@@ -15,24 +15,6 @@ import BackgroundTasks
 
 
 
-func keychain() -> Keychain {
-    Keychain()
-        .synchronizable(true)
-        .accessibility(.afterFirstUnlock)
-        .label("ContainEye")
-}
-
-extension Keychain {
-    func getCredential(for key: String) -> Credential? {
-        if let data = try? self.getData(key),
-           let credential = try? JSONDecoder().decode(Credential.self, from: data) {
-            return credential
-        } else {
-            return nil
-        }
-    }
-}
-
 @main
 struct ContainEyeApp: App {
     let db = try! Blackbird.Database(path: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent("db.sqlite").path)
