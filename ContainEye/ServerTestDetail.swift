@@ -73,6 +73,7 @@ struct ServerTestDetail: View {
                             .stroke(color, lineWidth: 5)
                             .fill(color.tertiary.tertiary)
                     )
+                    .disabled(test.state == .running)
                 }
                 Section{
                     AsyncButton(role: .destructive) {

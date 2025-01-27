@@ -79,6 +79,7 @@ struct ServerTestView: View {
 #endif
                                             try await test.write(to: db!)
                                         }
+                                        .disabled(test.state == .running)
                                         AsyncButton("Delete", systemImage: "trash", role: .destructive) {
                                             try await test.delete(from: db!)
                                         }
