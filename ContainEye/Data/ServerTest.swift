@@ -9,6 +9,7 @@ import Foundation
 import Blackbird
 import KeychainAccess
 import Citadel
+import NIOSSH
 
 struct ServerTest: BlackbirdModel {
 
@@ -54,20 +55,15 @@ struct ServerTest: BlackbirdModel {
             return "(Client Error) No credential in keychain"
         }
         do {
-            let ssh = try await retry {try await SSHClient.connect(
-                host: credential.host,
-                authenticationMethod: .passwordBased(username: credential.username, password: credential.password),
-                hostKeyValidator: .acceptAnything(),
-                reconnect: .always,
-                connectTimeout: .milliseconds(400)
-            )
-            }
-            let output = try await retry { try await ssh.execute(self.command) }
-            try? await ssh.close()
+            let output = try await retry { try await SSHClientActor.shared.execute(self.command, on: credential) }
             return output
         } catch {
             do{
                 let _ = try await URLSession.shared.data(from: URL(string: "https://connectivitycheck.gstatic.com/generate_204")!)
+                if let message = (error as? TTYSTDError)?.message {
+                    return String(buffer: message)
+                }
+
                 return error.localizedDescription
             } catch {
                 return "Not connected to internet"
@@ -98,6 +94,14 @@ func retry<T>(count: Int = 6, _ block: () async throws -> T) async rethrows -> T
         return try await block()
     } catch {
         if count > 0 {
+
+
+            if let error = error as? NIOSSHError,
+               error.type == .protocolViolation{
+
+                return try await retry { try await block() }
+            }
+
             let _ = try await URLSession.shared.data(from: URL(string: "https://connectivitycheck.gstatic.com/generate_204")!)
             try? await Task.sleep(for: .seconds(0.5))
             return try await retry(count: count - 1, block)

@@ -17,6 +17,7 @@ struct ServerDetailView: View {
                     .padding(.horizontal)
                     .onAppear{
                         Task{
+                            await server.fetchDockerStats()
                             try? await Task.sleep(for: .seconds(1))
                             server.dockerUpdatesPaused = false
                         }

@@ -60,6 +60,7 @@ struct ContainerDetailView: View {
         }
         .onAppear{
             Task {
+                try? await container.fetchDetails()
                 try? await Task.sleep(for: .seconds(1))
                 container.server.dockerUpdatesPaused = false
                 container.fetchDetailedUpdates = true

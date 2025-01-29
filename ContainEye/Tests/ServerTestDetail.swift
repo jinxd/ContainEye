@@ -16,6 +16,11 @@ struct ServerTestDetail: View {
     @State private var expandedElement = ExpandableElement?.none
     @Environment(\.dismiss) private var dismiss
 
+    @State private var isEditing = false
+    @State private var credentialKey = ""
+    @State private var command = ""
+    @State private var expectedOutput = ""
+
     enum ExpandableElement {
         case expectedOutput, actualOutput
     }
@@ -26,16 +31,51 @@ struct ServerTestDetail: View {
                 let host = keychain()
                     .getCredential(for: test.credentialKey)?.host ?? ""
 
-                LabeledContent("Host", value: host)
-                LabeledContent("Command", value: test.command)
-                LabeledContent("Last run", value: test.lastRun?.formatted(.dateTime) ?? "Never")
-                Section("Expected output") {
-                    Text(test.expectedOutput)
-                        .lineLimit(expandedElement == .expectedOutput ? nil : 2)
-                        .onTapGesture {
-                            expandedElement = expandedElement == .expectedOutput ? .none : .expectedOutput
+                if isEditing {
+                    Picker("Host", selection: $credentialKey) {
+                        Text("None")
+                            .tag("")
+                        let allKeys = keychain().allKeys()
+                        let credentials = allKeys.compactMap{keychain().getCredential(for: $0)}
+                        ForEach(credentials, id: \.key) { credential in
+                            Text(credential.label)
+                                .tag(credential.key)
                         }
+                    }
+                } else {
+                    LabeledContent("Host", value: host)
                 }
+
+                if isEditing {
+                    TextField("Command (e.g. curl localhost)", text: $command)
+#if !os(macOS)
+                        .keyboardType(.asciiCapable)
+#endif
+                } else {
+                    LabeledContent("Command", value: test.command)
+                }
+
+                LabeledContent("Last run", value: test.lastRun?.formatted(.dateTime) ?? "Never")
+
+
+                Section {
+                    if isEditing {
+                        TextEditor(text: $expectedOutput)
+                    } else {
+                        Text(test.expectedOutput)
+                            .lineLimit(expandedElement == .expectedOutput ? nil : 2)
+                            .onTapGesture {
+                                expandedElement = expandedElement == .expectedOutput ? .none : .expectedOutput
+                            }
+                    }
+                } header: {
+                    Text("Expected output")
+                } footer: {
+                    if isEditing {
+                        Text("You can use a regular expression to match the output. Both will be tried. This is \((try? Regex(expectedOutput)) == nil ? "an invalid regex" : "a valid regex")")
+                    }
+                }
+
                 Section("Actual output") {
                     Text(test.output ?? "No output")
                         .italic(test.output == nil)
@@ -73,7 +113,23 @@ struct ServerTestDetail: View {
                             .stroke(color, lineWidth: 5)
                             .fill(color.tertiary.tertiary)
                     )
-                    .disabled(test.state == .running)
+                }
+                Section {
+                    AsyncButton(isEditing ? "Done" : "Edit", systemImage: "pencil") {
+                        if isEditing {
+                            var test = test
+                            test.credentialKey = credentialKey
+                            test.command = command
+                            test.expectedOutput = expectedOutput
+                            try await test.write(to: db!)
+                            isEditing = false
+                        } else {
+                            credentialKey = test.credentialKey
+                            command = test.command
+                            expectedOutput = test.expectedOutput
+                            isEditing = true
+                        }
+                    }
                 }
                 Section{
                     AsyncButton(role: .destructive) {

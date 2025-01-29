@@ -13,6 +13,7 @@ struct ContentView: View {
     @State private var dataStreamer = DataStreamer.shared
     @State private var sheet = Sheet?.none
     @AppStorage("screen") private var screen = Screen.ServerList
+    @Environment(\.scenePhase) private var scenePhase
 
     enum Screen: String, CaseIterable, Identifiable {
         case ServerList
@@ -85,7 +86,7 @@ struct ContentView: View {
                 ServerTestDetail(test: .init(test, updatesEnabled: true))
             }
         }
-        .task {
+        .task{
             await dataStreamer.initialize()
         }
     }

@@ -36,11 +36,14 @@ struct ContainEyeApp: App {
             try! BGTaskScheduler.shared.submit(
                 BGAppRefreshTaskRequest(identifier: "apprefresh")
             )
-            for serverTest in (try? await ServerTest.query(in: db, columns: [\.$id], matching: .all)) ?? [] {
-                guard let test = try? await ServerTest.read(from: db, id: serverTest[\.$id]) else {continue}
+            let serverTests = (try? await ServerTest.query(in: db, columns: [\.$id], matching: .all)) ?? []
+            for serverTest in serverTests {
+                guard var test = try? await ServerTest.read(from: db, id: serverTest[\.$id]) else {return}
 
                 do {
-                    let test = await test.test()
+                    test.state = .running
+                    try await test.write(to: db)
+                    test = await test.test()
                     try await test.write(to: db)
                     if test.state == .failed {
                         try await sendPushNotification(title: test.title, output: test.output ?? "No output")

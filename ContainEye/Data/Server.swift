@@ -33,8 +33,6 @@ class Server: Identifiable, @preconcurrency Hashable {
     var updatesPaused = true
     var dockerUpdatesPaused = true
 
-    private var ssh: SSHClient? = nil
-
     init(credential: Credential) {
         self.credential = credential
 
@@ -55,17 +53,6 @@ class Server: Identifiable, @preconcurrency Hashable {
     }
 
     func connect() async throws(ServerError) {
-        do {
-            ssh = try await SSHClient.connect(
-                host: credential.host,
-                authenticationMethod: .passwordBased(username: credential.username, password: credential.password),
-                hostKeyValidator: .acceptAnything(),
-                reconnect: .always
-            )
-        } catch {
-            throw ServerError.otherError(error as NSError)
-        }
-
         let uptimeCommand = "date +%s -d \"$(uptime -s)\""
         let uptimeOutput = try await execute(uptimeCommand)
         if let timestamp = Double(uptimeOutput.trimmingCharacters(in: .whitespacesAndNewlines)) {
@@ -75,7 +62,7 @@ class Server: Identifiable, @preconcurrency Hashable {
     }
 
     func disconnect() async throws {
-        try await ssh?.close()
+        try await SSHClientActor.shared.disconnect(credential)
     }
 
     func fetchServerStats() async {
@@ -237,20 +224,14 @@ class Server: Identifiable, @preconcurrency Hashable {
     }
 
     func execute(_ command: String) async throws(ServerError) -> String {
-        guard let ssh else { throw ServerError.notConnected }
-        if !ssh.isConnected {
-            try await connect()
-        }
-        let bytebuffer: ByteBuffer
+
+        let string: String
         do {
-            bytebuffer = try await ssh.executeCommand(command)
+            string = try await SSHClientActor.shared.execute(command, on: credential)
         } catch {
             throw ServerError.otherError(error as NSError)
         }
-        guard let answerString = bytebuffer.getString(at: bytebuffer.readerIndex, length: bytebuffer.readableBytes) else {
-            throw ServerError.invalidServerResponse
-        }
-        return answerString
+        return string
     }
 
 

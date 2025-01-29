@@ -22,7 +22,9 @@ final class DataStreamer {
     }
 
     func initialize() async {
+        
         serversLoaded = false
+
         servers.removeAll()
         errors.removeAll()
         await withTaskGroup(of: Void.self) { group in

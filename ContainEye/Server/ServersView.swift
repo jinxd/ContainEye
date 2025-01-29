@@ -48,9 +48,9 @@ struct ServersView: View {
             .padding()
             .padding(.top, 50)
             .containerRelativeFrame(dataStreamer.servers.isEmpty || !dataStreamer.serversLoaded ? .vertical : [])
-            .refreshable {
-                await dataStreamer.initialize()
-            }
+        }
+        .refreshable {
+            await dataStreamer.initialize()
         }
         .safeAreaInset(edge: .bottom) {
             Button("Add Server", systemImage: "plus"){
