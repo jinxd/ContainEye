@@ -9,12 +9,7 @@ import Citadel
 
 extension SSHClient {
     public func execute(_ command: String) async throws -> String {
-//        do {
             let bytebuffer = try await executeCommand(command, maxResponseSize: .max, mergeStreams: false, inShell: false)
             return String(buffer: bytebuffer)
-//        } catch let error as TTYSTDError {
-//            String(buffer: error.message)
-//        }
-//        return ""
     }
 }
