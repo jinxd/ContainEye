@@ -34,8 +34,13 @@ struct ServersView: View {
                         NavigationLink(value: server) {
                             ServerSummaryView(server: server, hostInsteadOfLabel: false)
                                 .contextMenu{
-                                    AsyncButton("Delete", systemImage: "trash", role: .destructive) {
-                                        try await dataStreamer.removeHost(server.credential.key)
+                                    Menu {
+                                        AsyncButton("Delete", systemImage: "trash", role: .destructive) {
+                                            try await dataStreamer.removeHost(server.credential.key)
+                                        }
+                                        
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
                                     }
                                 }
                         }

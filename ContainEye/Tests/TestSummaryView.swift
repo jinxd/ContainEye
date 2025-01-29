@@ -65,8 +65,12 @@ struct TestSummaryView: View {
 #endif
                     try await test.write(to: db!)
                 }
-                AsyncButton("Delete", systemImage: "trash", role: .destructive) {
-                    try await test.delete(from: db!)
+                Menu{
+                    AsyncButton("Delete", systemImage: "trash", role: .destructive) {
+                        try await test.delete(from: db!)
+                    }
+                } label: {
+                    Label("Delete", systemImage: "trash")
                 }
             }
             .padding(3)
