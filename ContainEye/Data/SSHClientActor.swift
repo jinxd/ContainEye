@@ -16,9 +16,18 @@ actor SSHClientActor {
         if let client = clients[credential.key] {
             return try await client.execute(command)
         } else {
-            let client = try await SSHClient.connect(host: credential.host, authenticationMethod: .passwordBased(username: credential.username, password: credential.password), hostKeyValidator: .acceptAnything(), reconnect: .always)
-            clients[credential.username] = client
-            return try await client.execute(command)
+            let client: SSHClient
+            do{
+                client = try await SSHClient.connect(host: credential.host, authenticationMethod: .passwordBased(username: credential.username, password: credential.password), hostKeyValidator: .acceptAnything(), reconnect: .always)
+            } catch {
+                throw error
+            }
+            clients[credential.key] = client
+            do {
+                return try await client.execute(command)
+            } catch {
+                throw error
+            }
         }
     }
 
