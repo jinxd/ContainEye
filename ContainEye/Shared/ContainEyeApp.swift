@@ -33,25 +33,41 @@ struct ContainEyeApp: App {
         }
 #if !os(macOS)
         .backgroundTask(.appRefresh("apprefresh")) {
+            await BGTaskScheduler.shared.pendingTaskRequests().forEach{print($0.identifier)}
+            BGTaskScheduler.shared.cancelAllTaskRequests()
             try! BGTaskScheduler.shared.submit(
                 BGAppRefreshTaskRequest(identifier: "apprefresh")
             )
             let serverTests = (try? await ServerTest.query(in: db, columns: [\.$id], matching: .all)) ?? []
+            var tests: [ServerTest] = []
             for serverTest in serverTests {
-                guard var test = try? await ServerTest.read(from: db, id: serverTest[\.$id]) else {return}
-
-                do {
-                    test.state = .running
-                    try await test.write(to: db)
-                    test = await test.test()
-                    try await test.write(to: db)
-                    if test.state == .failed {
-                        try await sendPushNotification(title: test.title, output: test.output ?? "No output")
-                    }
-                } catch {
-                    try? await sendPushNotification(title: test.title, output: "to execute: \(error.localizedDescription)")
-                }
+                guard let test = try? await ServerTest.read(from: db, id: serverTest[\.$id]) else {continue}
+                tests.append(test)
             }
+            await withTaskCancellationHandler{
+                await withTaskGroup(of: Void.self){group in
+                    for test in tests {
+                        group.addTask {
+                            do {
+                                var test = test
+                                test.state = .running
+                                try await test.write(to: db)
+                                test = await test.test()
+                                try await test.write(to: db)
+                                if test.state == .failed {
+                                    try await sendPushNotification(title: test.title, output: test.output ?? "No output")
+                                }
+                            } catch {
+                                try? await sendPushNotification(title: test.title, output: "to execute: \(error.localizedDescription)")
+                            }
+                        }
+                    }
+                }
+                print(">>> Done")
+            } onCancel: {
+                print(">>> Cancelled")
+            }
+
         }
 #endif
     }
