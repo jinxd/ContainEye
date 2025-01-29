@@ -48,7 +48,7 @@ class Server: Identifiable, @preconcurrency Hashable {
         if !dockerUpdatesPaused {
             await fetchDockerStats()
         }
-        try? await Task.sleep(for: .seconds(2))
+        try? await Task.sleep(for: .seconds(0.5))
         Task { await update() }
     }
 
@@ -205,7 +205,7 @@ class Server: Identifiable, @preconcurrency Hashable {
 
 
     private func parseMemoryUsage(_ memoryString: String) throws(ServerError) -> Double {
-        let units = ["MiB": 1_048_576.0, "KiB": 1_024.0, "GiB": 1_073_741_824.0]
+        let units = ["MiB": 1_048_576.0, "KiB": 1_024.0, "GiB": 1_073_741_824.0, "B": 1.0]
 
         // Loop over the units to check which one is present
         if memoryString == "0" || (memoryString.localizedCaseInsensitiveContains("N/A")) {
@@ -220,7 +220,7 @@ class Server: Identifiable, @preconcurrency Hashable {
             }
         }
         // Handle the case where no valid unit is found
-        throw .invalidStatsOutput("Couldnt parse memory usage from: \(memoryString)")
+        throw .invalidStatsOutput("Couldn't parse memory usage from: \(memoryString)")
     }
 
     func execute(_ command: String) async throws(ServerError) -> String {
