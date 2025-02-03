@@ -28,7 +28,7 @@ class Container: @preconcurrency Identifiable, @preconcurrency Equatable, @preco
             status = "Up - loading status..."
             try await fetchDetails()
         } catch {
-            throw Server.ServerError.otherError(error as NSError)
+            throw error
         }
     }
 
@@ -40,7 +40,7 @@ class Container: @preconcurrency Identifiable, @preconcurrency Equatable, @preco
             status = "Exited - loading status..."
             try await fetchDetails()
         } catch {
-            throw Server.ServerError.otherError(error as NSError)
+            throw error
         }
     }
 
@@ -69,7 +69,7 @@ class Container: @preconcurrency Identifiable, @preconcurrency Equatable, @preco
             status = cleanedStatus
         } catch {
             throw Server.ServerError.invalidStatsOutput(
-                "Failed to fetch details for container \(id): \(error.localizedDescription)"
+                "Failed to fetch details for container \(id): \(error.generateDescription())"
             )
         }
     }

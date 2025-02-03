@@ -42,7 +42,9 @@ struct ServerSummaryView: View {
                     .padding(.horizontal, -15)
             }
             .padding()
-            .background(Color.accentColor.quaternary.quaternary, in: RoundedProgressRectangle(cornerRadius: 15))
+            .background(
+                server.isConnected ? Color.accentColor.quaternary.quaternary : Color.gray.quaternary.quaternary
+                , in: RoundedProgressRectangle(cornerRadius: 15))
     }
 }
 

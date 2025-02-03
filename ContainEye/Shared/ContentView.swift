@@ -86,8 +86,14 @@ struct ContentView: View {
                 ServerTestDetail(test: .init(test, updatesEnabled: true))
             }
         }
-        .task{
-            await dataStreamer.initialize()
+        .task(id: scenePhase){
+            switch scenePhase{
+            case .active:
+                await dataStreamer.initialize()
+            default:
+                try? await Task.sleep(for: .seconds(1))
+                await dataStreamer.disconnectAllServers()
+            }
         }
     }
 }

@@ -17,7 +17,7 @@ struct ErrorView: View {
                     Button {
                         server.errors.remove(error)
                     } label: {
-                        Text(String(describing: error))
+                        Text(error.generateDescription())
                     }
                     .contextMenu{
                         Button("Copy", systemImage: "document.on.document") {

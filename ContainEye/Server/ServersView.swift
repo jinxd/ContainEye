@@ -13,6 +13,7 @@ import ButtonKit
 struct ServersView: View {
     @Binding var sheet : ContentView.Sheet?
     @State var dataStreamer = DataStreamer.shared
+    @AppStorage("logs", store: UserDefaults(suiteName: "group.com.nagel.ContainEye")) private var log = ""
 
     var body: some View {
         ScrollView{

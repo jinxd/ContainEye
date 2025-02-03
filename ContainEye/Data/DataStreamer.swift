@@ -25,6 +25,8 @@ final class DataStreamer {
         
         serversLoaded = false
 
+        await disconnectAllServers()
+        
         servers.removeAll()
         errors.removeAll()
         await withTaskGroup(of: Void.self) { group in
@@ -36,7 +38,7 @@ final class DataStreamer {
                         }
                     } catch {
                         await MainActor.run {
-                            let _ = self.errors.insert(.failedToConnect(to: key, error: error.localizedDescription))
+                            let _ = self.errors.insert(.failedToConnect(to: key, error: error.generateDescription()))
                         }
                     }
                 }
@@ -57,14 +59,6 @@ final class DataStreamer {
 
     enum DataStreamerError: Error , Hashable {
         case failedToConnect(to: String, error: String)
-
-        var localizedDescription: String {
-            switch self {
-            case .failedToConnect(to: let key, error: let error):
-                let host = keychain().getCredential(for: key)?.host ?? "???"
-                return "Failed to connect to \(host): \(error)"
-            }
-        }
     }
 
 
@@ -81,4 +75,16 @@ final class DataStreamer {
         }
         try keychain().remove(key)
     }
+
+    func disconnectAllServers() async {
+        await withTaskGroup(of: Void.self) { group in
+            for server in servers {
+                group.addTask{
+                    try? await server.disconnect()
+                }
+            }
+        }
+    }
 }
+
+

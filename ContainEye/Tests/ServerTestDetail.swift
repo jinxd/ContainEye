@@ -20,6 +20,7 @@ struct ServerTestDetail: View {
     @State private var credentialKey = ""
     @State private var command = ""
     @State private var expectedOutput = ""
+    @State private var title = ""
 
     enum ExpandableElement {
         case expectedOutput, actualOutput
@@ -28,6 +29,13 @@ struct ServerTestDetail: View {
     var body: some View {
         if let test {
             Form {
+                if isEditing {
+                    LabeledContent("Title"){
+                        TextField("(e.g. website test)", text: $title)
+                            .multilineTextAlignment(.trailing)
+                    }
+                }
+
                 let host = keychain()
                     .getCredential(for: test.credentialKey)?.host ?? ""
 
@@ -47,10 +55,14 @@ struct ServerTestDetail: View {
                 }
 
                 if isEditing {
-                    TextField("Command (e.g. curl localhost)", text: $command)
+                    Section("Command") {
+                        TextEditor(text: $command)
 #if !os(macOS)
-                        .keyboardType(.asciiCapable)
+                            .keyboardType(.asciiCapable)
 #endif
+                            .frame(minHeight: 100)
+
+                    }
                 } else {
                     LabeledContent("Command", value: test.command)
                 }
@@ -61,6 +73,7 @@ struct ServerTestDetail: View {
                 Section {
                     if isEditing {
                         TextEditor(text: $expectedOutput)
+                            .frame(minHeight: 100)
                     } else {
                         Text(test.expectedOutput)
                             .lineLimit(expandedElement == .expectedOutput ? nil : 2)
@@ -76,7 +89,7 @@ struct ServerTestDetail: View {
                     }
                 }
 
-                Section("Actual output") {
+                Section(isEditing ? "Last output before editing" : "Actual output") {
                     Text(test.output ?? "No output")
                         .italic(test.output == nil)
                         .lineLimit(expandedElement == .actualOutput ? nil : 2)
@@ -86,7 +99,7 @@ struct ServerTestDetail: View {
                 }
 
 
-                let color = switch test.state {
+                let color = switch test.status {
                 case .failed:
                     Color.red
                 case .success:
@@ -95,17 +108,28 @@ struct ServerTestDetail: View {
                     Color.gray
                 }
                 Section {
-                    AsyncButton("Test Now") {
-                        self.test?.state = .running
-                        let test = await test.test()
-#if !os(macOS)
-                        if test.state == .failed {
-                            UINotificationFeedbackGenerator().notificationOccurred(.error)
+                    AsyncButton(isEditing ? "Fetch Current Output" : "Test Now") {
+                        if isEditing {
+
+                            var test = test
+                            test.credentialKey = credentialKey
+                            test.command = command
+                            test.expectedOutput = expectedOutput
+                            test.title = title
+                            try await test.write(to: db!)
+                            expectedOutput = await test.fetchOutput()
                         } else {
-                            UINotificationFeedbackGenerator().notificationOccurred(.success)
-                        }
+                            self.test?.status = .running
+                            let test = await test.test()
+#if !os(macOS)
+                            if test.status == .failed {
+                                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                            } else {
+                                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                            }
 #endif
-                        try await test.write(to: db!)
+                            try await test.write(to: db!)
+                        }
                     }
                     .asyncButtonStyle(.pulse)
                     .listRowBackground(
@@ -121,12 +145,14 @@ struct ServerTestDetail: View {
                             test.credentialKey = credentialKey
                             test.command = command
                             test.expectedOutput = expectedOutput
+                            test.title = title
                             try await test.write(to: db!)
                             isEditing = false
                         } else {
                             credentialKey = test.credentialKey
                             command = test.command
                             expectedOutput = test.expectedOutput
+                            title = test.title
                             isEditing = true
                         }
                     }
@@ -143,7 +169,52 @@ struct ServerTestDetail: View {
             }
             .textSelection(.enabled)
             .animation(.spring, value: expandedElement)
+            .animation(.spring, value: isEditing)
             .navigationTitle(test.title)
+            .toolbarTitleMenu {
+                AsyncButton(isEditing ? "Done" : "Edit", systemImage: "pencil") {
+                    if isEditing {
+                        var test = test
+                        test.credentialKey = credentialKey
+                        test.command = command
+                        test.expectedOutput = expectedOutput
+                        test.title = title
+                        try await test.write(to: db!)
+                        isEditing = false
+                    } else {
+                        credentialKey = test.credentialKey
+                        command = test.command
+                        expectedOutput = test.expectedOutput
+                        title = test.title
+                        isEditing = true
+                    }
+                }
+                Menu{
+                    AsyncButton(role: .destructive) {
+                        try await test.delete(from: db!)
+                        dismiss()
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                            .foregroundStyle(.red)
+                    }
+                } label : {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+            .userActivity("tests.selected", element: test) { test, userActivity in
+                if #available(iOS 18.2, macOS 15.2, *){
+                    userActivity.appEntityIdentifier = .init(for: test.entity)
+                }
+                userActivity.userInfo?["id"] = test.id
+                userActivity.isEligibleForHandoff = true
+                userActivity.isEligibleForSearch = true
+#if !os(macOS)
+                userActivity.isEligibleForPrediction = true
+#endif
+                userActivity.targetContentIdentifier = "\(test.id)"
+                userActivity.title = test.title
+                userActivity.becomeCurrent()
+            }
         } else {
             ContentUnavailableView("Nothing selected", systemImage: "questionmark.circle")
         }
@@ -151,5 +222,5 @@ struct ServerTestDetail: View {
 }
 
 #Preview {
-    ServerTestDetail(test: BlackbirdLiveModel<ServerTest>(ServerTest(id: Int.random(in: (.min)...(Int.max)), title: "Title", credentialKey: UUID().uuidString, command: "curl localhost", expectedOutput: ".+", state: .notRun)))
+    ServerTestDetail(test: BlackbirdLiveModel<ServerTest>(ServerTest(id: Int.random(in: (.min)...(Int.max)), title: "Title", credentialKey: UUID().uuidString, command: "curl localhost", expectedOutput: ".+", status: .notRun)))
 }

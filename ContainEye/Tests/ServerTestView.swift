@@ -30,8 +30,13 @@ struct ServerTestView: View {
                                 HStack {
                                     Text("Notifications not allowed")
                                     Spacer()
+
                                     Button("Change") {
+#if !os(macOS)
                                         UIApplication.shared.open(URL(string: UIApplication.openNotificationSettingsURLString)!)
+                                        #else
+#warning("fix this for macOS")
+#endif
                                     }
                                 }
                                 .padding()
@@ -67,9 +72,9 @@ struct ServerTestView: View {
 
 #Preview {
     let db = try! Blackbird.Database.inMemoryDatabase()
-    let serverTest = ServerTest(id: 17891, title: "Test", credentialKey: UUID().uuidString, command: "echo test", expectedOutput: "test", state: .success)
+    let serverTest = ServerTest(id: 17891, title: "Test", credentialKey: UUID().uuidString, command: "echo test", expectedOutput: "test", status: .success)
     let _ = Task{try await serverTest.write(to: db) }
-    let serverTest2 = ServerTest(id: 19311, title: "Test", credentialKey: UUID().uuidString, command: "echo test", expectedOutput: "test", state: .success)
+    let serverTest2 = ServerTest(id: 19311, title: "Test", credentialKey: UUID().uuidString, command: "echo test", expectedOutput: "test", status: .success)
     let _ = Task{try await serverTest2.write(to: db) }
     ServerTestView(sheet: .constant(nil))
         .environment(\.blackbirdDatabase, db)

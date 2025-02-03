@@ -32,6 +32,7 @@ class Server: Identifiable, @preconcurrency Hashable {
     var errors = Set<ServerError>()
     var updatesPaused = true
     var dockerUpdatesPaused = true
+    var isConnected = false
 
     init(credential: Credential) {
         self.credential = credential
@@ -44,24 +45,27 @@ class Server: Identifiable, @preconcurrency Hashable {
     func update() async {
         if !updatesPaused {
             await fetchServerStats()
-        }
-        if !dockerUpdatesPaused {
-            await fetchDockerStats()
+            if !dockerUpdatesPaused {
+                await fetchDockerStats()
+            }
         }
         try? await Task.sleep(for: .seconds(0.5))
         Task { await update() }
     }
 
-    func connect() async throws(ServerError) {
-        let uptimeCommand = "date +%s -d \"$(uptime -s)\""
-        let uptimeOutput = try await execute(uptimeCommand)
-        if let timestamp = Double(uptimeOutput.trimmingCharacters(in: .whitespacesAndNewlines)) {
-            uptime = Date(timeIntervalSince1970: timestamp)
-        }
+    func connect() async throws {
+        let _ = try await execute("echo hello")
+        isConnected = true
         updatesPaused = false
+        await SSHClientActor.shared.onDisconnect(of: credential) {[weak self] in
+            Task{@MainActor in
+                self?.isConnected = false
+            }
+        }
     }
 
     func disconnect() async throws {
+        updatesPaused = true
         try await SSHClientActor.shared.disconnect(credential)
     }
 
@@ -75,6 +79,14 @@ class Server: Identifiable, @preconcurrency Hashable {
         await fetchMetric(command: "sar -u 1 2 | grep 'Average' | awk '{print $5 / 100}'", setter: { self.ioWait = $0 })
         await fetchMetric(command: "sar -u 1 2 | grep 'Average' | awk '{print $6 / 100}'", setter: { self.stealTime = $0 })
         await fetchMetric(command: "uptime | awk '{print $(NF-2) / 100}'", setter: { self.systemLoad = $0 })
+        if uptime == nil {
+            let uptimeCommand = "date +%s -d \"$(uptime -s)\""
+            let uptimeOutput = try? await execute(uptimeCommand)
+            if let uptimeOutput,
+               let timestamp = Double(uptimeOutput.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                uptime = Date(timeIntervalSince1970: timestamp)
+            }
+        }
         lastUpdate = Date()
     }
 
@@ -129,7 +141,7 @@ class Server: Identifiable, @preconcurrency Hashable {
                 try await container.fetchDetails()
             }
         } catch {
-            errors.insert(error)
+            errors.insert(error as? ServerError ?? .otherError(error as NSError))
         }
     }
 
@@ -138,7 +150,7 @@ class Server: Identifiable, @preconcurrency Hashable {
             let output = try await execute(command)
             setter(try parseSingleValue(from: output, command: command))
         } catch {
-            errors.insert(error)
+            errors.insert(error as? ServerError ?? .otherError(error as NSError))
         }
     }
 
@@ -223,13 +235,13 @@ class Server: Identifiable, @preconcurrency Hashable {
         throw .invalidStatsOutput("Couldn't parse memory usage from: \(memoryString)")
     }
 
-    func execute(_ command: String) async throws(ServerError) -> String {
+    func execute(_ command: String) async throws -> String {
 
         let string: String
         do {
             string = try await SSHClientActor.shared.execute(command, on: credential)
         } catch {
-            throw ServerError.otherError(error as NSError)
+            throw error
         }
         return string
     }
@@ -237,33 +249,15 @@ class Server: Identifiable, @preconcurrency Hashable {
 
     enum ServerError: Error, Hashable {
         case connectionFailed, invalidStatsOutput(_ output: String), notConnected, invalidServerResponse, cpuCommandFailed, otherError(_ error: NSError), noPasswordInKeychain
-
-        var localizedDescription: String {
-            switch self {
-            case .connectionFailed:
-                return "Could not connect to the server."
-            case .invalidStatsOutput(let output):
-                return "Invalid output from server: \(output)"
-            case .notConnected:
-                return "Not connected to the server."
-            case .invalidServerResponse:
-                return "Invalid server response."
-            case .otherError(let error):
-                return "Other Error: \(error.localizedDescription)"
-            case .cpuCommandFailed:
-                return "Could not execute the CPU command."
-            case .noPasswordInKeychain:
-                return "No password found in keychain."
-            }
-        }
     }
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
         hasher.combine(lastUpdate)
+        hasher.combine(isConnected)
     }
 
     static func == (lhs: Server, rhs: Server) -> Bool {
-        lhs.id == rhs.id && lhs.lastUpdate == rhs.lastUpdate
+        lhs.id == rhs.id && lhs.lastUpdate == rhs.lastUpdate && lhs.isConnected == rhs.isConnected
     }
 }

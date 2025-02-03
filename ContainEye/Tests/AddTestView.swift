@@ -20,7 +20,7 @@ struct AddTestView: View {
         case title, command, expectedOutput
     }
 
-    @State private var serverTest = ServerTest(id: .random(in: Int.min...Int.max), title: "", credentialKey: UUID().uuidString, command: "", expectedOutput: "", state: .notRun)
+    @State private var serverTest = ServerTest(id: .random(in: Int.min...Int.max), title: "", credentialKey: UUID().uuidString, command: "", expectedOutput: "", status: .notRun)
 
     @Environment(\.blackbirdDatabase) var db
 

@@ -15,11 +15,12 @@ struct DataStreamerErrorView: View {
         VStack{
             ForEach(Array(dataStreamer.errors), id: \.self) {error in
                 VStack{
-                    if case let .failedToConnect(host, _) = error{
-                        Text(host)
+                    if case let .failedToConnect(key, _) = error,
+                       let label = keychain().getCredential(for: key)?.label {
+                        Text(label)
                             .font(.headline)
                     }
-                    Text(error.localizedDescription)
+                    Text(error.generateDescription())
 
                     HStack {
                         if case let .failedToConnect(key, _) = error{
@@ -29,7 +30,7 @@ struct DataStreamerErrorView: View {
                             }
                             .buttonStyle(.borderedProminent)
                         }
-                        Button("Copy Error", systemImage: "document.on.document") {
+                        AsyncButton("Copy Error", systemImage: "document.on.document") {
 #if os(macOS)
                             NSPasteboard.general.setString(String(describing: error), forType: .string)
 #else

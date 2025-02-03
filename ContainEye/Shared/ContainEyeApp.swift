@@ -12,12 +12,14 @@ import KeychainAccess
 #if !os(macOS)
 import BackgroundTasks
 #endif
-
+import AppIntents
+import UserNotifications
 
 
 @main
 struct ContainEyeApp: App {
-    let db = try! Blackbird.Database(path: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent("db.sqlite").path)
+    let db = SharedDatabase.db
+
 
     var body: some Scene {
         WindowGroup {
@@ -28,6 +30,12 @@ struct ContainEyeApp: App {
                     try? BGTaskScheduler.shared.submit(
                         BGAppRefreshTaskRequest(identifier: "apprefresh")
                     )
+
+                    Task{
+
+                        await ServerTest.ServerTestAppEntitiy.updateSpotlightIndex()
+                        AppIntent.updateAppShortcutParameters()
+                    }
                 }
 #endif
         }
@@ -44,30 +52,9 @@ struct ContainEyeApp: App {
                 guard let test = try? await ServerTest.read(from: db, id: serverTest[\.$id]) else {continue}
                 tests.append(test)
             }
-            await withTaskCancellationHandler{
-                await withTaskGroup(of: Void.self){group in
-                    for test in tests {
-                        group.addTask {
-                            do {
-                                var test = test
-                                test.state = .running
-                                try await test.write(to: db)
-                                test = await test.test()
-                                try await test.write(to: db)
-                                if test.state == .failed {
-                                    try await sendPushNotification(title: test.title, output: test.output ?? "No output")
-                                }
-                            } catch {
-                                try? await sendPushNotification(title: test.title, output: "to execute: \(error.localizedDescription)")
-                            }
-                        }
-                    }
-                }
-                print(">>> Done")
-            } onCancel: {
-                print(">>> Cancelled")
-            }
-
+            let intent = TestServers()
+            intent.tests = tests.map{$0.entity}
+            let _ = try? await intent.perform()
         }
 #endif
     }

@@ -30,6 +30,19 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		381E17192D4D3E6D008BFDCD /* Embed ExtensionKit Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(EXTENSIONS_FOLDER_PATH)";
+			dstSubfolderSpec = 16;
+			files = (
+			);
+			name = "Embed ExtensionKit Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		383319382D356EC0006CDAEA /* ContainEye.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ContainEye.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		383319492D356EC3006CDAEA /* ContainEyeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ContainEyeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -96,12 +109,20 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		381E171C2D4D4201008BFDCD /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		3833192F2D356EC0006CDAEA = {
 			isa = PBXGroup;
 			children = (
 				3833193A2D356EC0006CDAEA /* ContainEye */,
 				3833194C2D356EC3006CDAEA /* ContainEyeTests */,
 				383319562D356EC3006CDAEA /* ContainEyeUITests */,
+				381E171C2D4D4201008BFDCD /* Frameworks */,
 				383319392D356EC0006CDAEA /* Products */,
 			);
 			sourceTree = "<group>";
@@ -126,6 +147,7 @@
 				383319342D356EC0006CDAEA /* Sources */,
 				383319352D356EC0006CDAEA /* Frameworks */,
 				383319362D356EC0006CDAEA /* Resources */,
+				381E17192D4D3E6D008BFDCD /* Embed ExtensionKit Extensions */,
 			);
 			buildRules = (
 			);

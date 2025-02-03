@@ -21,20 +21,20 @@ struct TestSummaryView: View {
                         .font(.headline)
                     let host = keychain().getCredential(for: test.credentialKey)?.host ?? "???"
                     Text(host)
-                    Text(test.state.localizedDescription)
+                    Text(test.status.localizedDescription)
                 }
                 .lineLimit(1)
                 .padding()
                 .frame(maxWidth: .infinity)
                 .background {
-                    let state = test.state
-                    let color = state == .failed ? Color.red : state == .success ? Color.green : Color.blue
+                    let status = test.status
+                    let color = status == .failed ? Color.red : status == .success ? Color.green : Color.blue
 
-                    TimelineView(.animation(paused: state != .running)) { context in
-                        let trimTo = state == .notRun ? 1 : state == .running ? context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.0) / 2 : 1
+                    TimelineView(.animation(paused: status != .running)) { context in
+                        let trimTo = status == .notRun ? 1 : status == .running ? context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.0) / 2 : 1
 
                         let trimFrom: Double =
-                        if state == .running {
+                        if status == .running {
                             max(0, trimTo - pow((1 - trimTo), 2))
                         } else {
                             0
@@ -44,7 +44,7 @@ struct TestSummaryView: View {
                             .trim(from: trimFrom, to: trimTo)
                             .stroke(color, style: StrokeStyle(
                                 lineWidth: 5,
-                                dash: state == .running ? [0, 0.3, 4] : []
+                                dash: status == .running ? [0, 0.3, 4] : []
                             ))
                     }
                 }
@@ -52,18 +52,19 @@ struct TestSummaryView: View {
             .contextMenu {
                 AsyncButton("Execute", systemImage: "testtube.2") {
                     var test = test
-                    test.state = .running
+                    test.status = .running
                     try await test.write(to: db!)
                     test = await test.test()
 
 #if !os(macOS)
-                    if test.state == .failed {
+                    if test.status == .failed {
                         UINotificationFeedbackGenerator().notificationOccurred(.error)
                     } else {
                         UINotificationFeedbackGenerator().notificationOccurred(.success)
                     }
 #endif
                     try await test.write(to: db!)
+                    try await test.testIntent().donate()
                 }
                 Menu{
                     AsyncButton("Delete", systemImage: "trash", role: .destructive) {
