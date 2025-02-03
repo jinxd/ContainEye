@@ -20,6 +20,9 @@ struct AppIntent: AppShortcutsProvider {
             intent: TestServers(),
             phrases: [
                 "Test all servers in \(.applicationName)",
+                "Test servers in \(.applicationName)",
+                "\(.applicationName) test servers",
+                "\(.applicationName) test",
             ],
             shortTitle: "Test Servers",
             systemImageName: "shippingbox",
