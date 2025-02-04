@@ -31,6 +31,7 @@ struct ContainerDetailView: View {
             .tint(Color.accentColor)
             .padding()
             .background(Color.accentColor.quaternary.quaternary, in: RoundedProgressRectangle(cornerRadius: 15))
+            .padding(.horizontal)
 
 
             Text(container.status)
@@ -57,6 +58,7 @@ struct ContainerDetailView: View {
                 }
                 .gridCellColumns(2)
             }
+            .padding(.horizontal)
         }
         .onAppear{
             Task {
@@ -70,6 +72,7 @@ struct ContainerDetailView: View {
             container.fetchDetailedUpdates = false
         }
         .navigationTitle(container.name)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

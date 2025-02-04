@@ -32,6 +32,9 @@ struct ServerDetailView: View {
                     .animation(.spring, value: server.ioWait)
                     .animation(.spring, value: server.diskUsage)
                     .navigationTitle(server.credential.label)
+                #if !os(macOS)
+                    .navigationBarTitleDisplayMode(.inline)
+                #endif
 
                 if server.containers.isEmpty {
                     ContentUnavailableView("Loading your containers...", systemImage: "shippingbox")

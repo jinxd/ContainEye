@@ -16,7 +16,6 @@ struct ServerTestView: View {
     @BlackbirdLiveModels({ try await ServerTest.read(from: $0, orderBy: .descending(\.$lastRun)) }) var test
     @Environment(\.scenePhase) var scenePhase
     @State private var notificationsAllowed = true
-    @Namespace private var namespace
 
     var body: some View {
         ScrollView {
@@ -54,16 +53,16 @@ struct ServerTestView: View {
                         .padding(.vertical)
                     }
                 }
+
+                Button("Add Test", systemImage: "plus") {
+                    sheet = .addTest
+                }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+                .padding()
             }
             .padding()
             .containerRelativeFrame(test.results.isEmpty ? .vertical : [])
-        }
-        .safeAreaInset(edge: .bottom) {
-            Button("Add Test", systemImage: "plus") {
-                sheet = .addTest
-            }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.capsule)
         }
     }
 }

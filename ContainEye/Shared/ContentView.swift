@@ -14,6 +14,7 @@ struct ContentView: View {
     @State private var sheet = Sheet?.none
     @AppStorage("screen") private var screen = Screen.ServerList
     @Environment(\.scenePhase) private var scenePhase
+    @Namespace var namespace
 
     enum Screen: String, CaseIterable, Identifiable {
         case ServerList
@@ -48,26 +49,16 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             VStack{
-                if screen == .TestList {
-                    ServerTestView(sheet: $sheet)
-                        .transition(.move(edge: .trailing))
-                } else {
-                    ServersView(sheet: $sheet)
-                        .transition(.move(edge: .leading))
+                TabView(selection: $screen) {
+                    Tab("Servers", systemImage: "server.rack", value: Screen.ServerList){
+                        ServersView(sheet: $sheet)
+                    }
+                    Tab("Tests", systemImage: "testtube.2", value: Screen.TestList){
+                        ServerTestView(sheet: $sheet)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .animation(.smooth, value: screen)
-            .toolbar{
-                Picker("", selection: $screen) {
-                    ForEach(Screen.allCases) { screen in
-                        Text(screen.localizedTitle)
-                            .tag(screen)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-            }
             .navigationTitle("ContainEye")
 #if !os(macOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -95,6 +86,7 @@ struct ContentView: View {
                 await dataStreamer.disconnectAllServers()
             }
         }
+        .environment(\.namespace, namespace)
     }
 }
 

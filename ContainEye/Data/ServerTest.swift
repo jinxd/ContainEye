@@ -51,22 +51,22 @@ struct ServerTest: BlackbirdModel {
         static let caseDisplayRepresentations: [ServerTest.TestStatus : DisplayRepresentation] = [
             .failed: .init(
                 title: "Failed",
-                image: DisplayRepresentation.Image(systemName: "xmark")
+                image: DisplayRepresentation.Image(systemName: "xmark.seal.fill")
             ),
             .success: .init(
                 title: "Success",
-                image: DisplayRepresentation.Image(systemName: "checkmark")
+                image: DisplayRepresentation.Image(systemName: "checkmark.seal.fill")
             ),
             .running: .init(
                 title: "Running",
                 image: DisplayRepresentation.Image(
-                    systemName: "ellipsis"
+                    systemName: "seal.fill"
                 )
             ),
             .notRun: .init(
                 title: "Not Run",
                 image: DisplayRepresentation.Image(
-                    systemName: "questionmark"
+                    systemName: "seal"
                 )
             ),
         ]
@@ -91,13 +91,13 @@ struct ServerTest: BlackbirdModel {
         var imageName: String {
             switch self {
             case .failed:
-                "xmark"
+                "xmark.seal.fill"
             case .success:
-                "checkmark"
+                "checkmark.seal.fill"
             case .running:
-                "ellipsis"
+                "seal.fill"
             case .notRun:
-                "questionmark"
+                "seal"
             }
         }
     }

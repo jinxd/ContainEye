@@ -13,7 +13,7 @@ import ButtonKit
 struct ServersView: View {
     @Binding var sheet : ContentView.Sheet?
     @State var dataStreamer = DataStreamer.shared
-    @AppStorage("logs", store: UserDefaults(suiteName: "group.com.nagel.ContainEye")) private var log = ""
+
 
     var body: some View {
         ScrollView{
@@ -50,6 +50,17 @@ struct ServersView: View {
                 }
 
                 Spacer()
+
+
+                Button("Add Server", systemImage: "plus"){
+                    sheet = .addServer
+                }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+#if !os(macOS)
+                .drawingGroup()
+#endif
+                
             }
             .padding()
             .padding(.top, 50)
@@ -57,16 +68,6 @@ struct ServersView: View {
         }
         .refreshable {
             await dataStreamer.initialize()
-        }
-        .safeAreaInset(edge: .bottom) {
-            Button("Add Server", systemImage: "plus"){
-                sheet = .addServer
-            }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.capsule)
-#if !os(macOS)
-            .drawingGroup()
-#endif
         }
     }
 }
