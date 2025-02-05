@@ -14,6 +14,7 @@ import BackgroundTasks
 #endif
 import AppIntents
 import UserNotifications
+import CoreSpotlight
 
 
 @main
@@ -32,7 +33,6 @@ struct ContainEyeApp: App {
                     )
 
                     Task{
-
                         await ServerTest.ServerTestAppEntitiy.updateSpotlightIndex()
                         AppIntent.updateAppShortcutParameters()
                     }

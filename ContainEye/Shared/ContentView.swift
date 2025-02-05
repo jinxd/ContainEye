@@ -8,13 +8,14 @@
 import SwiftUI
 import KeychainAccess
 import ButtonKit
+import CoreSpotlight
 
 struct ContentView: View {
     @State private var dataStreamer = DataStreamer.shared
     @State private var sheet = Sheet?.none
     @AppStorage("screen") private var screen = Screen.ServerList
     @Environment(\.scenePhase) private var scenePhase
-    @Namespace var namespace
+    @Environment(\.blackbirdDatabase) var db
 
     enum Screen: String, CaseIterable, Identifiable {
         case ServerList
@@ -45,9 +46,10 @@ struct ContentView: View {
             }
         }
     }
+    @State private var navigationPath = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             VStack{
                 TabView(selection: $screen) {
                     Tab("Servers", systemImage: "server.rack", value: Screen.ServerList){
@@ -76,6 +78,24 @@ struct ContentView: View {
             .navigationDestination(for: ServerTest.self) { test in
                 ServerTestDetail(test: .init(test, updatesEnabled: true))
             }
+            .onContinueUserActivity(CSQueryContinuationActionType){ activity in
+                handleActivity(activity)
+            }
+            .onContinueUserActivity(CSSearchableItemActionType) { activity in
+                handleActivity(activity)
+            }
+            .onContinueUserActivity("test.selected") { activity in
+                handleActivity(activity)
+            }
+            .onOpenURL { url in
+                let string = url.absoluteString.replacingOccurrences(of: "https://hannesnagel.com/open/containeye/", with: "")
+                let components = string.components(separatedBy: "/")
+                if components[0] == "test" {
+                    navigationPath.append(
+                        ServerTest(id: Int(components[1])!, title: "", credentialKey: "", command: "", expectedOutput: "", status: .notRun)
+                    )
+                }
+            }
         }
         .task(id: scenePhase){
             switch scenePhase{
@@ -86,11 +106,44 @@ struct ContentView: View {
                 await dataStreamer.disconnectAllServers()
             }
         }
-        .environment(\.namespace, namespace)
+    }
+    func handleActivity(_ activity: NSUserActivity) {
+        screen = .TestList
+        if let string = (activity.userInfo!["kCSSearchableItemActivityContentKey"] as? String) ?? (activity.userInfo!["kCSSearchableItemActivityIdentifier"] as? String),
+           string.components(separatedBy: "/").count >= 2,
+           let id = Int(string.components(separatedBy: "/")[1] ){
+            navigationPath.append(
+                ServerTest(
+                    id: id,
+                    title: "",
+                    credentialKey: "",
+                    command: "",
+                    expectedOutput: "",
+                    status: .notRun
+                )
+            )
+        } else if let url = activity.contentAttributeSet?.url {
+            let string = url.absoluteString.replacingOccurrences(of: "https://hannesnagel.com/open/containeye/", with: "")
+            let components = string.components(separatedBy: "/")
+            if components[0] == "test" {
+                navigationPath.append(
+                    ServerTest(id: Int(components[1])!, title: "", credentialKey: "", command: "", expectedOutput: "", status: .notRun)
+                )
+            }
+        } else if let id = activity.userInfo!["id"] as? Int {
+            navigationPath.append(
+                ServerTest(
+                    id: id,
+                    title: "",
+                    credentialKey: "",
+                    command: "",
+                    expectedOutput: "",
+                    status: .notRun
+                )
+            )
+        }
     }
 }
-
-
 
 
 

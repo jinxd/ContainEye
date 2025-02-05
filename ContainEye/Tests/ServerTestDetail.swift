@@ -201,7 +201,7 @@ struct ServerTestDetail: View {
                     Label("Delete", systemImage: "trash")
                 }
             }
-            .userActivity("tests.selected", element: test) { test, userActivity in
+            .userActivity("test.selected", element: test) { test, userActivity in
                 if #available(iOS 18.2, macOS 15.2, *){
                     userActivity.appEntityIdentifier = .init(for: test.entity)
                 }

@@ -126,7 +126,10 @@ struct ServerTest: BlackbirdModel {
 
         let output = await fetchOutput()
 
-        if (try? (Regex(test.expectedOutput)).wholeMatch(in: output)) != nil || output == test.expectedOutput {
+        let regex = try? Regex(test.expectedOutput)
+        let isRegexMatch = (try? regex?.wholeMatch(in: output)) == nil
+
+        if isRegexMatch || output == test.expectedOutput {
             test.status = .success
         } else {
             test.status = .failed
@@ -416,32 +419,26 @@ extension ServerTest.ServerTestAppEntitiy: IndexedEntity {
             guard let test = try? await ServerTest.read(from: db, id: serverTest[\.$id]) else {continue}
             tests.append(test)
         }
-
-        let searchableItems = tests.map { test in
-            let item = CSSearchableItem(uniqueIdentifier: test.id.formatted(), domainIdentifier: test.id.formatted(), attributeSet: test.entity.attributeSet)
-            item.associateAppEntity(test.entity)
-            return item
-        }
-        try! await CSSearchableIndex.default().indexSearchableItems(searchableItems)
+        try! await CSSearchableIndex.default().indexAppEntities(tests.map{$0.entity})
     }
-    var attributeSet: CSSearchableItemAttributeSet{
-        let attributes = CSSearchableItemAttributeSet()
-
-        attributes.containerTitle = "Server Tests"
-        attributes.containerDisplayName = "Server Tests"
-        attributes.title = self.title
-        attributes.contentDescription = status.localizedDescription
-        attributes.keywords = ["Server Test", title, command, status.localizedDescription]
-        attributes.contentModificationDate = lastRun
-        attributes.displayName = title
-        attributes.creator = "ContainEye"
-
-        return attributes
-    }
+//    var attributeSet: CSSearchableItemAttributeSet{
+//        let attributes = CSSearchableItemAttributeSet()
+//
+//        attributes.containerTitle = "Server Tests"
+//        attributes.containerDisplayName = "Server Tests"
+//        attributes.title = self.title
+//        attributes.contentDescription = status.localizedDescription
+//        attributes.keywords = ["Server Test", title, command, status.localizedDescription]
+//        attributes.contentModificationDate = lastRun
+//        attributes.displayName = title
+//        attributes.creator = "ContainEye"
+//        attributes.url = URL(string: "https://hannesnagel.com/open/containeye/test/\(id)/details")
+//
+//        return attributes
+//    }
 }
 
 extension ServerTest.ServerTestAppEntitiy: URLRepresentableEntity {
-#warning("todo on server")
     static var urlRepresentation: URLRepresentation {
         "https://hannesnagel.com/open/containeye/test/\(.id)/details"
     }
