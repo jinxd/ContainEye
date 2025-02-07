@@ -13,6 +13,7 @@ import ButtonKit
 struct ServersView: View {
     @Binding var sheet : ContentView.Sheet?
     @State var dataStreamer = DataStreamer.shared
+    @Environment(\.namespace) var namespace
 
 
     var body: some View {
@@ -44,6 +45,7 @@ struct ServersView: View {
                                         Label("Delete", systemImage: "trash")
                                     }
                                 }
+                                .matchedTransitionSource(id: server.id, in: namespace!)
                         }
                         .buttonStyle(.plain)
                     }
@@ -60,7 +62,10 @@ struct ServersView: View {
 #if !os(macOS)
                 .drawingGroup()
 #endif
-                
+                .matchedTransitionSource(id: ContentView.Sheet.addServer, in: namespace!)
+                NavigationLink("Learn more", value: Help.servers)
+                    .matchedTransitionSource(id: Help.servers, in: namespace!)
+
             }
             .padding()
             .padding(.top, 50)

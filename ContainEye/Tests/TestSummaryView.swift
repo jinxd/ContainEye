@@ -19,8 +19,10 @@ struct TestSummaryView: View {
                 VStack(alignment: .leading) {
                     Text(test.title)
                         .font(.headline)
-                    let host = keychain().getCredential(for: test.credentialKey)?.host ?? "???"
-                    Text(host)
+                    let host = keychain()
+                        .getCredential(for: test.credentialKey)?.host
+                    let hostText = host ?? (test.credentialKey.isEmpty ? "Local (urls only)" : "Do not run")
+                    Text(hostText)
                     Text(test.status.localizedDescription)
                 }
                 .lineLimit(1)

@@ -103,10 +103,18 @@ struct ServerTest: BlackbirdModel {
     }
 
     func fetchOutput() async -> String {
+        do {
+        guard !credentialKey.isEmpty else {
+            if let url = URL(string: command){
+                let (data, response) = try await URLSession.shared.data(from: url)
+                return "Status Code: " + ((response as? HTTPURLResponse)?.statusCode.formatted() ?? "No response") + "\n" + (String(data: data, encoding: .utf8) ?? "No data")
+            } else {
+                return "No host selected and not a valid url"
+            }
+        }
         guard let credential = keychain().getCredential(for: self.credentialKey) else {
             return "(Client Error) No credential in keychain"
         }
-        do {
             let output = try await retry { try await SSHClientActor.shared.execute(self.command, on: credential) }
             return output
         } catch {
@@ -121,6 +129,7 @@ struct ServerTest: BlackbirdModel {
 
 
     func test() async -> ServerTest {
+        guard credentialKey != "-" else {return self}
         var test = self
         test.lastRun = .now
 

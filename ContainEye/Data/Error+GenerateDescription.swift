@@ -32,7 +32,7 @@ extension Error {
         if let error = self as? DataStreamer.DataStreamerError {
             switch error {
             case .failedToConnect(to: let key, error: let error):
-                let host = keychain().getCredential(for: key)?.host ?? "???"
+                let host = keychain().getCredential(for: key)?.host ?? "?"
                 return "Failed to connect to \(host): \(error)"
             }
         }

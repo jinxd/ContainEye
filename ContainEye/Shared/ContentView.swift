@@ -16,6 +16,7 @@ struct ContentView: View {
     @AppStorage("screen") private var screen = Screen.ServerList
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.blackbirdDatabase) var db
+    @Namespace var namespace
 
     enum Screen: String, CaseIterable, Identifiable {
         case ServerList
@@ -71,12 +72,19 @@ struct ContentView: View {
             }
             .navigationDestination(for: Server.self) { server in
                 ServerDetailView(server: server)
+                    .navigationTransition(.zoom(sourceID: server.id, in: namespace))
             }
             .navigationDestination(for: Container.self) { container in
                 ContainerDetailView(container: container)
+                    .navigationTransition(.zoom(sourceID: container.id, in: namespace))
             }
             .navigationDestination(for: ServerTest.self) { test in
                 ServerTestDetail(test: .init(test, updatesEnabled: true))
+                    .navigationTransition(.zoom(sourceID: test.id, in: namespace))
+            }
+            .navigationDestination(for: Help.self) { help in
+                HelpView(help: help)
+                    .navigationTransition(.zoom(sourceID: help, in: namespace))
             }
             .onContinueUserActivity(CSQueryContinuationActionType){ activity in
                 handleActivity(activity)
@@ -97,6 +105,7 @@ struct ContentView: View {
                 }
             }
         }
+        .environment(\.namespace, namespace)
         .task(id: scenePhase){
             switch scenePhase{
             case .active:

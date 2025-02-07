@@ -9,6 +9,7 @@ import SwiftUI
 
 struct ServerDetailView: View {
     let server: Server
+    @Environment(\.namespace) var namespace
 
     var body: some View {
         ScrollView{
@@ -57,7 +58,9 @@ struct ServerDetailView: View {
                             .padding()
                             .background(Color.accentColor.quaternary.quaternary, in: RoundedProgressRectangle(cornerRadius: 15))
                             .padding(.horizontal)
+                            .navigationTransition(.zoom(sourceID: container.id, in: namespace!))
                         }
+                        .matchedTransitionSource(id: container.id, in: namespace!)
                         .buttonStyle(.plain)
                     }
                 }

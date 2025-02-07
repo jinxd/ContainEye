@@ -16,6 +16,7 @@ struct ServerTestView: View {
     @BlackbirdLiveModels({ try await ServerTest.read(from: $0, orderBy: .descending(\.$lastRun)) }) var test
     @Environment(\.scenePhase) var scenePhase
     @State private var notificationsAllowed = true
+    @Environment(\.namespace) var namespace
 
     var body: some View {
         ScrollView {
@@ -59,10 +60,13 @@ struct ServerTestView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .buttonBorderShape(.capsule)
-                .padding()
+                .matchedTransitionSource(id: ContentView.Sheet.addTest, in: namespace!)
+                NavigationLink("Learn more", value: Help.tests)
             }
             .padding()
-            .containerRelativeFrame(test.results.isEmpty ? .vertical : [])
+            .containerRelativeFrame(test.results.isEmpty ? .vertical : []){len, axis in
+                len*0.8
+            }
         }
     }
 }

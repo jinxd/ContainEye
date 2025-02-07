@@ -24,9 +24,20 @@ struct AddTestView: View {
 
     @Environment(\.blackbirdDatabase) var db
 
+    @Namespace private var namespace
+
     var body: some View {
         VStack{
             Form {
+                if focus == nil {
+                    Image(systemName: "testtube.2")
+                        .resizable()
+                        .scaledToFit()
+                        .padding(100)
+                        .matchedGeometryEffect(id: "testtube.2", in: namespace)
+                        .listRowInsets(.init())
+                        .listRowBackground(Color.clear)
+                }
                 Section {
                     TextField("Title (example.com)", text: $serverTest.title)
 #if !os(macOS)
@@ -38,10 +49,13 @@ struct AddTestView: View {
                         }
                         .submitLabel(.next)
                 }
+
                 Section{
                     Picker("Host", selection: $serverTest.credentialKey) {
-                        Text("None")
+                        Text("Local (only urls)")
                             .tag("")
+                        Text("Do not execute")
+                            .tag("-")
                         let allKeys = keychain().allKeys()
                         let credentials = allKeys.compactMap{keychain().getCredential(for: $0)}
                         ForEach(credentials, id: \.key) { credential in
@@ -50,6 +64,7 @@ struct AddTestView: View {
                         }
                     }
                 }
+
                 Section {
                     TextField("Command (e.g. curl localhost)", text: $serverTest.command)
 #if !os(macOS)
@@ -79,6 +94,7 @@ struct AddTestView: View {
                     Text("You can use a regular expression to match the output. Both will be tried. This is \((try? Regex(serverTest.expectedOutput)) == nil ? "an invalid regex" : "a valid regex")")
                 }
             }
+            .scrollContentBackground(.hidden)
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom) {
                 AsyncButton {
@@ -108,6 +124,19 @@ struct AddTestView: View {
             }
         }
         .navigationTitle("Test a server")
+#if !os(macOS)
+        .navigationBarTitleDisplayMode(.inline)
+#endif
+        .toolbar {
+            if focus != nil {
+                Image(systemName: "testtube.2")
+                    .matchedGeometryEffect(id: "testtube.2", in: namespace)
+                    .onTapGesture {
+                        focus = nil
+                    }
+            }
+        }
+        .animation(.smooth, value: focus)
     }
     enum AddServerError: Error {
         case existsAlready

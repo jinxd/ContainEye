@@ -20,6 +20,11 @@ import CoreSpotlight
 @main
 struct ContainEyeApp: App {
     let db = SharedDatabase.db
+    @Environment(\.scenePhase) var scenePhase
+
+    init() {
+        Logger.initTelemetry()
+    }
 
 
     var body: some Scene {
@@ -38,6 +43,14 @@ struct ContainEyeApp: App {
                     }
                 }
 #endif
+                .onChange(of: scenePhase) {
+                    switch scenePhase {
+                    case .active:
+                        Logger.telemetry("app launched")
+                    default:
+                        Logger.telemetry("app closed")
+                    }
+                }
         }
 #if !os(macOS)
         .backgroundTask(.appRefresh("apprefresh")) {

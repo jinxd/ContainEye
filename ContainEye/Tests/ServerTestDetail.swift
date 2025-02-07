@@ -36,13 +36,12 @@ struct ServerTestDetail: View {
                     }
                 }
 
-                let host = keychain()
-                    .getCredential(for: test.credentialKey)?.host ?? ""
-
                 if isEditing {
                     Picker("Host", selection: $credentialKey) {
-                        Text("None")
+                        Text("Local (only urls)")
                             .tag("")
+                        Text("Do not execute")
+                            .tag("-")
                         let allKeys = keychain().allKeys()
                         let credentials = allKeys.compactMap{keychain().getCredential(for: $0)}
                         ForEach(credentials, id: \.key) { credential in
@@ -51,7 +50,11 @@ struct ServerTestDetail: View {
                         }
                     }
                 } else {
-                    LabeledContent("Host", value: host)
+                    let host = keychain()
+                        .getCredential(for: test.credentialKey)?.host
+                    let hostText = host ?? (test.credentialKey.isEmpty ? "Local (urls only)" : "Do not run")
+
+                    LabeledContent("Host", value: hostText)
                 }
 
                 if isEditing {

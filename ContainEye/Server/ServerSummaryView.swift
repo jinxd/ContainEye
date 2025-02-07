@@ -11,6 +11,7 @@ import SwiftUI
 struct ServerSummaryView: View {
     let server: Server
     let hostInsteadOfLabel: Bool
+    @Environment(\.scenePhase) var scenePhase
 
     var body: some View {
             VStack {
@@ -38,8 +39,10 @@ struct ServerSummaryView: View {
                         GridItemView.Text(title: "Downstream", text: server.networkDownstream?.formatted(.number))
                     }
                 }
-                ErrorView(server: server)
-                    .padding(.horizontal, -15)
+                if scenePhase == .active {
+                    ErrorView(server: server)
+                        .padding(.horizontal, -15)
+                }
             }
             .padding()
             .background(

@@ -11,6 +11,7 @@
 		384638B82D4030F900AA796B /* ButtonKit in Frameworks */ = {isa = PBXBuildFile; productRef = 384638B72D4030F900AA796B /* ButtonKit */; };
 		384638BB2D40310800AA796B /* KeychainAccess in Frameworks */ = {isa = PBXBuildFile; productRef = 384638BA2D40310800AA796B /* KeychainAccess */; };
 		384638BE2D40312100AA796B /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = 384638BD2D40312100AA796B /* Citadel */; };
+		38F6210D2D5525F3001D6924 /* Aptabase in Frameworks */ = {isa = PBXBuildFile; productRef = 38F6210C2D5525F3001D6924 /* Aptabase */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -85,6 +86,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				38F6210D2D5525F3001D6924 /* Aptabase in Frameworks */,
 				384638BE2D40312100AA796B /* Citadel in Frameworks */,
 				384638BB2D40310800AA796B /* KeychainAccess in Frameworks */,
 				384638B82D4030F900AA796B /* ButtonKit in Frameworks */,
@@ -162,6 +164,7 @@
 				384638BA2D40310800AA796B /* KeychainAccess */,
 				384638BD2D40312100AA796B /* Citadel */,
 				380A10492D438650009F3D42 /* Blackbird */,
+				38F6210C2D5525F3001D6924 /* Aptabase */,
 			);
 			productName = ContainEye;
 			productReference = 383319382D356EC0006CDAEA /* ContainEye.app */;
@@ -250,6 +253,7 @@
 				384638B92D40310800AA796B /* XCRemoteSwiftPackageReference "KeychainAccess" */,
 				384638BC2D40312100AA796B /* XCRemoteSwiftPackageReference "Citadel" */,
 				380A10482D438650009F3D42 /* XCRemoteSwiftPackageReference "Blackbird" */,
+				38F6210B2D5525F3001D6924 /* XCRemoteSwiftPackageReference "aptabase-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 383319392D356EC0006CDAEA /* Products */;
@@ -683,6 +687,14 @@
 				minimumVersion = 0.9.2;
 			};
 		};
+		38F6210B2D5525F3001D6924 /* XCRemoteSwiftPackageReference "aptabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/aptabase/aptabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.3.11;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -705,6 +717,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 384638BC2D40312100AA796B /* XCRemoteSwiftPackageReference "Citadel" */;
 			productName = Citadel;
+		};
+		38F6210C2D5525F3001D6924 /* Aptabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 38F6210B2D5525F3001D6924 /* XCRemoteSwiftPackageReference "aptabase-swift" */;
+			productName = Aptabase;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

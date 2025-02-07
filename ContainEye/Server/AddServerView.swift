@@ -23,8 +23,17 @@ struct AddServerView: View {
         case label, host, port, username, password
     }
 
+    @Namespace var namespace
+
     var body: some View {
         VStack{
+            if focus == nil {
+                Image(systemName: "server.rack")
+                    .resizable()
+                    .scaledToFit()
+                    .padding(100)
+                    .matchedGeometryEffect(id: "server.rack", in: namespace)
+            }
             Form {
                 Section {
                     TextField("Label", text: $credential.label)
@@ -37,6 +46,7 @@ struct AddServerView: View {
                         }
                         .submitLabel(.next)
                 }
+                .padding()
                 Section {
                     TextField("Host (example.com)", text: $credential.host)
 #if !os(macOS)
@@ -58,6 +68,8 @@ struct AddServerView: View {
                         }
                         .submitLabel(.next)
                 }
+                .padding()
+
                 Section {
                     TextField("User (e.g. root)", text: $credential.username)
 #if !os(macOS)
@@ -76,7 +88,9 @@ struct AddServerView: View {
                         }
                         .submitLabel(.done)
                 }
+                .padding()
             }
+            .formStyle(.columns)
             .safeAreaInset(edge: .bottom) {
                 AsyncButton {
                     do {
@@ -106,6 +120,19 @@ struct AddServerView: View {
             }
         }
         .navigationTitle("Add a Server")
+#if !os(macOS)
+        .navigationBarTitleDisplayMode(.inline)
+#endif
+        .toolbar {
+            if focus != nil {
+                Image(systemName: "server.rack")
+                    .matchedGeometryEffect(id: "server.rack", in: namespace)
+                    .onTapGesture {
+                        focus = nil
+                    }
+            }
+        }
+        .animation(.smooth, value: focus)
     }
     enum AddServerError: Error {
         case existsAlready
@@ -125,9 +152,13 @@ struct AddServerView: View {
             .set(data, key: credential.key)
 
         dismiss()
+        Logger.telemetry("Added server", with: ["total":keychain().allKeys().count])
     }
 }
 
 #Preview {
-    AddServerView()
+    VStack{}
+        .sheet(isPresented: .constant(true)) {
+            SheetView(sheet: .addServer)
+        }
 }
