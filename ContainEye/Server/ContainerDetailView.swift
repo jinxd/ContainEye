@@ -72,7 +72,9 @@ struct ContainerDetailView: View {
             container.fetchDetailedUpdates = false
         }
         .navigationTitle(container.name)
+#if !os(macOS)
         .navigationBarTitleDisplayMode(.inline)
+#endif
     }
 }
 

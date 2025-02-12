@@ -17,14 +17,53 @@ struct AddTestView: View {
     @FocusState private var focus : Focus?
 
     enum Focus {
-        case title, command, expectedOutput
+        case title, notes, command, expectedOutput
     }
 
-    @State private var serverTest = ServerTest(id: .random(in: Int.min...Int.max), title: "", credentialKey: UUID().uuidString, command: "", expectedOutput: "", status: .notRun)
+    @State private var serverTest = ServerTest(id: .random(in: Int.min...Int.max), title: "", credentialKey: "-", command: "", expectedOutput: "", status: .notRun)
 
     @Environment(\.blackbirdDatabase) var db
 
     @Namespace private var namespace
+
+    @Environment(LLMEvaluator.self) var llm
+
+    private let systemPrompt = #"""
+You are an expert system administrator and shell scripting specialist. Your task is to generate a single shell command that tests a system, service, or resource, and a corresponding regular expression that validates the command's output.
+
+Follow these instructions exactly:
+1. Read the provided test case description.
+2. Write exactly one executable shell command that performs the test.
+3. Write exactly one regular expression that matches exactly the output produced by the command.
+4. Output a valid JSON object with exactly two keys: "command" and "expectedOutput". Do not include any extra text, commentary, or explanation.
+
+**Output Format:**
+Your output must strictly follow this JSON structure:
+
+```json
+{
+    "command": "Your shell command here",
+    "expectedOutput": "Your regular expression here"
+}
+```
+
+**Example:**
+If the test case is “Check available disk space”, your output must be:
+
+```json
+{
+    "command": "df -h / | awk 'NR==2 {print $4}'",
+    "expectedOutput": "^[0-9]+[A-Za-z]$"
+}
+```
+
+**Additional Requirements:**
+- Do not use aliases, variables, or unnecessary options.
+- Do not include any additional flags or parameters unless necessary.
+- The shell command must be executable exactly as provided.
+- The regular expression must match exactly the output of the shell command.
+"""#
+
 
     var body: some View {
         VStack{
@@ -45,17 +84,61 @@ struct AddTestView: View {
 #endif
                         .focused($focus, equals: .title)
                         .onSubmit {
+                            focus = .notes
+                        }
+                        .submitLabel(.next)
+                }
+                Section("Describe your test") {
+                    TextEditor(text: $serverTest.notes.nonOptional)
+#if !os(macOS)
+                        .keyboardType(.asciiCapable)
+#endif
+                        .focused($focus, equals: .notes)
+                        .onSubmit {
                             focus = nil
                         }
                         .submitLabel(.next)
                 }
+                Section {
+                    AsyncButton("Generate test from description") {
+                        let dirtyLlmOutput = await llm.generate(
+                            prompt: "\(serverTest.title)\n\(serverTest.notes ?? "")",
+                            systemPrompt: systemPrompt
+                        )
+                        let llmOutput = cleanLLMOutput(dirtyLlmOutput)
+
+                        struct LLMOutput: Decodable {
+                            let command: String
+                            let expectedOutput: String
+                        }
+                        
+                        let output = try JSONDecoder().decode(
+                            LLMOutput.self,
+                            from: Data(
+                                llmOutput.utf8
+                            )
+                        )
+                        serverTest.command = output.command
+                        serverTest.expectedOutput = output.expectedOutput
+                    }
+                } footer: {
+                    if llm.isThinking && llm.running {
+                        Text(llm.elapsedTime ?? 0, format: .number.precision(.fractionLength(1))).monospacedDigit() + Text(" seconds elapsed") + Text(
+                            llm.output
+                                .replacingOccurrences(of: "<think>", with: "")
+                        )
+                    } else {
+                        Text(llm.modelInfo.replacingOccurrences(of: "mlx-community/", with: ""))
+                    }
+                }
+
 
                 Section{
                     Picker("Host", selection: $serverTest.credentialKey) {
-                        Text("Local (only urls)")
-                            .tag("")
                         Text("Do not execute")
                             .tag("-")
+                        Text("Local (only urls)")
+                            .tag("")
                         let allKeys = keychain().allKeys()
                         let credentials = allKeys.compactMap{keychain().getCredential(for: $0)}
                         ForEach(credentials, id: \.key) { credential in
@@ -120,7 +203,7 @@ struct AddTestView: View {
                 .padding(.bottom)
             }
             .onAppear{
-                focus = .title
+//                focus = .title
             }
         }
         .navigationTitle("Test a server")
@@ -152,3 +235,18 @@ struct AddTestView: View {
 #Preview {
     AddServerView()
 }
+
+
+func cleanLLMOutput(_ input: String) -> String {
+    // Remove <think>...</think>
+    let thinkPattern = #"<think>.*?</think>"#
+    let cleanedThinkOutput = (try? NSRegularExpression(pattern: thinkPattern, options: .dotMatchesLineSeparators))?
+        .stringByReplacingMatches(in: input, options: [], range: NSRange(location: 0, length: input.utf16.count), withTemplate: "")
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? input
+
+    return cleanedThinkOutput
+        .replacingOccurrences(of: "```json", with: "")
+        .replacingOccurrences(of: "``` json", with: "")
+        .replacingOccurrences(of: "```", with: "")
+}
+

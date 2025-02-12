@@ -21,6 +21,7 @@ import CoreSpotlight
 struct ContainEyeApp: App {
     let db = SharedDatabase.db
     @Environment(\.scenePhase) var scenePhase
+    let llm = LLMEvaluator()
 
     init() {
         Logger.initTelemetry()
@@ -40,6 +41,7 @@ struct ContainEyeApp: App {
                     Task{
                         await ServerTest.ServerTestAppEntitiy.updateSpotlightIndex()
                         AppIntent.updateAppShortcutParameters()
+                        await loadDefaultData()
                     }
                 }
 #endif
@@ -51,6 +53,7 @@ struct ContainEyeApp: App {
                         Logger.telemetry("app closed")
                     }
                 }
+                .environment(llm)
         }
 #if !os(macOS)
         .backgroundTask(.appRefresh("apprefresh")) {
@@ -78,5 +81,26 @@ struct ContainEyeApp: App {
         content.body = output
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false))
         try await UNUserNotificationCenter.current().add(request)
+    }
+
+    nonisolated func loadDefaultData() async {
+        guard let url = Bundle.main.url(forResource: "DefaultTests", withExtension: "json") else {
+            print("Failed to find DefaultTests.json")
+            return
+        }
+        do {
+            let data = try Data(contentsOf: url)
+            let tests = try JSONDecoder().decode([ServerTest].self, from: data)
+
+            for test in tests {
+                guard (try? await ServerTest.read(from: db, id: test.id)) == nil else {continue}
+
+                try! await test.write(to: db)
+            }
+
+        } catch {
+            print("Error loading JSON: \(error)")
+            return
+        }
     }
 }

@@ -11,6 +11,11 @@
 		384638B82D4030F900AA796B /* ButtonKit in Frameworks */ = {isa = PBXBuildFile; productRef = 384638B72D4030F900AA796B /* ButtonKit */; };
 		384638BB2D40310800AA796B /* KeychainAccess in Frameworks */ = {isa = PBXBuildFile; productRef = 384638BA2D40310800AA796B /* KeychainAccess */; };
 		384638BE2D40312100AA796B /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = 384638BD2D40312100AA796B /* Citadel */; };
+		38940A822D5801F80095F58A /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 38940A812D5801F80095F58A /* MLXLLM */; };
+		38940A842D5801F80095F58A /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 38940A832D5801F80095F58A /* MLXLMCommon */; };
+		38940A862D5801F80095F58A /* MLXMNIST in Frameworks */ = {isa = PBXBuildFile; productRef = 38940A852D5801F80095F58A /* MLXMNIST */; };
+		38940A882D5801F80095F58A /* MLXVLM in Frameworks */ = {isa = PBXBuildFile; productRef = 38940A872D5801F80095F58A /* MLXVLM */; };
+		38940A8A2D5801F80095F58A /* StableDiffusion in Frameworks */ = {isa = PBXBuildFile; productRef = 38940A892D5801F80095F58A /* StableDiffusion */; };
 		38F6210D2D5525F3001D6924 /* Aptabase in Frameworks */ = {isa = PBXBuildFile; productRef = 38F6210C2D5525F3001D6924 /* Aptabase */; };
 /* End PBXBuildFile section */
 
@@ -86,11 +91,16 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				38940A842D5801F80095F58A /* MLXLMCommon in Frameworks */,
+				38940A822D5801F80095F58A /* MLXLLM in Frameworks */,
+				38940A882D5801F80095F58A /* MLXVLM in Frameworks */,
 				38F6210D2D5525F3001D6924 /* Aptabase in Frameworks */,
 				384638BE2D40312100AA796B /* Citadel in Frameworks */,
+				38940A862D5801F80095F58A /* MLXMNIST in Frameworks */,
 				384638BB2D40310800AA796B /* KeychainAccess in Frameworks */,
 				384638B82D4030F900AA796B /* ButtonKit in Frameworks */,
 				380A104A2D438650009F3D42 /* Blackbird in Frameworks */,
+				38940A8A2D5801F80095F58A /* StableDiffusion in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -165,6 +175,11 @@
 				384638BD2D40312100AA796B /* Citadel */,
 				380A10492D438650009F3D42 /* Blackbird */,
 				38F6210C2D5525F3001D6924 /* Aptabase */,
+				38940A812D5801F80095F58A /* MLXLLM */,
+				38940A832D5801F80095F58A /* MLXLMCommon */,
+				38940A852D5801F80095F58A /* MLXMNIST */,
+				38940A872D5801F80095F58A /* MLXVLM */,
+				38940A892D5801F80095F58A /* StableDiffusion */,
 			);
 			productName = ContainEye;
 			productReference = 383319382D356EC0006CDAEA /* ContainEye.app */;
@@ -254,6 +269,7 @@
 				384638BC2D40312100AA796B /* XCRemoteSwiftPackageReference "Citadel" */,
 				380A10482D438650009F3D42 /* XCRemoteSwiftPackageReference "Blackbird" */,
 				38F6210B2D5525F3001D6924 /* XCRemoteSwiftPackageReference "aptabase-swift" */,
+				38940A802D5801F80095F58A /* XCRemoteSwiftPackageReference "mlx-swift-examples" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 383319392D356EC0006CDAEA /* Products */;
@@ -687,6 +703,14 @@
 				minimumVersion = 0.9.2;
 			};
 		};
+		38940A802D5801F80095F58A /* XCRemoteSwiftPackageReference "mlx-swift-examples" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ml-explore/mlx-swift-examples/";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.21.2;
+			};
+		};
 		38F6210B2D5525F3001D6924 /* XCRemoteSwiftPackageReference "aptabase-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/aptabase/aptabase-swift";
@@ -717,6 +741,31 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 384638BC2D40312100AA796B /* XCRemoteSwiftPackageReference "Citadel" */;
 			productName = Citadel;
+		};
+		38940A812D5801F80095F58A /* MLXLLM */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 38940A802D5801F80095F58A /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
+			productName = MLXLLM;
+		};
+		38940A832D5801F80095F58A /* MLXLMCommon */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 38940A802D5801F80095F58A /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
+			productName = MLXLMCommon;
+		};
+		38940A852D5801F80095F58A /* MLXMNIST */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 38940A802D5801F80095F58A /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
+			productName = MLXMNIST;
+		};
+		38940A872D5801F80095F58A /* MLXVLM */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 38940A802D5801F80095F58A /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
+			productName = MLXVLM;
+		};
+		38940A892D5801F80095F58A /* StableDiffusion */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 38940A802D5801F80095F58A /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
+			productName = StableDiffusion;
 		};
 		38F6210C2D5525F3001D6924 /* Aptabase */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -19,4 +19,8 @@ enum Logger {
     static func telemetry(_ message: String, with parameters: [String: any Value] = [:]) {
         Aptabase.shared.trackEvent(message, with: parameters)
     }
+
+    static func flushTelemetry() {
+        Aptabase.shared.flush()
+    }
 }

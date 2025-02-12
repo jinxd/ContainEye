@@ -58,7 +58,9 @@ struct ServerDetailView: View {
                             .padding()
                             .background(Color.accentColor.quaternary.quaternary, in: RoundedProgressRectangle(cornerRadius: 15))
                             .padding(.horizontal)
+                            #if !os(macOS)
                             .navigationTransition(.zoom(sourceID: container.id, in: namespace!))
+                            #endif
                         }
                         .matchedTransitionSource(id: container.id, in: namespace!)
                         .buttonStyle(.plain)

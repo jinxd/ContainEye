@@ -1,0 +1,145 @@
+[
+    {
+        "command": "curl -s -o /dev/null -w \"%{http_code}\" http://example.com",
+        "status": "notRun",
+        "expectedOutput": "200",
+        "output": "",
+        "title": "Check Website Status",
+        "lastRun": null,
+        "credentialKey": "-",
+        "id": -1234567890123456789,
+        "notes": "Replace 'http://example.com' with the website you want to check. The test verifies if the site responds with HTTP status 200 (OK)."
+    },
+    {
+        "command": "df --output=pcent / | tail -1 | tr -d ' %'",
+        "status": "notRun",
+        "expectedOutput": "([0-8]?[0-9]|90)",
+        "output": "",
+        "title": "Check Disk Space Usage",
+        "lastRun": null,
+        "credentialKey": "-",
+        "id": -2345678901234567890,
+        "notes": "Checks the root disk usage percentage. Fails if usage is above 90%."
+    },
+    {
+        "command": "top -bn1 | grep \"Cpu(s)\" | awk '{print 100 - $8}' | cut -d'.' -f1",
+        "status": "notRun",
+        "expectedOutput": "([0-8]?[0-9]|90)",
+        "output": "",
+        "title": "Check CPU Usage",
+        "lastRun": null,
+        "credentialKey": "-",
+        "id": -3456789012345678901,
+        "notes": "Checks CPU usage percentage. Fails if usage is 91% or higher."
+    },
+    {
+        "command": "systemctl is-active nginx",
+        "status": "notRun",
+        "expectedOutput": "active",
+        "output": "",
+        "title": "Verify Nginx is Running",
+        "lastRun": null,
+        "credentialKey": "-",
+        "id": -4567890123456789012,
+        "notes": "Checks if the Nginx web server is running. Fails if the status is not 'active'."
+    },
+    {
+        "command": "find /var/log -type f -name \"*.log\" -mtime +7 | wc -l",
+        "status": "notRun",
+        "expectedOutput": "0",
+        "output": "",
+        "title": "Check for Old Logs",
+        "lastRun": null,
+        "credentialKey": "-",
+        "id": -5678901234567890123,
+        "notes": "Finds log files older than 7 days. Fails if any are found."
+    },
+    {
+        "command": "ps aux | awk '{ if ($8 == \"Z\") print $0; }' | wc -l",
+        "status": "notRun",
+        "expectedOutput": "0",
+        "output": "",
+        "title": "Check for Zombie Processes",
+        "lastRun": null,
+        "credentialKey": "-",
+        "id": -6789012345678901234,
+        "notes": "Counts zombie processes. Fails if any are found."
+    },
+    {
+        "command": "openssl s_client -connect example.com:443 -servername example.com 2>/dev/null | openssl x509 -noout -enddate | awk -F= '{print $2}' | xargs -I{} date -d {} +%s | awk '{print int(($_ - systime())/86400)}'",
+        "status": "notRun",
+        "expectedOutput": "[1-9][0-9]*",
+        "output": "",
+        "title": "Check SSL Certificate Expiry",
+        "lastRun": null,
+        "credentialKey": "-",
+        "id": -7890123456789012345,
+        "notes": "Replace 'example.com' with your domain. Checks how many days remain until the SSL certificate expires."
+    },
+    {
+        "command": "mysqladmin ping -u root -pYourPassword 2>/dev/null",
+        "status": "notRun",
+        "expectedOutput": "mysqld is alive",
+        "output": "",
+        "title": "Verify MySQL is Running",
+        "lastRun": null,
+        "credentialKey": "-",
+        "id": -8901234567890123456,
+        "notes": "Replace 'YourPassword' with the correct MySQL root password. Checks if MySQL is running."
+    },
+    {
+        "command": "uptime | awk -F'load average: ' '{print $2}' | cut -d',' -f1 | awk '{print int($1)}'",
+        "status": "notRun",
+        "expectedOutput": "([0-4])",
+        "output": "",
+        "title": "Check System Load Average",
+        "lastRun": null,
+        "credentialKey": "-",
+        "id": -9012345678901234567,
+        "notes": "Checks system load average. Fails if the load is 5 or higher."
+    },
+    {
+        "command": "apt list --upgradable 2>/dev/null | grep -v \"Listing\" | wc -l",
+        "status": "notRun",
+        "expectedOutput": "0",
+        "output": "",
+        "title": "Check for Pending System Updates",
+        "lastRun": null,
+        "credentialKey": "-",
+        "id": -2234567890123456789,
+        "notes": "Checks for available system updates. Fails if updates are available."
+    },
+    {
+        "command": "ls /backup/important_$(date +%F).tar.gz",
+        "status": "notRun",
+        "expectedOutput": "/backup/important_\\d{4}-\\d{2}-\\d{2}\\.tar\\.gz",
+        "output": "",
+        "title": "Verify Backup File Exists",
+        "lastRun": null,
+        "credentialKey": "-",
+        "id": -3345678901234567890,
+        "notes": "Checks if today's backup file exists in '/backup/'."
+    },
+    {
+        "command": "grep \"$(date --date='1 hour ago' '+%b %_d %H')\" /var/log/auth.log | grep \"Failed password\" | wc -l",
+        "status": "notRun",
+        "expectedOutput": "([0-9]|[1-4][0-9]|50)",
+        "output": "",
+        "title": "Check Failed Login Attempts (Last Hour)",
+        "lastRun": null,
+        "credentialKey": "-",
+        "id": -5567890123456789012,
+        "notes": "Checks for failed SSH login attempts in the last hour. Fails if 50 or more are detected."
+    },
+    {
+        "command": "ping -c 4 google.com | grep '0% packet loss' | wc -l",
+        "status": "notRun",
+        "expectedOutput": "1",
+        "output": "",
+        "title": "Check Network Latency (Packet Loss)",
+        "lastRun": null,
+        "credentialKey": "-",
+        "id": -6678901234567890123,
+        "notes": "Tests network connectivity to Google. Fails if any packet loss occurs."
+    }
+]

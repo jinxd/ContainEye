@@ -52,28 +52,30 @@ struct TestSummaryView: View {
                 }
             }
             .contextMenu {
-                AsyncButton("Execute", systemImage: "testtube.2") {
-                    var test = test
-                    test.status = .running
-                    try await test.write(to: db!)
-                    test = await test.test()
-
+                if test.credentialKey != "-" {
+                    AsyncButton("Execute", systemImage: "testtube.2") {
+                        var test = test
+                        test.status = .running
+                        try await test.write(to: db!)
+                        test = await test.test()
+                        
 #if !os(macOS)
-                    if test.status == .failed {
-                        UINotificationFeedbackGenerator().notificationOccurred(.error)
-                    } else {
-                        UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    }
+                        if test.status == .failed {
+                            UINotificationFeedbackGenerator().notificationOccurred(.error)
+                        } else {
+                            UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        }
 #endif
-                    try await test.write(to: db!)
-                    try await test.testIntent().donate()
-                }
-                Menu{
-                    AsyncButton("Delete", systemImage: "trash", role: .destructive) {
-                        try await test.delete(from: db!)
+                        try await test.write(to: db!)
+                        try await test.testIntent().donate()
                     }
-                } label: {
-                    Label("Delete", systemImage: "trash")
+                    Menu{
+                        AsyncButton("Delete", systemImage: "trash", role: .destructive) {
+                            try await test.delete(from: db!)
+                        }
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
                 }
             }
             .padding(3)

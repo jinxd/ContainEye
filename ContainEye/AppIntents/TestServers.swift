@@ -33,7 +33,9 @@ struct TestServers: AppIntents.AppIntent {
 
         await withTaskCancellationHandler{
             finishedTests = await withTaskGroup(of: ServerTest.self){group in
-                for test in tests {
+                for test in tests.filter({ test in
+                    test.credentialKey != "-"
+                }) {
                     group.addTask {
                         var test = test
                         do {

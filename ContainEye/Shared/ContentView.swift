@@ -36,7 +36,7 @@ struct ContentView: View {
     }
 
     enum Sheet: Identifiable {
-        case addServer, addTest
+        case addServer, addTest, feedback
 
         var id: String {
             switch self {
@@ -44,6 +44,8 @@ struct ContentView: View {
                 "add_server"
             case .addTest:
                 "add_test"
+            case .feedback:
+                "feedback"
             }
         }
     }
@@ -72,19 +74,27 @@ struct ContentView: View {
             }
             .navigationDestination(for: Server.self) { server in
                 ServerDetailView(server: server)
+#if !os(macOS)
                     .navigationTransition(.zoom(sourceID: server.id, in: namespace))
+#endif
             }
             .navigationDestination(for: Container.self) { container in
                 ContainerDetailView(container: container)
+#if !os(macOS)
                     .navigationTransition(.zoom(sourceID: container.id, in: namespace))
+#endif
             }
             .navigationDestination(for: ServerTest.self) { test in
                 ServerTestDetail(test: .init(test, updatesEnabled: true))
+#if !os(macOS)
                     .navigationTransition(.zoom(sourceID: test.id, in: namespace))
+#endif
             }
             .navigationDestination(for: Help.self) { help in
                 HelpView(help: help)
+#if !os(macOS)
                     .navigationTransition(.zoom(sourceID: help, in: namespace))
+#endif
             }
             .onContinueUserActivity(CSQueryContinuationActionType){ activity in
                 handleActivity(activity)
@@ -161,3 +171,5 @@ struct ContentView: View {
 #Preview {
     ContentView()
 }
+
+

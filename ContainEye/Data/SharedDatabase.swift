@@ -8,7 +8,7 @@
 import Foundation
 import Blackbird
 
-class SharedDatabase {
+enum SharedDatabase {
     static let db = {
         let path = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.nagel.ContainEye")!.appendingPathComponent("db.sqlite").path
         return try! Blackbird.Database(path: path)

@@ -26,6 +26,7 @@ struct ServerTest: BlackbirdModel {
 
     @BlackbirdColumn var id: Int
     @BlackbirdColumn var title: String
+    @BlackbirdColumn var notes: String?
     @BlackbirdColumn var credentialKey: String
     @BlackbirdColumn var command: String
     @BlackbirdColumn var expectedOutput: String
@@ -64,7 +65,7 @@ struct ServerTest: BlackbirdModel {
                 )
             ),
             .notRun: .init(
-                title: "Not Run",
+                title: "hasn't run",
                 image: DisplayRepresentation.Image(
                     systemName: "seal"
                 )
@@ -82,7 +83,7 @@ struct ServerTest: BlackbirdModel {
             case .running:
                 "running"
             case .notRun:
-                "not run"
+                "hasn't run"
             }
         }
         var image: Image {
@@ -117,6 +118,7 @@ struct ServerTest: BlackbirdModel {
         }
             let output = try await retry { try await SSHClientActor.shared.execute(self.command, on: credential) }
             return output
+                .trimmingFromEnd(character: "\n", upto: 1)
         } catch {
             do{
                 let _ = try await URLSession.shared.data(from: URL(string: "https://connectivitycheck.gstatic.com/generate_204")!)
@@ -136,7 +138,16 @@ struct ServerTest: BlackbirdModel {
         let output = await fetchOutput()
 
         let regex = try? Regex(test.expectedOutput)
-        let isRegexMatch = (try? regex?.wholeMatch(in: output)) == nil
+        let isRegexMatch: Bool
+        if let regex {
+            do {
+                isRegexMatch = (try regex.wholeMatch(in: output)) != nil
+            } catch {
+                isRegexMatch = false
+            }
+        } else {
+            isRegexMatch = false
+        }
 
         if isRegexMatch || output == test.expectedOutput {
             test.status = .success
@@ -182,6 +193,7 @@ extension ServerTest {
 
 
         @Property var title: String
+        @Property var notes: String?
         @Property var command: String
         @Property var expectedOutput: String
         @Property var lastRun: Date?
@@ -189,7 +201,7 @@ extension ServerTest {
         @Property var output: String?
 
         func getServerTest() -> ServerTest {
-            ServerTest(id: id, title: title, credentialKey: credentialKey, command: command, expectedOutput: expectedOutput, status: status)
+            ServerTest(id: id, title: title, notes: notes, credentialKey: credentialKey, command: command, expectedOutput: expectedOutput, status: status)
         }
 
         static var typeDisplayRepresentation: TypeDisplayRepresentation {
@@ -215,6 +227,18 @@ extension ServerTest {
                     }
                     NotEqualToComparator { val in
                         #Predicate<ServerTest.ServerTestAppEntitiy> { $0.title != val }
+                    }
+                }
+                // Notes Property
+                Property(\ServerTest.ServerTestAppEntitiy.$notes) {
+                    ContainsComparator { val in
+                        #Predicate<ServerTest.ServerTestAppEntitiy> { $0.notes?.localizedStandardContains(val) ?? false }
+                    }
+                    EqualToComparator { val in
+                        #Predicate<ServerTest.ServerTestAppEntitiy> { $0.notes == val }
+                    }
+                    NotEqualToComparator { val in
+                        #Predicate<ServerTest.ServerTestAppEntitiy> { $0.notes != val }
                     }
                 }
 
@@ -280,6 +304,7 @@ extension ServerTest {
 
             static let sortingOptions = SortingOptions {
                 SortableBy(\ServerTest.ServerTestAppEntitiy.$title)
+                SortableBy(\ServerTest.ServerTestAppEntitiy.$notes)
                 SortableBy(\ServerTest.ServerTestAppEntitiy.$command)
                 SortableBy(\ServerTest.ServerTestAppEntitiy.$expectedOutput)
                 SortableBy(\ServerTest.ServerTestAppEntitiy.$lastRun)
@@ -395,6 +420,8 @@ extension ServerTest.ServerTestAppEntitiy.Query: EntityPropertyQuery {
         return switch keyPath {
         case \.$title:
             \.$title
+        case \.$notes:
+            \.$notes
         case \.$command:
             \.$command
         case \.$output:

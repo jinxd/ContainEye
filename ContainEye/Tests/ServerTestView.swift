@@ -9,23 +9,43 @@ import SwiftUI
 import Blackbird
 import ButtonKit
 import UserNotifications
+import MLXLMCommon
 
 struct ServerTestView: View {
     @Binding var sheet : ContentView.Sheet?
     @Environment(\.blackbirdDatabase) var db
-    @BlackbirdLiveModels({ try await ServerTest.read(from: $0, orderBy: .descending(\.$lastRun)) }) var test
+    @BlackbirdLiveModels({
+        try await ServerTest.read(
+            from: $0,
+            matching: .literal("\(ServerTest.tableName).credentialKey IS NOT NULL AND \(ServerTest.tableName).credentialKey != '-'"),
+            orderBy: .descending(\.$lastRun)
+        )
+    }) var test
+    @BlackbirdLiveModels({
+        try await ServerTest.read(
+            from: $0,
+            matching: .literal("credentialKey = ?", "-"),
+            orderBy: .descending(\.$lastRun)
+        )
+    }) var suggestions
     @Environment(\.scenePhase) var scenePhase
     @State private var notificationsAllowed = true
     @Environment(\.namespace) var namespace
+    @Environment(LLMEvaluator.self) var llm
 
     var body: some View {
         ScrollView {
             VStack{
                 if test.didLoad {
-                    if test.results.isEmpty {
-                        ContentUnavailableView("You don't have any tests yet.", systemImage: "testtube.2")
-                    } else {
-                        VStack {
+                    VStack {
+                        if test.results.isEmpty {
+                            ContentUnavailableView("You don't have any tests yet.", systemImage: "testtube.2")
+                                .containerRelativeFrame(.vertical){len, axis in
+                                    len*0.4
+                                }
+                        } else {
+                            Text("Active Tests")
+                                .font(.title.bold())
                             if !notificationsAllowed {
                                 HStack {
                                     Text("Notifications not allowed")
@@ -34,7 +54,7 @@ struct ServerTestView: View {
                                     Button("Change") {
 #if !os(macOS)
                                         UIApplication.shared.open(URL(string: UIApplication.openNotificationSettingsURLString)!)
-                                        #else
+#else
 #warning("fix this for macOS")
 #endif
                                     }
@@ -44,15 +64,37 @@ struct ServerTestView: View {
                                 .padding(.vertical)
                             }
 
+                            Button {
+                                sheet = .feedback
+                                Logger.telemetry("opened feedback sheet")
+                            } label:  {
+                                HStack {
+                                    Text("Tap to submit feedback")
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(.orange, in: .capsule)
+                                .padding(.vertical)
+                            }
+                            .buttonStyle(.plain)
+
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 250))], spacing: 15){
                                 ForEach(test.results) { test in
                                     TestSummaryView(test: test.liveModel)
                                 }
                             }
+                            .padding(.bottom, 100)
                         }
-                        .animation(.smooth, value: test.results)
-                        .padding(.vertical)
+                        Text("Suggested")
+                            .font(.title.bold())
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 250))], spacing: 15){
+                            ForEach(suggestions.results) { test in
+                                TestSummaryView(test: test.liveModel)
+                            }
+                        }
                     }
+                    .animation(.smooth, value: test.results)
+                    .padding(.vertical)
                 }
 
                 Button("Add Test", systemImage: "plus") {
@@ -62,11 +104,10 @@ struct ServerTestView: View {
                 .buttonBorderShape(.capsule)
                 .matchedTransitionSource(id: ContentView.Sheet.addTest, in: namespace!)
                 NavigationLink("Learn more", value: Help.tests)
+
+
             }
             .padding()
-            .containerRelativeFrame(test.results.isEmpty ? .vertical : []){len, axis in
-                len*0.8
-            }
         }
     }
 }
