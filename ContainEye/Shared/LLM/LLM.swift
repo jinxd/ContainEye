@@ -99,6 +99,7 @@ class LLMEvaluator {
     }
 
     func generate(prompt: String, systemPrompt: String) async -> String {
+        Logger.telemetry("using ai")
         guard case let .id(id) = modelConfiguration.id else {return "No model selected"}
 
         let modelName = id

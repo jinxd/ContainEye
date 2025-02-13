@@ -17,7 +17,7 @@ struct ServersHelp: View {
                 .init(
                     sectionTitle: "Why should I add a server?",
                     text: Text("This app is for managing these servers and monitoring their status and health."),
-                    footerTitle: "You can't use ContainEye without servers."
+                    footerTitle: "You can use ContainEye to some degree without servers. Learn more my in the tests section."
                 ),
                 .init(
                     sectionTitle: "How do I add a server?",

@@ -13,21 +13,22 @@ import CoreSpotlight
 struct ContentView: View {
     @State private var dataStreamer = DataStreamer.shared
     @State private var sheet = Sheet?.none
-    @AppStorage("screen") private var screen = Screen.ServerList
+    @AppStorage("screen") private var screen = Screen.serverList
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.blackbirdDatabase) var db
     @Namespace var namespace
 
     enum Screen: String, CaseIterable, Identifiable {
-        case ServerList
-        case TestList
+        case serverList, testList, more
 
         var localizedTitle: String {
             switch self {
-            case .ServerList:
+            case .serverList:
                 "Servers"
-            case .TestList:
+            case .testList:
                 "Tests"
+            case .more:
+                "more"
             }
         }
         var id: String {
@@ -55,11 +56,14 @@ struct ContentView: View {
         NavigationStack(path: $navigationPath) {
             VStack{
                 TabView(selection: $screen) {
-                    Tab("Servers", systemImage: "server.rack", value: Screen.ServerList){
+                    Tab("Servers", systemImage: "server.rack", value: .serverList){
                         ServersView(sheet: $sheet)
                     }
-                    Tab("Tests", systemImage: "testtube.2", value: Screen.TestList){
+                    Tab("Tests", systemImage: "testtube.2", value: .testList){
                         ServerTestView(sheet: $sheet)
+                    }
+                    Tab("More", systemImage: "ellipsis", value: .more){
+                        MoreView(sheet: $sheet)
                     }
                 }
             }
@@ -127,7 +131,7 @@ struct ContentView: View {
         }
     }
     func handleActivity(_ activity: NSUserActivity) {
-        screen = .TestList
+        screen = .testList
         if let string = (activity.userInfo!["kCSSearchableItemActivityContentKey"] as? String) ?? (activity.userInfo!["kCSSearchableItemActivityIdentifier"] as? String),
            string.components(separatedBy: "/").count >= 2,
            let id = Int(string.components(separatedBy: "/")[1] ){

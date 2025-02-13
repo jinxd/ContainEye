@@ -27,6 +27,8 @@ struct TestServers: AppIntents.AppIntent {
     init(){}
 
     func perform() async throws -> some IntentResult & ReturnsValue<[ServerTest.ServerTestAppEntitiy]> & ShowsSnippetView {
+        Logger.telemetry("using appintent testservers", with: ["count":tests.count])
+        Logger.flushTelemetry()
         let db = SharedDatabase.db
         let tests = tests.map { $0.getServerTest() }
         var finishedTests: [ServerTest] = []
@@ -43,11 +45,11 @@ struct TestServers: AppIntents.AppIntent {
                             try await test.write(to: db)
                             test = await test.test()
                             if test.status == .failed {
-                                try await sendPushNotification(title: test.title, output: test.output ?? "No output")
+                                await sendPushNotification(title: test.title, output: test.output ?? "No output")
                             }
                         } catch {
                             test.status = .failed
-                            try? await sendPushNotification(title: test.title, output: "to execute: \(error.generateDescription())")
+                            await sendPushNotification(title: test.title, output: "to execute: \(error.generateDescription())")
                         }
                         try? await test.write(to: db)
                         return test
@@ -68,12 +70,12 @@ struct TestServers: AppIntents.AppIntent {
 
         return .result(value: retryIntent.tests, view: IntentReturnView(tests: finishedTests, retryIntent: finishedTests.contains(where: {$0.status != .success}) ? retryIntent : nil))
     }
-    private func sendPushNotification(title: String, output: String) async throws {
+    private func sendPushNotification(title: String, output: String) async {
         let content = UNMutableNotificationContent()
         content.title = title
         content.subtitle = "Test failed"
         content.body = output
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false))
-        try await UNUserNotificationCenter.current().add(request)
+        try? await UNUserNotificationCenter.current().add(request)
     }
 }

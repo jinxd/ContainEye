@@ -229,6 +229,7 @@ If the test case is “Check available disk space”, your output must be:
         try await serverTest.write(to: db!)
         dismiss()
         let _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound])
+        Logger.telemetry("added server test")
     }
 }
 

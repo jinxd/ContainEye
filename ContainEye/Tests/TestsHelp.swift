@@ -16,7 +16,7 @@ struct TestsHelp: View {
             contents: [
                 .init(
                     sectionTitle: "What are Tests?",
-                    text: Text("Tests allow you to monitor the health and functionality of your servers by running predefined commands and checking their output.")
+                    text: Text("Tests allow you to monitor the health and functionality of your servers by running predefined commands and checking their output. You can also check whether websites change by using execute locally in the host dropdown.")
                 ),
                 .init(
                     sectionTitle: "How do I add a Test?",
@@ -24,7 +24,7 @@ struct TestsHelp: View {
                 ),
                 .init(
                     sectionTitle: "What is the Command?",
-                    text: Text("The command is the actual shell command that will be executed on your server. For example: `df -h` to check disk space.")
+                    text: Text("The command is the actual shell command that will be executed on your server. For example: `df -h` to check disk space. When selecting run locally in the host picker, you can only enter a url to fetch the page from.")
                 ),
                 .init(
                     sectionTitle: "What is the Expected Output?",
@@ -44,12 +44,13 @@ struct TestsHelp: View {
                 ),
                 .init(
                     sectionTitle: "Is there shortcuts support?",
-                    text: Text("Yes! You can fetch the available tests, sort and filter them, and run them directly from the shortcuts app.")
+                    text: Text("Yes! You can fetch the available tests, sort and filter them, and run them directly from the shortcuts app or using Siri.")
                 )
             ]
         ) {
             NavigationLink("Learn about Servers", value: Help.servers)
         }
+        .onAppear{Logger.telemetry("opened more tab")}
     }
 }
 

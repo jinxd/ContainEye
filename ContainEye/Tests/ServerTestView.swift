@@ -64,20 +64,6 @@ struct ServerTestView: View {
                                 .padding(.vertical)
                             }
 
-                            Button {
-                                sheet = .feedback
-                                Logger.telemetry("opened feedback sheet")
-                            } label:  {
-                                HStack {
-                                    Text("Tap to submit feedback")
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(.orange, in: .capsule)
-                                .padding(.vertical)
-                            }
-                            .buttonStyle(.plain)
-
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 250))], spacing: 15){
                                 ForEach(test.results) { test in
                                     TestSummaryView(test: test.liveModel)

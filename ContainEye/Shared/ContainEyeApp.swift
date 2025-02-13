@@ -74,14 +74,6 @@ struct ContainEyeApp: App {
         }
 #endif
     }
-    func sendPushNotification(title: String, output: String) async throws {
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.subtitle = "Test failed"
-        content.body = output
-        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false))
-        try await UNUserNotificationCenter.current().add(request)
-    }
 
     nonisolated func loadDefaultData() async {
         guard let url = Bundle.main.url(forResource: "DefaultTests", withExtension: "json") else {
