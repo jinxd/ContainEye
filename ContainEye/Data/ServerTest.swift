@@ -341,6 +341,7 @@ extension ServerTest.ServerTestAppEntitiy.Query: EntityQuery {
             try? await ServerTest.query(
                 in: db,
                 columns: [\.$id],
+                matching: \.$credentialKey != "-",
                 orderBy: .descending(\.$lastRun),
                 limit: 10
             )
@@ -390,6 +391,7 @@ extension ServerTest.ServerTestAppEntitiy.Query: EntityPropertyQuery {
             try? await ServerTest.query(
                 in: db,
                 columns: [\.$id],
+                matching: .like(\.$credentialKey, "[^-]"),
                 orderBy: orderClauses.first ?? .ascending(\.$title), orderClauses.last ?? .ascending(\.$title)
             )
         ) ?? []

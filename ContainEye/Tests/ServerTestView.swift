@@ -17,14 +17,14 @@ struct ServerTestView: View {
     @BlackbirdLiveModels({
         try await ServerTest.read(
             from: $0,
-            matching: .literal("\(ServerTest.tableName).credentialKey IS NOT NULL AND \(ServerTest.tableName).credentialKey != '-'"),
+            matching: \.$credentialKey != "-",
             orderBy: .descending(\.$lastRun)
         )
     }) var test
     @BlackbirdLiveModels({
         try await ServerTest.read(
             from: $0,
-            matching: .literal("credentialKey = ?", "-"),
+            matching: \.$credentialKey == "-",
             orderBy: .descending(\.$lastRun)
         )
     }) var suggestions
