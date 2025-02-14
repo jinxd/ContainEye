@@ -71,27 +71,6 @@ extension ModelConfiguration: @retroactive Equatable {
         }
     }
 
-//    func getPromptHistory(thread: Thread, systemPrompt: String) -> [[String: String]] {
-//        var history: [[String: String]] = []
-//
-//        // system prompt
-//        history.append([
-//            "role": "system",
-//            "content": systemPrompt,
-//        ])
-//
-//        // messages
-//        for message in thread.sortedMessages {
-//            let role = message.role.rawValue
-//            history.append([
-//                "role": role,
-//                "content": formatForTokenizer(message.content), // Remove think tags and add a space before each message to fix the Jinja chat template issue.
-//            ])
-//        }
-//
-//        return history
-//    }
-
     // TODO: Remove this function when Jinja gets updated
     func formatForTokenizer(_ message: String) -> String {
         if self.modelType == .reasoning {
@@ -114,9 +93,3 @@ extension ModelConfiguration: @retroactive Equatable {
         }
     }
 }
-
-/*
- wnma3mz/Janus-Pro-1B-4bit //any to any
- mlx-community/Qwen2.5-VL-3B-Instruct-4bit
- mlx-community/stable-code-instruct-3b-4bit //code 1.8gb
- */
