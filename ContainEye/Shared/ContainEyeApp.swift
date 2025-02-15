@@ -59,7 +59,7 @@ struct ContainEyeApp: App {
         .backgroundTask(.appRefresh("apprefresh")) {
             await BGTaskScheduler.shared.pendingTaskRequests().forEach{print($0.identifier)}
             BGTaskScheduler.shared.cancelAllTaskRequests()
-            try! BGTaskScheduler.shared.submit(
+            try? BGTaskScheduler.shared.submit(
                 BGAppRefreshTaskRequest(identifier: "apprefresh")
             )
             let serverTests = (try? await ServerTest.query(in: db, columns: [\.$id])) ?? []
@@ -87,7 +87,7 @@ struct ContainEyeApp: App {
             for test in tests {
                 guard (try? await ServerTest.read(from: db, id: test.id)) == nil else {continue}
 
-                try! await test.write(to: db)
+                try? await test.write(to: db)
             }
 
         } catch {

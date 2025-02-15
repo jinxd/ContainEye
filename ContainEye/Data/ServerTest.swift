@@ -459,7 +459,7 @@ extension ServerTest.ServerTestAppEntitiy: IndexedEntity {
             guard let test = try? await ServerTest.read(from: db, id: serverTest[\.$id]) else {continue}
             tests.append(test)
         }
-        try! await CSSearchableIndex.default().indexAppEntities(tests.map{$0.entity})
+        try? await CSSearchableIndex.default().indexAppEntities(tests.map{$0.entity})
     }
 //    var attributeSet: CSSearchableItemAttributeSet{
 //        let attributes = CSSearchableItemAttributeSet()
