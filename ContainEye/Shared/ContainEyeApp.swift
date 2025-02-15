@@ -48,7 +48,15 @@ struct ContainEyeApp: App {
                 .onChange(of: scenePhase) {
                     switch scenePhase {
                     case .active:
-                        Logger.telemetry("app launched")
+                        Task{
+                            try? await Logger.telemetry(
+                                "app launched",
+                                with: [
+                                    "servers":keychain().allKeys().count,
+                                    "tests":ServerTest.count(in: db, matching: \.$credentialKey != "-")
+                                ]
+                            )
+                        }
                     default:
                         Logger.telemetry("app closed")
                     }
