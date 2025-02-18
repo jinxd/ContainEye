@@ -89,6 +89,22 @@ struct ContainEyeApp: App {
             return
         }
         do {
+            let chain = Keychain()
+                .synchronizable(true)
+                .accessibility(.afterFirstUnlock)
+                .label("ContainEye")
+            for key in chain.allKeys() {
+                do {
+                    if let credential = chain.getCredential(for: key),
+                       try !keychain().contains(credential.key) {
+                        let data = try JSONEncoder().encode(credential)
+                        try keychain()
+                            .set(data, key: credential.key)
+                    }
+                } catch {
+                    print(error)
+                }
+            }
             let data = try Data(contentsOf: url)
             let tests = try JSONDecoder().decode([ServerTest].self, from: data)
 

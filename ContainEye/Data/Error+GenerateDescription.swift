@@ -29,7 +29,7 @@ extension Error {
                 return "No password found in keychain."
             }
         }
-        if let error = self as? DataStreamer.DataStreamerError {
+        if let error = self as? DataStreamerError {
             switch error {
             case .failedToConnect(to: let key, error: let error):
                 let host = keychain().getCredential(for: key)?.host ?? "?"

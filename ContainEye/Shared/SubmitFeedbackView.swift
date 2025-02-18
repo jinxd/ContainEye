@@ -50,7 +50,7 @@ struct SubmitFeedbackView: View {
                                 "message" : message
                             ]
                     )
-                    Logger.flushTelemetry()
+                    await Logger.flushTelemetry()
                     dismiss()
                 }
             }

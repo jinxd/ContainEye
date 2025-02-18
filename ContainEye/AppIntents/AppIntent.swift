@@ -35,6 +35,7 @@ struct AppIntent: AppShortcutsProvider {
                 "Execute \(\.$test) in \(.applicationName)",
                 "Execute test in \(.applicationName)",
                 "\(.applicationName) führe \(\.$test) aus",
+                "\(.applicationName) \(\.$test)",
             ],
             shortTitle: "Run a single Test",
             systemImageName: "shippingbox",

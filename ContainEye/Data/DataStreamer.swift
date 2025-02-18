@@ -57,10 +57,6 @@ final class DataStreamer {
 
     }
 
-    enum DataStreamerError: Error , Hashable {
-        case failedToConnect(to: String, error: String)
-    }
-
 
 
     func removeHost(_ key: String) async throws {
