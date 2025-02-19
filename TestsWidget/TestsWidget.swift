@@ -8,6 +8,7 @@
 import WidgetKit
 import SwiftUI
 import Blackbird
+import OrderedCollections
 
 struct Provider: TimelineProvider {
     func placeholder(in context: Context) -> TestTimelineEntry {
@@ -20,7 +21,7 @@ struct Provider: TimelineProvider {
                 command: "echo test",
                 expectedOutput: "test",
                 status: .success
-            )
+            ), url: nil
         )
     }
 
@@ -28,22 +29,21 @@ struct Provider: TimelineProvider {
         Task {
             let db = SharedDatabase.db
 
-            let stati : Set<ServerTest.TestStatus> = [
+            let stati : OrderedSet<ServerTest.TestStatus> = [
                 .failed,
                 .running,
                 .success,
                 .notRun
             ]
-            let all = try await ServerTest.read(
+            var all = try await ServerTest.read(
                 from: db,
                 matching: \.$credentialKey != "-",
                 orderBy: .ascending(\.$lastRun)
             )
-                .sorted {
-                    stati.firstIndex(of: $0.status)! < stati.firstIndex(of: $1.status)!
-                }
-
-            let entry = TestTimelineEntry(date: Date(), test: all.first)
+            all.sort{
+                stati.firstIndex(of: $0.status)! < stati.firstIndex(of: $1.status)!
+            }
+            let entry = await TestTimelineEntry(date: Date(), test: all.first, url: all.first?.entity.urlRepresentation)
             completion(entry)
         }
     }
@@ -52,23 +52,22 @@ struct Provider: TimelineProvider {
         Task {
             let db = SharedDatabase.db
 
-            let stati : Set<ServerTest.TestStatus> = [
+            let stati : OrderedSet<ServerTest.TestStatus> = [
                 .failed,
                 .running,
                 .success,
                 .notRun
             ]
-            let all = try await ServerTest.read(
+            var all = try await ServerTest.read(
                 from: db,
                 matching: \.$credentialKey != "-",
                 orderBy: .ascending(\.$lastRun)
             )
-                .sorted {
-                    stati.firstIndex(of: $0.status)! < stati.firstIndex(of: $1.status)!
-                }
-
-            let timeline = Timeline(entries: [
-                TestTimelineEntry(date: .now, test: all.first)
+            all.sort{
+                stati.firstIndex(of: $0.status)! < stati.firstIndex(of: $1.status)!
+            }
+            let timeline = await Timeline(entries: [
+                TestTimelineEntry(date: .now, test: all.first, url: all.first?.entity.urlRepresentation)
             ], policy: .atEnd)
 
             completion(timeline)
@@ -83,6 +82,7 @@ struct Provider: TimelineProvider {
 struct TestTimelineEntry: TimelineEntry {
     let date: Date
     let test: ServerTest?
+    let url: URL?
 }
 
 struct TestsWidgetEntryView : View {
@@ -92,6 +92,7 @@ struct TestsWidgetEntryView : View {
         VStack {
             if let test = entry.test {
                 WidgetTestSummaryView(test: test)
+                    .widgetURL(entry.url)
             } else {
                 ContentUnavailableView("No tests available", systemImage: "testtube.2")
             }
@@ -112,13 +113,19 @@ struct WidgetTestSummaryView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if let lastRun = test.lastRun {
-                (Text(lastRun, style: .relative) + Text(" ago")).font(.caption)
+                VStack(alignment: .center) {
+                    (Text(lastRun, style: .relative) + Text(" ago")).font(.caption)
+                        .multilineTextAlignment(.center)
+                        .monospacedDigit()
+                }
+                .frame(maxWidth: .infinity)
             }
 
             Button(test.status.localizedDescription, systemImage: "arrow.clockwise", intent: test.testIntent())
                 .font(.caption)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .invalidatableContent()
         .containerBackground(test.status == .failed ? Color.red : test.status == .success ? Color.green.opacity(0.2) : Color.blue.opacity(0.5), for: .widget)
     }
 }
@@ -148,7 +155,7 @@ struct TestsWidget: Widget {
             command: "",
             expectedOutput: "",
             status: .failed
-        )
+        ), url: nil
     )
     TestTimelineEntry(
         date: .now,
@@ -159,7 +166,7 @@ struct TestsWidget: Widget {
             command: "",
             expectedOutput: "",
             status: .running
-        )
+        ), url: nil
     )
     TestTimelineEntry(
         date: .now,
@@ -170,6 +177,6 @@ struct TestsWidget: Widget {
             command: "",
             expectedOutput: "",
             status: .success
-        )
+        ), url: nil
     )
 }
