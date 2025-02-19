@@ -11,7 +11,7 @@ import NIOSSH
 
 extension Error {
     func generateDescription() -> String {
-        if let error = self as? Server.ServerError {
+        if let error = self as? ServerError {
             switch error {
             case .connectionFailed:
                 return "Could not connect to the server."

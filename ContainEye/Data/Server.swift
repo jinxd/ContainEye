@@ -246,11 +246,6 @@ class Server: Identifiable, @preconcurrency Hashable {
         return string
     }
 
-
-    enum ServerError: Error, Hashable {
-        case connectionFailed, invalidStatsOutput(_ output: String), notConnected, invalidServerResponse, cpuCommandFailed, otherError(_ error: NSError), noPasswordInKeychain
-    }
-
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
         hasher.combine(lastUpdate)

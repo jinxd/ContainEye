@@ -8,6 +8,7 @@
 import AppIntents
 import UserNotifications
 import SwiftUI
+import WidgetKit
 
 struct TestServers: AppIntents.AppIntent {
     static var title: LocalizedStringResource { "Test the servers" }
@@ -44,6 +45,7 @@ struct TestServers: AppIntents.AppIntent {
                         do {
                             test.status = .running
                             try await test.write(to: db)
+                            WidgetCenter.shared.reloadAllTimelines()
                             test = await test.test()
                             if test.status == .failed {
                                 await sendPushNotification(title: test.title, output: test.output ?? "No output")
@@ -62,6 +64,7 @@ struct TestServers: AppIntents.AppIntent {
                 }
                 return result
             }
+            WidgetCenter.shared.reloadAllTimelines()
             print(">>> Done")
         } onCancel: {
             print(">>> Cancelled")

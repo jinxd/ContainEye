@@ -44,7 +44,7 @@ class Container: @preconcurrency Identifiable, @preconcurrency Equatable, @preco
         }
     }
 
-    func fetchDetails() async throws(Server.ServerError) {
+    func fetchDetails() async throws(ServerError) {
         // Command to fetch the container's command
         let commandCmd = "docker inspect --format='{{.Config.Cmd}}' \(id)"
         // Command to fetch the container's status
@@ -68,7 +68,7 @@ class Container: @preconcurrency Identifiable, @preconcurrency Equatable, @preco
             // Assign the status directly
             status = cleanedStatus
         } catch {
-            throw Server.ServerError.invalidStatsOutput(
+            throw ServerError.invalidStatsOutput(
                 "Failed to fetch details for container \(id): \(error.generateDescription())"
             )
         }

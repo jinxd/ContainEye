@@ -45,8 +45,8 @@ struct ServersView: View {
                                         Label("Delete", systemImage: "trash")
                                     }
                                 }
-                                .matchedTransitionSource(id: server.id, in: namespace!)
                         }
+                        .matchedTransitionSource(id: server.id, in: namespace!)
                         .buttonStyle(.plain)
                     }
                 }

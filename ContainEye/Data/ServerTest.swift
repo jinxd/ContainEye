@@ -12,6 +12,7 @@ import NIOSSH
 import AppIntents
 import SwiftUI
 import CoreSpotlight
+import MLXLLM
 
 struct ServerTest: BlackbirdModel {
 

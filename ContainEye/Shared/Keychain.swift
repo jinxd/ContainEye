@@ -10,10 +10,11 @@ import KeychainAccess
 
 
 func keychain() -> Keychain {
-    Keychain()
+    let c = Keychain(service: "com.nagel.ContainEye", accessGroup: "X5933694SW.com.nagel.shared")
         .synchronizable(true)
         .accessibility(.afterFirstUnlock)
         .label("ContainEye")
+    return c
 }
 
 

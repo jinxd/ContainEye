@@ -12,6 +12,7 @@ import ButtonKit
 struct TestSummaryView: View {
     @BlackbirdLiveModel var test: ServerTest?
     @Environment(\.blackbirdDatabase) var db
+    @Environment(\.namespace) var namespace
 
     var body: some View {
         if let test {

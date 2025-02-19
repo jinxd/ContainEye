@@ -15,6 +15,7 @@ import BackgroundTasks
 import AppIntents
 import UserNotifications
 import CoreSpotlight
+import WidgetKit
 
 
 @main
@@ -45,6 +46,9 @@ struct ContainEyeApp: App {
                     }
                 }
 #endif
+                .onReceive(ServerTest.changePublisher(in: db)){ _ in
+                    WidgetCenter.shared.reloadAllTimelines()
+                }
                 .onChange(of: scenePhase) {
                     switch scenePhase {
                     case .active:
