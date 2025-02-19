@@ -22,7 +22,7 @@
         "notes": "Checks the root disk usage percentage. Fails if usage is above 90%."
     },
     {
-        "command": "top -bn1 | grep \"Cpu(s)\" | awk '{print 100 - $8}' | cut -d'.' -f1",
+        "command": "top -bn3 -d1 | grep \"Cpu(s)\" | awk 'NR>1 {sum += 100 - $8} END {print int(sum / 3)}'",
         "status": "notRun",
         "expectedOutput": "([0-8]?[0-9]|90)",
         "output": "",
