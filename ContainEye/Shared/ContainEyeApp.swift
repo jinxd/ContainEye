@@ -68,7 +68,7 @@ struct ContainEyeApp: App {
                 .environment(llm)
         }
 #if !os(macOS)
-        .backgroundTask(.appRefresh("apprefresh")) {
+        .backgroundTask(.appRefresh("apprefresh")) {    //e -l objc -- (void)[[BGTaskScheduler sharedScheduler] _simulateLaunchForTaskWithIdentifier:@"apprefresh"]
             await BGTaskScheduler.shared.pendingTaskRequests().forEach{print($0.identifier)}
             BGTaskScheduler.shared.cancelAllTaskRequests()
             try? BGTaskScheduler.shared.submit(

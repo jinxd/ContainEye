@@ -74,6 +74,11 @@ struct ServersView: View {
         .refreshable {
             await dataStreamer.initialize()
         }
+        .background(
+            Color.accentColor
+                .opacity(0.1)
+                .gradient
+        )
     }
 }
 

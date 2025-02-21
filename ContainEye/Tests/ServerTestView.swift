@@ -95,6 +95,13 @@ struct ServerTestView: View {
             }
             .padding()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            test.results
+                .contains(where: {$0.status != .success}) ? Color.clear.gradient : Color.green
+                .opacity(0.1)
+                .gradient
+        )
     }
 }
 

@@ -305,6 +305,12 @@ If the test case is “Check available disk space”, your output must be:
                 userActivity.title = test.title
                 userActivity.becomeCurrent()
             }
+            .scrollContentBackground(.hidden)
+            .background(
+                (test.status == .running ? Color.blue : test.status == .notRun ? Color.gray : test.status == .failed ? Color.red : Color.green)
+                    .opacity(0.1)
+                    .gradient
+            )
         } else {
             ContentUnavailableView("Nothing selected", systemImage: "questionmark.circle")
         }

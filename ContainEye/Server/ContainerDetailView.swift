@@ -75,6 +75,11 @@ struct ContainerDetailView: View {
 #if !os(macOS)
         .navigationBarTitleDisplayMode(.inline)
 #endif
+        .background(
+            Color.accentColor
+                .opacity(0.1)
+                .gradient
+        )
     }
 }
 

@@ -35,12 +35,12 @@ struct SheetView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
                 LinearGradient(
-                    stops: [
-                        .init(color: Color.accentColor.opacity(0.2), location: 0),
-                        .init(color: Color.gray.opacity(0.2), location: 1),
+                    colors: [
+                        Color.accentColor.opacity(0.2),
+                        Color.gray.opacity(0.2),
                     ],
                     startPoint: .top,
-                    endPoint: .bottomTrailing
+                    endPoint: .bottom
                 ), ignoresSafeAreaEdges: .all
             )
         }

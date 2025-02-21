@@ -27,13 +27,6 @@ struct AddServerView: View {
 
     var body: some View {
         VStack{
-            if focus == nil {
-                Image(systemName: "server.rack")
-                    .resizable()
-                    .scaledToFit()
-                    .padding(100)
-                    .matchedGeometryEffect(id: "server.rack", in: namespace)
-            }
             Form {
                 Section {
                     TextField("Label", text: $credential.label)
@@ -45,6 +38,7 @@ struct AddServerView: View {
                             focus = .host
                         }
                         .submitLabel(.next)
+                        .defaultFocus($focus, .label, priority: .userInitiated)
                 }
                 .padding()
                 Section {
@@ -115,24 +109,17 @@ struct AddServerView: View {
                 .disabled(disabled)
                 .padding(.bottom)
             }
-            .onAppear{
-                focus = .label
-            }
         }
         .navigationTitle("Add a Server")
 #if !os(macOS)
         .navigationBarTitleDisplayMode(.inline)
 #endif
         .toolbar {
-            if focus != nil {
-                Image(systemName: "server.rack")
-                    .matchedGeometryEffect(id: "server.rack", in: namespace)
-                    .onTapGesture {
-                        focus = nil
-                    }
-            }
+            Image(systemName: "server.rack")
+                .onTapGesture {
+                    focus = focus == nil ? .label : nil
+                }
         }
-        .animation(.smooth, value: focus)
     }
     enum AddServerError: Error {
         case existsAlready

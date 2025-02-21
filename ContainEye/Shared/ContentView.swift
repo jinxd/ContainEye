@@ -68,7 +68,6 @@ struct ContentView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .navigationTitle("ContainEye")
 #if !os(macOS)
             .navigationBarTitleDisplayMode(.inline)
 #endif

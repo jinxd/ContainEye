@@ -16,6 +16,9 @@ struct TestSummaryView: View {
 
     var body: some View {
         if let test {
+            let status = test.status
+            let color = status == .failed ? Color.red : status == .success ? Color.green : Color.blue
+
             NavigationLink(value: test) {
                 VStack(alignment: .leading) {
                     Text(test.title)
@@ -30,8 +33,6 @@ struct TestSummaryView: View {
                 .padding()
                 .frame(maxWidth: .infinity)
                 .background {
-                    let status = test.status
-                    let color = status == .failed ? Color.red : status == .success ? Color.green : Color.blue
 
                     TimelineView(.animation(paused: status != .running)) { context in
                         let trimTo = status == .notRun ? 1 : status == .running ? context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.0) / 2 : 1
@@ -50,6 +51,13 @@ struct TestSummaryView: View {
                                 dash: status == .running ? [0, 0.3, 4] : []
                             ))
                     }
+                }
+                .background {
+                    LinearGradient.init(colors: [
+                        color.opacity(0.3),
+                        color.opacity(0.2)
+                    ], startPoint: .top, endPoint: .bottom)
+                    .clipShape(.rect(cornerRadius: 15))
                 }
             }
             .contextMenu {

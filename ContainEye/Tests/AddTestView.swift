@@ -24,7 +24,6 @@ struct AddTestView: View {
 
     @Environment(\.blackbirdDatabase) var db
 
-    @Namespace private var namespace
 
     @Environment(LLMEvaluator.self) var llm
 
@@ -68,15 +67,6 @@ If the test case is “Check available disk space”, your output must be:
     var body: some View {
         VStack{
             Form {
-                if focus == nil {
-                    Image(systemName: "testtube.2")
-                        .resizable()
-                        .scaledToFit()
-                        .padding(100)
-                        .matchedGeometryEffect(id: "testtube.2", in: namespace)
-                        .listRowInsets(.init())
-                        .listRowBackground(Color.clear)
-                }
                 Section {
                     TextField("Title (example.com)", text: $serverTest.title)
 #if !os(macOS)
@@ -202,22 +192,16 @@ If the test case is “Check available disk space”, your output must be:
                 .padding(.horizontal)
                 .padding(.bottom)
             }
-            .onAppear{
-//                focus = .title
-            }
         }
         .navigationTitle("Test a server")
 #if !os(macOS)
         .navigationBarTitleDisplayMode(.inline)
 #endif
         .toolbar {
-            if focus != nil {
-                Image(systemName: "testtube.2")
-                    .matchedGeometryEffect(id: "testtube.2", in: namespace)
-                    .onTapGesture {
-                        focus = nil
-                    }
-            }
+            Image(systemName: "testtube.2")
+                .onTapGesture {
+                    focus = focus == nil ? .title : nil
+                }
         }
         .animation(.smooth, value: focus)
     }
