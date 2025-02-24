@@ -39,10 +39,6 @@ struct ServerSummaryView: View {
                         GridItemView.Text(title: "Downstream", text: server.networkDownstream?.formatted(.number))
                     }
                 }
-                if scenePhase == .active {
-                    ErrorView(server: server)
-                        .padding(.horizontal, -15)
-                }
             }
             .padding()
             .background(

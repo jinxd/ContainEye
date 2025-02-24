@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct Credential: Codable {
+struct Credential: Codable, Equatable {
     var key: String
     var label: String
     var host: String

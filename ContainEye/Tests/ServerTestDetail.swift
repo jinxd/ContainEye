@@ -15,7 +15,6 @@ struct ServerTestDetail: View {
     @Environment(\.blackbirdDatabase) private var db
     @State private var expandedElement = ExpandableElement?.none
     @Environment(\.dismiss) private var dismiss
-    @Environment(LLMEvaluator.self) private var llm
 
     @State private var isEditing = false
     @State private var credentialKey = ""
@@ -199,7 +198,6 @@ If the test case is “Check available disk space”, your output must be:
                     } header: {
                         Text("Fix the test")
                     } footer: {
-                        Text(llm.modelInfo)
                     }
                 }
                 Section {
@@ -339,7 +337,7 @@ If the test case is “Check available disk space”, your output must be:
         if !isEditing { try await setLocalProperties() }
         isEditing = true
 
-        let dirtyOutput = await llm.generate(
+        let dirtyOutput = await LLM.generate(
             prompt: "\(prompt)Do the following:\n\(changeDescription)",
             systemPrompt: systemPrompt
         )

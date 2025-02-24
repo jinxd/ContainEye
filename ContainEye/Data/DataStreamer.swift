@@ -15,7 +15,7 @@ final class DataStreamer {
     static let shared = DataStreamer()
     var serversLoaded = false
 
-    var servers = [Server]()
+    var servers = Array<Server>()
     var errors = Set<DataStreamerError>()
 
     private init() {
@@ -26,8 +26,7 @@ final class DataStreamer {
         serversLoaded = false
 
         await disconnectAllServers()
-        
-        servers.removeAll()
+
         errors.removeAll()
         await withTaskGroup(of: Void.self) { group in
             for key in keychain().allKeys() {
@@ -49,7 +48,7 @@ final class DataStreamer {
 
     // Initialize with credentials and connect to servers
     func addServer(with credential: Credential) async throws {
-        let server = Server(credential: credential)
+        let server = servers.first(where: {$0.credential == credential}) ?? Server(credential: credential)
         try await server.connect()
         servers.append(
             server

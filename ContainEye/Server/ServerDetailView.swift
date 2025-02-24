@@ -70,11 +70,6 @@ struct ServerDetailView: View {
             .animation(.spring, value: server.containers)
             .zIndex(-1)
         }
-        .background(
-            Color.accentColor
-                .opacity(0.1)
-                .gradient
-        )
     }
 }
 

@@ -22,7 +22,6 @@ import WidgetKit
 struct ContainEyeApp: App {
     let db = SharedDatabase.db
     @Environment(\.scenePhase) var scenePhase
-    let llm = LLMEvaluator()
 
     init() {
         Logger.initTelemetry()
@@ -65,7 +64,6 @@ struct ContainEyeApp: App {
                         Logger.telemetry("app closed")
                     }
                 }
-                .environment(llm)
         }
 #if !os(macOS)
         .backgroundTask(.appRefresh("apprefresh")) {    //e -l objc -- (void)[[BGTaskScheduler sharedScheduler] _simulateLaunchForTaskWithIdentifier:@"apprefresh"]

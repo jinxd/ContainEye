@@ -9,7 +9,6 @@ import SwiftUI
 import Blackbird
 import ButtonKit
 import UserNotifications
-import MLXLMCommon
 
 struct ServerTestView: View {
     @Binding var sheet : ContentView.Sheet?
@@ -31,7 +30,6 @@ struct ServerTestView: View {
     @Environment(\.scenePhase) var scenePhase
     @State private var notificationsAllowed = true
     @Environment(\.namespace) var namespace
-    @Environment(LLMEvaluator.self) var llm
 
     var body: some View {
         ScrollView {
@@ -96,12 +94,6 @@ struct ServerTestView: View {
             .padding()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            test.results
-                .contains(where: {$0.status != .success}) ? Color.clear.gradient : Color.green
-                .opacity(0.1)
-                .gradient
-        )
     }
 }
 

@@ -52,13 +52,6 @@ struct TestSummaryView: View {
                             ))
                     }
                 }
-                .background {
-                    LinearGradient.init(colors: [
-                        color.opacity(0.3),
-                        color.opacity(0.2)
-                    ], startPoint: .top, endPoint: .bottom)
-                    .clipShape(.rect(cornerRadius: 15))
-                }
             }
             .contextMenu {
                 if test.credentialKey != "-" {

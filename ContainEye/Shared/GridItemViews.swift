@@ -29,7 +29,7 @@ enum GridItemView {
                     .fill(.background)
                 RoundedProgressRectangle(cornerRadius: 15)
                     .trim(from: 0, to: trim)
-                    .stroke(Color.accentColor, style: .init(lineWidth: 10, lineCap: .round))
+                    .stroke(.accent, style: .init(lineWidth: 10, lineCap: .round))
                     .padding(3)
             }
             .redacted(reason: redacted ? .placeholder : [])

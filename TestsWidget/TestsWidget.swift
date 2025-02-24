@@ -8,7 +8,6 @@
 import WidgetKit
 import SwiftUI
 import Blackbird
-import OrderedCollections
 
 struct Provider: TimelineProvider {
     func placeholder(in context: Context) -> TestTimelineEntry {
@@ -29,7 +28,7 @@ struct Provider: TimelineProvider {
         Task {
             let db = SharedDatabase.db
 
-            let stati : OrderedSet<ServerTest.TestStatus> = [
+            let stati : Array<ServerTest.TestStatus> = [
                 .failed,
                 .running,
                 .success,
@@ -52,7 +51,7 @@ struct Provider: TimelineProvider {
         Task {
             let db = SharedDatabase.db
 
-            let stati : OrderedSet<ServerTest.TestStatus> = [
+            let stati : Array<ServerTest.TestStatus> = [
                 .failed,
                 .running,
                 .success,

@@ -12,7 +12,6 @@ import NIOSSH
 import AppIntents
 import SwiftUI
 import CoreSpotlight
-import MLXLLM
 
 struct ServerTest: BlackbirdModel {
 
@@ -488,3 +487,18 @@ extension ServerTest.ServerTestAppEntitiy: URLRepresentableEntity {
 extension EntityQueryProperties<ServerTest.ServerTestAppEntitiy, Predicate<ServerTest.ServerTestAppEntitiy>> : @unchecked @retroactive Sendable{}
 
 extension EntityQuerySortingOptions<ServerTest.ServerTestAppEntitiy> : @unchecked @retroactive Sendable {}
+
+extension String {
+    func trimmingFromEnd(character: Character, upto count: Int) -> String {
+        var newString = self
+        var trimmedCount = 0
+
+        // Iterate from the end of the string
+        while let lastCharacter = newString.last, lastCharacter == character && trimmedCount < count {
+            newString.removeLast()
+            trimmedCount += 1
+        }
+
+        return newString
+    }
+}

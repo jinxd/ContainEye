@@ -24,9 +24,6 @@ struct AddTestView: View {
 
     @Environment(\.blackbirdDatabase) var db
 
-
-    @Environment(LLMEvaluator.self) var llm
-
     private let systemPrompt = #"""
 You are an expert system administrator and shell scripting specialist. Your task is to generate a single shell command that tests a system, service, or resource, and a corresponding regular expression that validates the command's output.
 
@@ -91,7 +88,7 @@ If the test case is “Check available disk space”, your output must be:
                 }
                 Section {
                     AsyncButton("Generate test from description") {
-                        let dirtyLlmOutput = await llm.generate(
+                        let dirtyLlmOutput = await LLM.generate(
                             prompt: "\(serverTest.title)\n\(serverTest.notes ?? "")",
                             systemPrompt: systemPrompt
                         )
@@ -112,14 +109,6 @@ If the test case is “Check available disk space”, your output must be:
                         serverTest.expectedOutput = output.expectedOutput
                     }
                 } footer: {
-                    if llm.isThinking && llm.running {
-                        Text(llm.elapsedTime ?? 0, format: .number.precision(.fractionLength(1))).monospacedDigit() + Text(" seconds elapsed") + Text(
-                            llm.output
-                                .replacingOccurrences(of: "<think>", with: "")
-                        )
-                    } else {
-                        Text(llm.modelInfo.replacingOccurrences(of: "mlx-community/", with: ""))
-                    }
                 }
 
 

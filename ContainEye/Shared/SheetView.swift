@@ -32,17 +32,6 @@ struct SheetView: View {
 #endif
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(
-                LinearGradient(
-                    colors: [
-                        Color.accentColor.opacity(0.2),
-                        Color.gray.opacity(0.2),
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                ), ignoresSafeAreaEdges: .all
-            )
         }
     }
 }
