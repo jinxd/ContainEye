@@ -42,17 +42,9 @@ struct TestServers: AppIntents.AppIntent {
                 }) {
                     group.addTask {
                         var test = test
-                        do {
-                            test.status = .running
-                            try await test.write(to: db)
-                            WidgetCenter.shared.reloadAllTimelines()
-                            test = await test.test()
-                            if test.status == .failed {
-                                await sendPushNotification(title: test.title, output: test.output ?? "No output")
-                            }
-                        } catch {
-                            test.status = .failed
-                            await sendPushNotification(title: test.title, output: "to execute: \(error.generateDescription())")
+                        test = await test.test()
+                        if test.status == .failed {
+                            await sendPushNotification(title: test.title, output: test.output ?? "No output")
                         }
                         try? await test.write(to: db)
                         return test
