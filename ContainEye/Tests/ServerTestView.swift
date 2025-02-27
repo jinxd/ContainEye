@@ -36,66 +36,71 @@ struct ServerTestView: View {
             VStack{
                 if test.didLoad {
                     VStack {
+
+                        HStack {
+                            Button {
+                                UserDefaults.standard.set(ContentView.Screen.setup.rawValue, forKey: "screen")
+                                UserDefaults.standard.set(2, forKey: "setupScreen")
+                            } label: {
+                                Image(systemName: "plus")
+                            }
+                            .buttonStyle(.bordered)
+                            .buttonBorderShape(.capsule)
+
+                            Spacer()
+
+                            if test.results.count > 2 {
+                                AsyncButton("Test all") {
+                                    for test in test.results {
+                                        var test = test
+                                        do {
+                                            test.status = .running
+                                            try await test.write(to: db!)
+                                            test = await test.test()
+
+#if !os(macOS)
+                                            if test.status == .failed {
+                                                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                                            } else {
+                                                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                                            }
+
+#endif
+                                            try await test.write(to: db!)
+                                            try await test.testIntent().donate()
+                                        } catch {
+                                            if test.status == .running {
+                                                test.status = .failed
+                                                try? await test.write(to: db!)
+                                            }
+                                        }
+                                    }
+                                }
+                                .buttonBorderShape(.capsule)
+                                .buttonStyle(.bordered)
+                                .padding(2)
+                            }
+                        }
+                        .overlay{
+                            Text("Active Tests")
+                                .font(.title.bold())
+                                .frame(maxWidth: .infinity)
+                        }
+                        .padding(5)
+                        .background(test.results.contains(where: {$0.status == .failed}) ? .red.opacity(0.2) : .green.opacity(0.2), in: .capsule)
+                        .background(.regularMaterial, in: .capsule)
+                        .padding(.top, 30)
+                        .visualEffect { content, geo in
+                            content.offset(y: geo.safeAreaInsets.top - min(0,geo.frame(in: .scrollView).midY))
+                        }
+                        .zIndex(1)
+                        .padding(.bottom, 30)
                         if test.results.isEmpty {
                             ContentUnavailableView("You don't have any tests yet.", systemImage: "testtube.2")
                                 .containerRelativeFrame(.vertical){len, axis in
                                     len*0.4
                                 }
                         } else {
-                            HStack {
-                                Button {
-                                    UserDefaults.standard.set(ContentView.Screen.setup.rawValue, forKey: "screen")
-                                    UserDefaults.standard.set(2, forKey: "setupScreen")
-                                } label: {
-                                    Image(systemName: "plus")
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .buttonBorderShape(.capsule)
-                                Text("Active Tests")
-                                    .font(.title.bold())
-                                    .frame(maxWidth: .infinity)
-
-
-                                if test.results.count > 2 {
-                                    AsyncButton("Test all") {
-                                        for test in test.results {
-                                            var test = test
-                                            do {
-                                                test.status = .running
-                                                try await test.write(to: db!)
-                                                test = await test.test()
-
-#if !os(macOS)
-                                                if test.status == .failed {
-                                                    UINotificationFeedbackGenerator().notificationOccurred(.error)
-                                                } else {
-                                                    UINotificationFeedbackGenerator().notificationOccurred(.success)
-                                                }
-
-#endif
-                                                try await test.write(to: db!)
-                                                try await test.testIntent().donate()
-                                            } catch {
-                                                if test.status == .running {
-                                                    test.status = .failed
-                                                    try? await test.write(to: db!)
-                                                }
-                                            }
-                                        }
-                                    }
-                                    .buttonBorderShape(.capsule)
-                                    .buttonStyle(.borderedProminent)
-                                    .padding(2)
-                                }
-                            }
-                                .padding(5)
-                                .background(.regularMaterial, in: .capsule)
-                                .padding(.top, 30)
-                                .visualEffect { content, geo in
-                                    content.offset(y: geo.safeAreaInsets.top - min(0,geo.frame(in: .scrollView).midY))
-                                }
-                                .zIndex(1)
-                                .padding(.bottom, 30)
                             if !notificationsAllowed {
                                 HStack {
                                     Text("Notifications not allowed")

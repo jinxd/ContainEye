@@ -14,36 +14,34 @@ struct ServerSummaryView: View {
     @Environment(\.scenePhase) var scenePhase
 
     var body: some View {
-            VStack {
+        VStack {
 
-                Text(hostInsteadOfLabel ? server.credential.host : server.credential.label)
+            Text(hostInsteadOfLabel ? server.credential.host : server.credential.label)
 
-                Grid {
-                    GridRow{
-                        GridItemView.Percentage(title: "CPU Usage", percentage: server.cpuUsage)
-                    }
-                    .gridCellColumns(2)
-                    GridRow {
-                        GridItemView.Percentage(title: "Memory Usage", percentage: server.memoryUsage)
+            Grid {
+                GridRow{
+                    GridItemView.Percentage(title: "CPU Usage", percentage: server.cpuUsage)
+                }
+                .gridCellColumns(2)
+                GridRow {
+                    GridItemView.Percentage(title: "Memory Usage", percentage: server.memoryUsage)
 
-                        GridItemView.Percentage(title: "IO Wait", percentage: server.ioWait)
-                    }
-                    GridRow{
-                        GridItemView.Date(title: "Up Time", value: server.uptime)
+                    GridItemView.Percentage(title: "IO Wait", percentage: server.ioWait)
+                }
+                GridRow{
+                    GridItemView.Date(title: "Up Time", value: server.uptime)
 
-                        GridItemView.Percentage(title: "Disk Usage", percentage: server.diskUsage)
-                    }
-                    GridRow{
-                        GridItemView.Text(title: "Upstream", text: server.networkUpstream?.formatted(.number))
+                    GridItemView.Percentage(title: "Disk Usage", percentage: server.diskUsage)
+                }
+                GridRow{
+                    GridItemView.Text(title: "Upstream", text: server.networkUpstream?.formatted(.number))
 
-                        GridItemView.Text(title: "Downstream", text: server.networkDownstream?.formatted(.number))
-                    }
+                    GridItemView.Text(title: "Downstream", text: server.networkDownstream?.formatted(.number))
                 }
             }
-            .padding()
-            .background(
-                server.isConnected ? Color.accentColor.quaternary.quaternary : Color.gray.quaternary.quaternary
-                , in: RoundedProgressRectangle(cornerRadius: 15))
+        }
+        .padding()
+        .background(server.isConnected ? .accent.opacity(0.1) : .gray.opacity(0.2), in: .rect(cornerRadius: 15))
     }
 }
 

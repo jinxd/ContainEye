@@ -28,11 +28,11 @@ struct SetupView: View {
                     .background(
                         LinearGradient(
                             colors: [
-                                .accent,
+                                .accent.opacity(0.2),
                                 .clear
                             ],
-                            startPoint: .bottom,
-                            endPoint: .top
+                            startPoint: .top,
+                            endPoint: .bottom
                         )
                         .background()
                         .clipShape(.rect(cornerRadius: 15))
