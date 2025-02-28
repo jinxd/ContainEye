@@ -8,6 +8,7 @@
 
 import SwiftUI
 import ButtonKit
+import Blackbird
 
 struct AddServerSetupView: View {
     @Binding var screen: Int?
@@ -80,11 +81,25 @@ struct AddServerSetupView: View {
                 } else {
                     Menu("Add this test"){
                         AsyncButton("and add another test") {
+                            try? await Logger.telemetry(
+                                "added test",
+                                with: [
+                                    "servers":keychain().allKeys().count,
+                                    "tests":ServerTest.count(in: db!, matching: \.$credentialKey != "-")
+                                ]
+                            )
                             try await test.write(to: db!)
                             test = ServerTest(id: .random(in: (.min)...(.max)), title: "", credentialKey: "", command: "", expectedOutput: "", status: .notRun)
                         }
                         .buttonStyle(.bordered)
                         AsyncButton("but do not add another test") {
+                            try? await Logger.telemetry(
+                                "added test",
+                                with: [
+                                    "servers":keychain().allKeys().count,
+                                    "tests":ServerTest.count(in: db!, matching: \.$credentialKey != "-")
+                                ]
+                            )
                             try await test.write(to: db!)
                             UserDefaults.standard.set(ContentView.Screen.testList.rawValue, forKey: "screen")
                         }

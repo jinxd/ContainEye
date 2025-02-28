@@ -14,7 +14,7 @@ enum LLMEvaluatorError: Error {
 
 enum LLM {
     static func generate(prompt: String, systemPrompt: String) async -> String {
-        Logger.telemetry("using ai")
+        Logger.telemetry("using ai", with: ["prompt": prompt])
 
         do {
             var urlRequest = URLRequest(url: URL(string: "https://containeye.hannesnagel.com/text-generation")!)
