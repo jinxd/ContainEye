@@ -29,6 +29,7 @@ class Server: Identifiable, @preconcurrency Hashable {
     var uptime = Date?.none
     var lastUpdate: Date? = nil
     var containers: [Container] = []
+    var containersLoaded = false
     var errors = Set<ServerError>()
     var updatesPaused = true
     var dockerUpdatesPaused = true
@@ -140,6 +141,7 @@ class Server: Identifiable, @preconcurrency Hashable {
             for container in containers.filter({ $0.fetchDetailedUpdates }) {
                 try await container.fetchDetails()
             }
+            containersLoaded = true
         } catch {
             errors.insert(error as? ServerError ?? .otherError(error as NSError))
         }

@@ -15,7 +15,7 @@ final class DataStreamer {
     static let shared = DataStreamer()
     var serversLoaded = false
 
-    var servers = Array<Server>()
+    var servers = Set<Server>()
     var errors = Set<DataStreamerError>()
 
     private init() {
@@ -50,7 +50,7 @@ final class DataStreamer {
     func addServer(with credential: Credential) async throws {
         let server = servers.first(where: {$0.credential == credential}) ?? Server(credential: credential)
         try await server.connect()
-        servers.append(
+        servers.insert(
             server
         )
 
@@ -62,7 +62,7 @@ final class DataStreamer {
         let servers = servers.filter {
             $0.credential.key == key
         }
-        self.servers.removeAll { $0.credential.key == key }
+        self.servers = self.servers.filter{$0.credential.key != key}
 
 
         for server in servers{

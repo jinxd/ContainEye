@@ -27,42 +27,6 @@ struct ServerTestDetail: View {
         case expectedOutput, actualOutput, notes
     }
 
-    private let systemPrompt = #"""
-You are an expert system administrator and shell scripting specialist. Your task is to generate a single shell command that tests a system, service, or resource, and a corresponding regular expression that validates the command's output.
-
-Follow these instructions exactly:
-1. Read the provided test case description.
-2. Write exactly one executable shell command that performs the test.
-3. Write exactly one regular expression that matches exactly the output produced by the command.
-4. Output a valid JSON object with exactly two keys: "command" and "expectedOutput". Do not include any extra text, commentary, or explanation.
-
-**Output Format:**
-Your output must strictly follow this JSON structure:
-
-```json
-{
-    "command": "Your shell command here",
-    "expectedOutput": "Your regular expression here"
-}
-```
-
-**Example:**
-If the test case is “Check available disk space”, your output must be:
-
-```json
-{
-    "command": "df -h / | awk 'NR==2 {print $4}'",
-    "expectedOutput": "^[0-9]+[A-Za-z]$"
-}
-```
-
-**Additional Requirements:**
-- Do not use aliases, variables, or unnecessary options.
-- Do not include any additional flags or parameters unless necessary.
-- The shell command must be executable exactly as provided.
-- The regular expression must match exactly the output of the shell command.
-"""#
-
     var prompt: String {
         if let test {
             "\(test.title)\n\(test.notes?.appending("\n") ?? "")The current command is: \(command)\n Current regex that should validate the output is: \(expectedOutput)\n\n"
@@ -96,7 +60,7 @@ If the test case is “Check available disk space”, your output must be:
                     }
                 } else {
                     let host = keychain()
-                        .getCredential(for: test.credentialKey)?.host
+                        .getCredential(for: test.credentialKey)?.label
                     let hostText = host ?? (test.credentialKey.isEmpty ? "Local (urls only)" : "Do not run")
 
                     LabeledContent("Host", value: hostText)
@@ -303,12 +267,6 @@ If the test case is “Check available disk space”, your output must be:
                 userActivity.title = test.title
                 userActivity.becomeCurrent()
             }
-            .scrollContentBackground(.hidden)
-            .background(
-                (test.status == .running ? Color.blue : test.status == .notRun ? Color.gray : test.status == .failed ? Color.red : Color.green)
-                    .opacity(0.1)
-                    .gradient
-            )
         } else {
             ContentUnavailableView("Nothing selected", systemImage: "questionmark.circle")
         }
@@ -339,11 +297,12 @@ If the test case is “Check available disk space”, your output must be:
 
         let dirtyOutput = await LLM.generate(
             prompt: "\(prompt)Do the following:\n\(changeDescription)",
-            systemPrompt: systemPrompt
+            systemPrompt: LLM.addTestSystemPrompt
         )
-        let llmOutput = cleanLLMOutput(dirtyOutput)
+        let llmOutput = LLM.cleanLLMOutput(dirtyOutput)
 
         struct LLMOutput: Decodable {
+            let title: String
             let command: String
             let expectedOutput: String
         }
@@ -354,6 +313,7 @@ If the test case is “Check available disk space”, your output must be:
                 llmOutput.utf8
             )
         )
+        title = output.title
         command = output.command
         expectedOutput = output.expectedOutput
     }

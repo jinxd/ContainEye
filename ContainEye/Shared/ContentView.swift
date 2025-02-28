@@ -19,7 +19,7 @@ struct ContentView: View {
     @Namespace var namespace
 
     enum Screen: String, CaseIterable, Identifiable {
-        case serverList, testList, more
+        case serverList, testList, more, setup
 
         var localizedTitle: String {
             switch self {
@@ -29,6 +29,8 @@ struct ContentView: View {
                 "Tests"
             case .more:
                 "more"
+            case .setup:
+                "setup"
             }
         }
         var id: String {
@@ -37,14 +39,10 @@ struct ContentView: View {
     }
 
     enum Sheet: Identifiable {
-        case addServer, addTest, feedback
+        case feedback
 
         var id: String {
             switch self {
-            case .addServer:
-                "add_server"
-            case .addTest:
-                "add_test"
             case .feedback:
                 "feedback"
             }
@@ -55,25 +53,47 @@ struct ContentView: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             VStack{
-                TabView(selection: $screen) {
-                    Tab("Servers", systemImage: "server.rack", value: .serverList){
-                        ServersView(sheet: $sheet)
-                    }
-                    Tab("Tests", systemImage: "testtube.2", value: .testList){
-                        ServerTestView(sheet: $sheet)
-                    }
-                    Tab("More", systemImage: "ellipsis", value: .more){
-                        MoreView(sheet: $sheet)
+                if screen == .setup {
+                    SetupView(sheet: $sheet)
+                } else {
+                    TabView(selection: $screen) {
+                        Tab("Servers", systemImage: "server.rack", value: .serverList){
+                            ServersView(sheet: $sheet)
+                        }
+                        Tab("Tests", systemImage: "testtube.2", value: .testList){
+                            ServerTestView(sheet: $sheet)
+                        }
+                        Tab("More", systemImage: "ellipsis", value: .more){
+                            MoreView(sheet: $sheet)
+                        }
                     }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            .toolbar{
+                if screen == .serverList{
+                    Button{
+                        UserDefaults.standard.set(ContentView.Screen.setup.rawValue, forKey: "screen")
+                        UserDefaults.standard.set(1, forKey: "setupScreen")
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("Add a server")
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.circle)
+                }
+            }
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
 #if !os(macOS)
             .navigationBarTitleDisplayMode(.inline)
 #endif
             .animation(.spring, value: dataStreamer.servers)
             .sheet(item: $sheet) { sheet in
                 SheetView(sheet: sheet)
+#if !os(macOS)
+                    .navigationTransition(.zoom(sourceID: sheet.id, in: namespace))
+#endif
             }
             .navigationDestination(for: Server.self) { server in
                 ServerDetailView(server: server)

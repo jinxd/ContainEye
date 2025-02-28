@@ -78,11 +78,6 @@ struct SecondSetupView: View {
 
             NavigationLink("Learn about Servers", value: Help.servers)
         }
-        .toolbar{
-            Button("Skip Setup") {
-                UserDefaults.standard.set(ContentView.Screen.testList.rawValue, forKey: "screen")
-            }
-        }
         .onSubmit(of: .text) {
             guard showing != .password else { return }
             showing = Field.allCases[Field.allCases.index(
@@ -96,7 +91,7 @@ struct SecondSetupView: View {
     func showNextField() async throws {
         if showing == .password {
             try await addServer()
-            UserDefaults.standard.set(ContentView.Screen.testList.rawValue, forKey: "screen")
+            screen = 3
         } else {
             showing = Field.allCases[Field.allCases.index(
                 after: Field.allCases

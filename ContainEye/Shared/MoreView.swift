@@ -9,11 +9,17 @@ import SwiftUI
 
 struct MoreView: View {
     @Binding var sheet: ContentView.Sheet?
+    @Environment(\.namespace) var namespace
+    
     var body: some View {
         Form {
             Section("Get help"){
                 NavigationLink("Learn about servers", value: Help.servers)
                 NavigationLink("Learn about testing them", value: Help.tests)
+                Button("Show setup again") {
+                    UserDefaults.standard.set("setup", forKey: "screen")
+                    UserDefaults.standard.set(0, forKey: "setupScreen")
+                }
                 Link("Send me an email", destination: "mailto:contact@hannesnagel.com")
             }
 
@@ -22,6 +28,7 @@ struct MoreView: View {
                     sheet = .feedback
                     Logger.telemetry("opened feedback sheet")
                 }
+                .matchedTransitionSource(id: ContentView.Sheet.feedback.id, in: namespace!)
                 Link("Open a new Issue on GitHub", destination: "https://github.com/hannesmnagel/ContainEye/issues")
             }
             Section("About") {

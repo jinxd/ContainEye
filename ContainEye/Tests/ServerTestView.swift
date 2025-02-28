@@ -42,8 +42,60 @@ struct ServerTestView: View {
                                     len*0.4
                                 }
                         } else {
-                            Text("Active Tests")
-                                .font(.title.bold())
+                            HStack {
+                                Button {
+                                    UserDefaults.standard.set(ContentView.Screen.setup.rawValue, forKey: "screen")
+                                    UserDefaults.standard.set(1, forKey: "setupScreen")
+                                } label: {
+                                    Image(systemName: "plus")
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .buttonBorderShape(.capsule)
+                                Text("Active Tests")
+                                    .font(.title.bold())
+                                    .frame(maxWidth: .infinity)
+
+
+                                if test.results.count > 2 {
+                                    AsyncButton("Test all") {
+                                        for test in test.results {
+                                            var test = test
+                                            do {
+                                                test.status = .running
+                                                try await test.write(to: db!)
+                                                test = await test.test()
+
+#if !os(macOS)
+                                                if test.status == .failed {
+                                                    UINotificationFeedbackGenerator().notificationOccurred(.error)
+                                                } else {
+                                                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                                                }
+
+#endif
+                                                try await test.write(to: db!)
+                                                try await test.testIntent().donate()
+                                            } catch {
+                                                if test.status == .running {
+                                                    test.status = .failed
+                                                    try? await test.write(to: db!)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    .buttonBorderShape(.capsule)
+                                    .buttonStyle(.borderedProminent)
+                                    .padding(2)
+                                }
+                            }
+                                .padding(5)
+                                .background(.regularMaterial, in: .capsule)
+                                .padding(.top, 30)
+                                .visualEffect { content, geo in
+                                    content.offset(y: geo.safeAreaInsets.top - min(0,geo.frame(in: .scrollView).midY))
+                                }
+                                .zIndex(1)
+                                .padding(.bottom, 30)
                             if !notificationsAllowed {
                                 HStack {
                                     Text("Notifications not allowed")
@@ -67,10 +119,18 @@ struct ServerTestView: View {
                                     TestSummaryView(test: test.liveModel)
                                 }
                             }
-                            .padding(.bottom, 100)
                         }
                         Text("Suggested")
                             .font(.title.bold())
+                            .frame(maxWidth: .infinity)
+                            .padding(5)
+                            .background(.regularMaterial, in: .capsule)
+                            .padding(.top, 30)
+                            .visualEffect { content, geo in
+                                content.offset(y: geo.safeAreaInsets.top - min(0,geo.frame(in: .scrollView).midY))
+                            }
+                            .zIndex(2)
+                            .padding(.bottom, 30)
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 250))], spacing: 15){
                             ForEach(suggestions.results) { test in
                                 TestSummaryView(test: test.liveModel)
@@ -80,13 +140,6 @@ struct ServerTestView: View {
                     .animation(.smooth, value: test.results)
                     .padding(.vertical)
                 }
-
-                Button("Add Test", systemImage: "plus") {
-                    sheet = .addTest
-                }
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.capsule)
-                .matchedTransitionSource(id: ContentView.Sheet.addTest, in: namespace!)
                 NavigationLink("Learn more", value: Help.tests)
 
 
@@ -94,6 +147,7 @@ struct ServerTestView: View {
             .padding()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
     }
 }
 

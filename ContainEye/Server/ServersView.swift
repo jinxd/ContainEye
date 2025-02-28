@@ -32,7 +32,7 @@ struct ServersView: View {
 
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 500, maximum: 800))]) {
-                    ForEach(Array(dataStreamer.servers)) {server in
+                    ForEach(Array(dataStreamer.servers).sorted(by: {$0.id < $1.id})) {server in
                         NavigationLink(value: server) {
                             ServerSummaryView(server: server, hostInsteadOfLabel: false)
                                 .contextMenu{
@@ -40,7 +40,7 @@ struct ServersView: View {
                                         AsyncButton("Delete", systemImage: "trash", role: .destructive) {
                                             try await dataStreamer.removeHost(server.credential.key)
                                         }
-                                        
+
                                     } label: {
                                         Label("Delete", systemImage: "trash")
                                     }
@@ -52,20 +52,12 @@ struct ServersView: View {
                 }
 
                 Spacer()
-
-
-                Button("Add Server", systemImage: "plus"){
-                    sheet = .addServer
-                }
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.capsule)
 #if !os(macOS)
                 .drawingGroup()
 #endif
-                .matchedTransitionSource(id: ContentView.Sheet.addServer, in: namespace!)
                 NavigationLink("Learn more", value: Help.servers)
                     .matchedTransitionSource(id: Help.servers, in: namespace!)
-
+                
             }
             .padding()
             .padding(.top, 50)

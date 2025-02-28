@@ -15,16 +15,6 @@ struct SheetView: View {
         NavigationStack {
             Group{
                 switch sheet {
-                case .addServer:
-                    AddServerView()
-#if !os(macOS)
-                        .navigationTransition(.zoom(sourceID: sheet, in: namespace!))
-#endif
-                case .addTest:
-                    AddTestView()
-#if !os(macOS)
-                        .navigationTransition(.zoom(sourceID: sheet, in: namespace!))
-#endif
                 case .feedback:
                     SubmitFeedbackView()
 #if !os(macOS)
@@ -39,5 +29,5 @@ struct SheetView: View {
 
 
 #Preview {
-    SheetView(sheet: .addServer)
+    SheetView(sheet: .feedback)
 }

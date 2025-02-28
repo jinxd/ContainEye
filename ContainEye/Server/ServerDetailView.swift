@@ -38,7 +38,7 @@ struct ServerDetailView: View {
                 #endif
 
                 if server.containers.isEmpty {
-                    ContentUnavailableView("Loading your containers...", systemImage: "shippingbox")
+                    ContentUnavailableView(server.containersLoaded ? "You don't have any containers" :"Loading your containers...", systemImage: "shippingbox")
                 } else {
                     Text("Container")
                     ForEach(server.containers) { container in
