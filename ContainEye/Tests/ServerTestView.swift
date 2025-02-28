@@ -45,7 +45,7 @@ struct ServerTestView: View {
                             HStack {
                                 Button {
                                     UserDefaults.standard.set(ContentView.Screen.setup.rawValue, forKey: "screen")
-                                    UserDefaults.standard.set(1, forKey: "setupScreen")
+                                    UserDefaults.standard.set(2, forKey: "setupScreen")
                                 } label: {
                                     Image(systemName: "plus")
                                 }
