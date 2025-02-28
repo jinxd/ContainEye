@@ -55,6 +55,9 @@ struct ContentView: View {
             VStack{
                 if screen == .setup {
                     SetupView(sheet: $sheet)
+                        .onDisappear{
+                            UserDefaults.standard.set(0, forKey: "setupScreen")
+                        }
                 } else {
                     TabView(selection: $screen) {
                         Tab("Servers", systemImage: "server.rack", value: .serverList){
@@ -67,6 +70,11 @@ struct ContentView: View {
                             MoreView(sheet: $sheet)
                         }
                     }
+                }
+            }
+            .onAppear{
+                if UserDefaults.standard.object(forKey: "setupScreen") == nil {
+                    UserDefaults.standard.set(ContentView.Screen.setup.rawValue, forKey: "screen")
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
