@@ -24,7 +24,7 @@ struct TestSummaryView: View {
                     Text(test.title)
                         .font(.headline)
                     let host = keychain()
-                        .getCredential(for: test.credentialKey)?.host
+                        .getCredential(for: test.credentialKey)?.label
                     let hostText = host ?? (test.credentialKey.isEmpty ? "Local (urls only)" : "Do not run")
                     Text(hostText)
                     Text(test.status.localizedDescription)
