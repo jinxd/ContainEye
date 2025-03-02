@@ -49,6 +49,12 @@ struct ServerTestView: View {
 
                             Spacer()
 
+                            Text("Active Tests")
+                                .font(.title.bold())
+                                .frame(maxWidth: .infinity)
+
+                            Spacer()
+
                             if test.results.count > 2 {
                                 AsyncButton("Test all") {
                                     for test in test.results {
@@ -80,11 +86,6 @@ struct ServerTestView: View {
                                 .buttonStyle(.bordered)
                                 .padding(2)
                             }
-                        }
-                        .overlay{
-                            Text("Active Tests")
-                                .font(.title.bold())
-                                .frame(maxWidth: .infinity)
                         }
                         .padding(5)
                         .background(test.results.contains(where: {$0.status == .failed}) ? .red.opacity(0.2) : .green.opacity(0.2), in: .capsule)
