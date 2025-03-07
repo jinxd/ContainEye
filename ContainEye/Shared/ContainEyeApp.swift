@@ -31,6 +31,7 @@ struct ContainEyeApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .confirmator()
                 .environment(\.blackbirdDatabase, db)
 #if !os(macOS)
                 .onAppear{
@@ -79,7 +80,7 @@ struct ContainEyeApp: App {
                 tests.append(test)
             }
             let intent = TestServers()
-            intent.tests = tests.map{$0.entity}
+            intent.tests = tests.map{$0.entity}.shuffled()
             let _ = try? await intent.perform()
         }
 #endif

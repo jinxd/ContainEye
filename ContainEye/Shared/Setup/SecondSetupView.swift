@@ -91,7 +91,7 @@ struct SecondSetupView: View {
     func showNextField() async throws {
         if showing == .password {
             try await addServer()
-            screen = 3
+            screen = 2
         } else {
             showing = Field.allCases[Field.allCases.index(
                 after: Field.allCases

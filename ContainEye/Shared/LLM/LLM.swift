@@ -12,69 +12,118 @@ enum LLMEvaluatorError: Error {
     case modelNotFound(String)
 }
 
+import Foundation
+
 enum LLM {
-    static func generate(prompt: String, systemPrompt: String) async -> String {
+    static func generate(prompt: String, systemPrompt: String, history: [[String: String]] = []) async -> String {
         Logger.telemetry("using ai", with: ["prompt": prompt])
 
         do {
+            // Prepare the conversation history, ensuring the system prompt is always at the start
+            var conversation = [["role": "system", "content": systemPrompt]] + history
+            conversation.append(["role": "user", "content": prompt])
+
             var urlRequest = URLRequest(url: URL(string: "https://containeye.hannesnagel.com/text-generation")!)
             urlRequest.httpMethod = "PUT"
             urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            urlRequest.httpBody = try JSONSerialization
-                .data(
-                    withJSONObject:
-                        [
-                            ["role": "system",
-                             "content": systemPrompt],
-                            ["role": "user",
-                             "content": prompt],
-                        ]
-                )
-            let (data, _) = try await URLSession.shared.data(for: urlRequest)
+            urlRequest.httpBody = try JSONSerialization.data(withJSONObject: conversation)
 
-            return String(data: data, encoding: .utf8) ?? "Failed to parse response"
+            let (data, _) = try await URLSession.shared.data(for: urlRequest)
+            let responseString = String(data: data, encoding: .utf8) ?? "Failed to parse response"
+
+            // Append AI response to the conversation history
+            conversation.append(["role": "assistant", "content": responseString])
+
+            // Define regex patterns for JSON syntax
+            let questionPattern = /"type":\s*"question".*?"content":\s*"([^"]+)"/.dotMatchesNewlines()
+            let executePattern = /"type":\s*"execute",.*?"content":\s*"([^"]+)"/.dotMatchesNewlines()
+
+            var newInputs: [[String: String]] = []
+
+
+            print(responseString, responseString.matches(of: questionPattern).count, responseString.matches(of: executePattern).count)
+            // Process questions
+            for match in responseString.matches(of: questionPattern) {
+                let question = match.1
+                let answer = try await ConfirmatorManager.shared.ask(String(question))
+                let jsonResponse = """
+                {
+                    "type": "answer",
+                    "content": "\(answer)"
+                }
+                """
+                newInputs.append(["role": "user", "content": jsonResponse])
+            }
+
+            // Process commands
+            for match in responseString.matches(of: executePattern) {
+                let command = match.1
+                let result = try await ConfirmatorManager.shared.execute(String(command))
+                let jsonResponse = """
+                {
+                    "type": "command_output",
+                    "content": "\(result)"
+                }	
+                """
+                newInputs.append(["role": "user", "content": jsonResponse])
+            }
+
+            // If new input exists, recurse with updated history
+            if !newInputs.isEmpty {
+                return await generate(prompt: "", systemPrompt: systemPrompt, history: conversation + newInputs)
+            }
+
+            return responseString
 
         } catch {
             return "Failed: \(error)"
         }
     }
 
+
     static let addTestSystemPrompt = #"""
-You are an expert system administrator and shell scripting specialist. Your task is to generate a single shell command that tests a system, service, or resource, and a corresponding regular expression that validates the command's output.
+Your final task is to generate a test for a server the user already has chosen. The test works by executing the command you provide via ssh on a remote server and then validate the output using a regular expression repeatedly to make sure the server is healthy. The test must test something and can't just always succeed.
+ 
+### **Response Options**
+You have **three options** for responding:
+1. **Provide a JSON response** with a shell command and a regular expression that matches exactly the output of the shell command but only when it succeeds.
+2. **Ask a question** to clarify the test case before proceeding.
+3. **Execute a shell command** to retrieve necessary information before generating the response.
 
-Follow these instructions exactly:
-1. Read the provided test case description.
-2. Write exactly one executable shell command that performs the test.
-3. Write exactly one regular expression that matches exactly the output produced by the command.
-4. Output a valid JSON object with exactly two keys: "command" and "expectedOutput". Do not include any extra text, commentary, or explanation.
+---
+### **Important Rules**
+- **Always ask a question first** if you lack the required details. You can ask questions using JSON:
+    ```json
+    {
+        "type": "question",
+        "content": "Your question here"
+    }
+    ```
+- **Only provide a JSON response** if you have all necessary information:
+    ```json
+    {
+        "type": "response",
+        "content": {
+            "title": "The title for the test here",
+            "command": "Your shell command here",
+            "expectedOutput": "Your regular expression here"
+        }
+    }
+    ```
+- **Execute a shell command** if you need system information before generating the response:
+    ```json
+    {
+        "type": "execute",
+        "content": "Your shell command here"
+    }
+    ```
 
-**Output Format:**
-Your output must strictly follow this JSON structure:
-
-```json
-{
-    "title": "The title for the test here",
-    "command": "Your shell command here",
-    "expectedOutput": "Your regular expression here"
-}
-```
-
-**Example:**
-If the test case is “Check available disk space”, your output must be:
-
-```json
-{
-    "title": "Check disk space usage",
-    "command": "df -h / | awk 'NR==2 {print $4}'",
-    "expectedOutput": "^[0-9]+[A-Za-z]$"
-}
-```
-
-**Additional Requirements:**
-- Do not use aliases, variables, or unnecessary options.
-- Do not include any additional flags or parameters unless necessary.
-- The shell command must be executable exactly as provided.
-- The regular expression must match exactly the output of the shell command.
+---
+### **Final Instructions**
+- **Never assume missing information**—use `question` first.
+- **Use only one response type at a time** (`JSON`, `question`, or `execute`).
+- **The test must check something and has to be able to fail.
+- **If the request is vague, clarify before proceeding.**
 """#
 
     static func cleanLLMOutput(_ input: String) -> String {
@@ -89,5 +138,14 @@ If the test case is “Check available disk space”, your output must be:
             .replacingOccurrences(of: "``` json", with: "")
             .replacingOccurrences(of: "```", with: "")
     }
+    struct Output: Decodable {
+        let type: String
+        let content: Content
 
+        struct Content: Decodable {
+            let title: String
+            let command: String
+            let expectedOutput: String
+        }
+    }
 }

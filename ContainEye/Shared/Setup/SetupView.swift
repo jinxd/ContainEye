@@ -23,7 +23,10 @@ struct SetupView: View {
                             .id(1)
                         AddServerSetupView(screen: $setupScreen)
                             .id(2)
+                        WouldYouLikeToAddAnotherTestView(screen: $setupScreen)
+                            .id(3)
                     }
+                    .frame(maxHeight: .infinity)
                     .containerRelativeFrame(.horizontal)
                     .background(
                         LinearGradient(
@@ -68,6 +71,7 @@ struct SetupView: View {
 #Preview {
     SetupView(sheet: .constant(.none))
 }
+
 
 
 

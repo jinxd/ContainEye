@@ -301,21 +301,16 @@ struct ServerTestDetail: View {
         )
         let llmOutput = LLM.cleanLLMOutput(dirtyOutput)
 
-        struct LLMOutput: Decodable {
-            let title: String
-            let command: String
-            let expectedOutput: String
-        }
 
         let output = try JSONDecoder().decode(
-            LLMOutput.self,
+            LLM.Output.self,
             from: Data(
                 llmOutput.utf8
             )
         )
-        title = output.title
-        command = output.command
-        expectedOutput = output.expectedOutput
+        title = output.content.title
+        command = output.content.command
+        expectedOutput = output.content.expectedOutput
     }
 }
 

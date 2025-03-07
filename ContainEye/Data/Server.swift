@@ -252,6 +252,7 @@ class Server: Identifiable, @preconcurrency Hashable {
         hasher.combine(id)
         hasher.combine(lastUpdate)
         hasher.combine(isConnected)
+        hasher.combine(credential)
     }
 
     static func == (lhs: Server, rhs: Server) -> Bool {
