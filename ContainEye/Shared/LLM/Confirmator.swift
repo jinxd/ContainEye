@@ -52,6 +52,7 @@ private struct Confirmator: View {
         )
     }) var servers
     @Environment(\.blackbirdDatabase) var db
+    @FocusState private var focused: Bool
 
     var body: some View {
         if confirmator.question != nil || confirmator.command != nil {
@@ -66,6 +67,7 @@ private struct Confirmator: View {
                     Spacer()
                     HStack {
                         TextField("Tell me please...", text: $answer, axis: .vertical)
+                            .focused($focused)
                         Button {
                             confirmator.continuation?.resume(returning: answer)
                             confirmator.question = nil
@@ -131,6 +133,10 @@ private struct Confirmator: View {
             .frame(maxWidth: 500)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.regularMaterial)
+            .onAppear{
+                focused = false
+                focused = true
+            }
         }
     }
 }

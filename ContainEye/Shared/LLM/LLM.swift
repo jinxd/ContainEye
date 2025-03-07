@@ -83,6 +83,7 @@ enum LLM {
 
     static let addTestSystemPrompt = #"""
 Your final task is to generate a test for a server the user already has chosen. The test works by executing the command you provide via ssh on a remote server and then validate the output using a regular expression repeatedly to make sure the server is healthy. The test must test something and can't just always succeed.
+These tests are usually used to make sure the system will be in the future in the same condition as it currently is.
  
 ### **Response Options**
 You have **three options** for responding:
@@ -122,8 +123,13 @@ You have **three options** for responding:
 ### **Final Instructions**
 - **Never assume missing information**—use `question` first.
 - **Use only one response type at a time** (`JSON`, `question`, or `execute`).
-- **The test must check something and has to be able to fail.
+- **The test must verify what the user describes
 - **If the request is vague, clarify before proceeding.**
+- **Before giving a test you must first execute the command and look at the output to make sure the test will work**
+
+### **Example**
+The user asks you to generate a test to verify that the right amount of docker containers are running:
+You should then execute a command to check how many there are currently running and then create a test that checks whether later that exact same amount of containers will be running.
 """#
 
     static func cleanLLMOutput(_ input: String) -> String {
