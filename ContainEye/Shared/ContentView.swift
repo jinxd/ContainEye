@@ -9,9 +9,10 @@ import SwiftUI
 import KeychainAccess
 import ButtonKit
 import CoreSpotlight
+import Blackbird
 
 struct ContentView: View {
-    @State private var dataStreamer = DataStreamer.shared
+    @BlackbirdLiveModels({try await Server.read(from: $0, matching: .all, orderBy: .descending(\.$id))}) var servers
     @State private var sheet = Sheet?.none
     @AppStorage("screen") private var screen = Screen.serverList
     @Environment(\.scenePhase) private var scenePhase
@@ -96,7 +97,6 @@ struct ContentView: View {
 #if !os(macOS)
             .navigationBarTitleDisplayMode(.inline)
 #endif
-            .animation(.spring, value: dataStreamer.servers)
             .sheet(item: $sheet) { sheet in
                 SheetView(sheet: sheet)
 #if !os(macOS)
@@ -104,13 +104,13 @@ struct ContentView: View {
 #endif
             }
             .navigationDestination(for: Server.self) { server in
-                ServerDetailView(server: server)
+                ServerDetailView(server: server.liveModel, id: server.id)
 #if !os(macOS)
                     .navigationTransition(.zoom(sourceID: server.id, in: namespace))
 #endif
             }
             .navigationDestination(for: Container.self) { container in
-                ContainerDetailView(container: container)
+                ContainerDetailView(container: container.liveModel)
 #if !os(macOS)
                     .navigationTransition(.zoom(sourceID: container.id, in: namespace))
 #endif
@@ -147,13 +147,12 @@ struct ContentView: View {
             }
         }
         .environment(\.namespace, namespace)
-        .task(id: scenePhase){
-            switch scenePhase{
-            case .active:
-                await dataStreamer.initialize()
-            default:
-                try? await Task.sleep(for: .seconds(1))
-                await dataStreamer.disconnectAllServers()
+        .task{
+            if !servers.didLoad {try? await Task.sleep(for: .seconds(1))}
+            for key in keychain().allKeys() {
+                if !servers.results.contains(where: {$0.credentialKey == key}) {
+                    try? await Server(credentialKey: key).write(to: db!)
+                }
             }
         }
     }

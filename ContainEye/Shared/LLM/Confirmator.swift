@@ -39,10 +39,19 @@ enum ConfirmatorError: Error {
     case cancelled
 }
 
+import Blackbird
+
 private struct Confirmator: View {
     @State private var confirmator = ConfirmatorManager.shared
     @State private var answer = ""
-    @State private var credKey = ""
+    @State private var server: Server?
+    @BlackbirdLiveModels({
+        try await Server.read(
+            from: $0,
+            matching: .all
+        )
+    }) var servers
+    @Environment(\.blackbirdDatabase) var db
 
     var body: some View {
         if confirmator.question != nil || confirmator.command != nil {
@@ -91,26 +100,25 @@ private struct Confirmator: View {
                     Spacer()
 
                     Text("Choose where to execute the command:").monospaced()
-                    Picker("Host", selection: $credKey) {
-                        Text("Local (only urls)")
-                            .tag("")
-                        let allKeys = keychain().allKeys()
-                        let credentials = allKeys.compactMap{keychain().getCredential(for: $0)}
-                        ForEach(credentials, id: \.key) { credential in
-                            Text(credential.label)
-                                .tag(credential.key)
+                    Picker("Host", selection: $server) {
+                        Text("Choose a server")
+                            .tag(Server?.none)
+                        ForEach(servers.results) { server in
+                            Text(server.credential?.label ?? "Unknown")
+                                .tag(server)
                         }
                     }
                     .pickerStyle(.inline)
 
                     AsyncButton("Tap to Execute") {
-                        guard let server = DataStreamer.shared.servers.first(where: {$0.credential.key == credKey}) else {throw ConfirmatorError.cancelled}
+                        guard let server = server else {return}
                         let output = (try? await server.execute(command)) ?? "sth went wrong"
                         confirmator.continuation?.resume(returning: output)
                         confirmator.command = nil
                         answer.removeAll()
                     }
                     .buttonStyle(.borderedProminent)
+                    .disabled(server == nil)
                     Button("Cancel") {
                         confirmator.continuation?.resume(throwing: ConfirmatorError.cancelled)
                         confirmator.command = nil

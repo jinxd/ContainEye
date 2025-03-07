@@ -6,73 +6,91 @@
 //
 
 import SwiftUI
+import Blackbird
+
+@MainActor
+class CurrentServerId{
+    static let shared = CurrentServerId()
+    var currentServerId: String?
+
+    func setCurrentServerId(_ id: String?){
+        self.currentServerId = id
+    }
+}
 
 struct ServerDetailView: View {
-    let server: Server
+    @BlackbirdLiveModels({try await Container.read(from: $0, matching: .all)}) var containers
+    @BlackbirdLiveModel var server: Server?
     @Environment(\.namespace) var namespace
 
-    var body: some View {
-        ScrollView{
-            VStack {
-                ServerSummaryView(server: server, hostInsteadOfLabel: true)
-                    .padding(.horizontal)
-                    .onAppear{
-                        Task{
-                            await server.fetchDockerStats()
-                            try? await Task.sleep(for: .seconds(1))
-                            server.dockerUpdatesPaused = true
-                        }
-                    }
-                    .onDisappear{
-                        guard !server.containers.contains(where: {$0.fetchDetailedUpdates}) else { return }
-                        print("on disappear", "pausing docker updates")
-                        server.dockerUpdatesPaused = true
-                    }
-                    .animation(.spring, value: server.cpuUsage)
-                    .animation(.spring, value: server.memoryUsage)
-                    .animation(.spring, value: server.ioWait)
-                    .animation(.spring, value: server.diskUsage)
-                    .navigationTitle(server.credential.label)
-                #if !os(macOS)
-                    .navigationBarTitleDisplayMode(.inline)
-                #endif
+    init(server: BlackbirdLiveModel<Server>, id serverId: String) {
+        self._server = server
+        self._containers = .init({try await Container.read(from: $0, matching: \.$serverId == serverId)})
+    }
 
-                if server.containers.isEmpty {
-                    ContentUnavailableView(server.containersLoaded ? "You don't have any containers" :"Loading your containers...", systemImage: "shippingbox")
-                } else {
-                    Text("Container")
-                    ForEach(server.containers) { container in
-                        NavigationLink(value: container){
-                            VStack{
-                                Text(container.name)
-                                HStack {
-                                    GridRow {
-                                        GridItemView.Percentage(title: "CPU Usage", percentage: container.cpuUsage)
-                                        GridItemView.Percentage(title: "Memory Usage", percentage: container.memoryUsage)
+
+
+    var body: some View {
+        if let server {
+            ScrollView{
+                VStack {
+                    ServerSummaryView(server: server, hostInsteadOfLabel: true)
+                        .padding(.horizontal)
+                        .animation(.spring, value: server.cpuUsage)
+                        .animation(.spring, value: server.memoryUsage)
+                        .animation(.spring, value: server.ioWait)
+                        .animation(.spring, value: server.diskUsage)
+                        .navigationTitle(server.credential?.label ?? "")
+#if !os(macOS)
+                        .navigationBarTitleDisplayMode(.inline)
+#endif
+
+                    if containers.results.isEmpty {
+                        ContentUnavailableView((containers.didLoad) ? "You don't have any containers" :"Loading your containers...", systemImage: "shippingbox")
+                    } else {
+                        Text("Container")
+                        ForEach(containers.results) { container in
+                            NavigationLink(value: container){
+                                VStack{
+                                    Text(container.name)
+                                    HStack {
+                                        GridRow {
+                                            GridItemView.Percentage(title: "CPU Usage", percentage: container.cpuUsage)
+                                            GridItemView.Percentage(title: "Memory Usage", percentage: container.memoryUsage)
+                                        }
+                                        .tint(
+                                            container.status.localizedCaseInsensitiveContains("up") ? Color.accentColor.secondary : Color.primary.secondary
+                                        )
                                     }
-                                    .tint(
-                                        container.status.localizedCaseInsensitiveContains("up") ? Color.accentColor.secondary : Color.primary.secondary
-                                    )
                                 }
+                                .padding()
+                                .background(Color.accentColor.quaternary.quaternary, in: RoundedProgressRectangle(cornerRadius: 15))
+                                .padding(.horizontal)
+#if !os(macOS)
+                                .navigationTransition(.zoom(sourceID: container.id, in: namespace!))
+#endif
                             }
-                            .padding()
-                            .background(Color.accentColor.quaternary.quaternary, in: RoundedProgressRectangle(cornerRadius: 15))
-                            .padding(.horizontal)
-                            #if !os(macOS)
-                            .navigationTransition(.zoom(sourceID: container.id, in: namespace!))
-                            #endif
+                            .matchedTransitionSource(id: container.id, in: namespace!)
+                            .buttonStyle(.plain)
                         }
-                        .matchedTransitionSource(id: container.id, in: namespace!)
-                        .buttonStyle(.plain)
                     }
                 }
+                .zIndex(-1)
             }
-            .animation(.spring, value: server.containers)
-            .zIndex(-1)
+            .onAppear{
+                CurrentServerId.shared.setCurrentServerId(server.id)
+            }
+            .task{
+                while !Task.isCancelled {
+                    if !server.isConnected {try? await server.connect()}
+                    await server.fetchServerStats()
+                    await server.fetchDockerStats()
+                }
+            }
         }
     }
 }
 
 #Preview {
-    ServerDetailView(server: Server(credential: Credential(key: UUID().uuidString, label: "My fancy new server", host: "", port: 0, username: "", password: "")))
+    ServerDetailView(server: Server(credentialKey: UUID().uuidString).liveModel, id: UUID().uuidString)
 }

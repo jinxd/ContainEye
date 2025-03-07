@@ -14,6 +14,7 @@ struct SecondSetupView: View {
     @State private var showing = Field.label
     @FocusState private var field : Field?
     @Environment(\.triggerButton) private var triggerButton
+    @Environment(\.blackbirdDatabase) var db
 
     enum Field: CaseIterable {
         case label, host, port, username, password
@@ -105,7 +106,9 @@ struct SecondSetupView: View {
     func addServer() async throws {
         let data = try JSONEncoder().encode(credential)
 
-        try await DataStreamer.shared.addServer(with: credential)
+        let server = Server(credentialKey: credential.key)
+        try await server.connect()
+        try await server.write(to: db!)
 
 
         try keychain()

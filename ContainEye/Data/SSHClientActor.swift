@@ -11,7 +11,7 @@ import NIO
 
 actor SSHClientActor {
     private var clients = [String: SSHClient]()
-    
+
 
     func log(_ message: String) {
         print("\(Date().formatted(date: .omitted, time: .complete)) - \(message)")

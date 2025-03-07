@@ -6,27 +6,62 @@
 //
 
 import SwiftUI
+import Blackbird
 
-@MainActor
-@Observable
-class Container: @preconcurrency Identifiable, @preconcurrency Equatable, @preconcurrency Hashable {
-    var id: String
-    var name: String
-    var status: String
-    var cpuUsage: Double
-    var memoryUsage: Double
-    var server: Server
-    var cmd = ""
-    var fetchDetailedUpdates = false
-    var lastUpdate = Date()
+struct Container: BlackbirdModel, Identifiable, Equatable, Hashable {
+    @BlackbirdColumn var id: String
+    @BlackbirdColumn var name: String
+    @BlackbirdColumn var status: String
+    @BlackbirdColumn var cpuUsage: Double
+    @BlackbirdColumn var memoryUsage: Double
+    @BlackbirdColumn var serverId: String
+    @BlackbirdColumn var cmd = ""
+    @BlackbirdColumn var fetchDetailedUpdates = false
+    @BlackbirdColumn var lastUpdate = Date()
 
+    var db : Blackbird.Database { SharedDatabase.db }
+
+    static let primaryKey: [BlackbirdColumnKeyPath] = [ \.$id ]
+
+    static let indexes: [[BlackbirdColumnKeyPath]] = [
+        [ \.$serverId ]
+    ]
+
+    func server(in db: Blackbird.Database = SharedDatabase.db) async -> Server? {
+        try? await Server.read(from: db, id: serverId)
+    }
+    var server: Server? {
+        get async {
+            try? await Server.read(from: db, id: serverId)
+        }
+    }
+
+    init(id: String, name: String, status: String, cpuUsage: Double, memoryUsage: Double, serverId: String) {
+        self.id = id
+        self.name = name
+        self.status = status
+        self.cpuUsage = cpuUsage
+        self.memoryUsage = memoryUsage
+        self.serverId = serverId
+    }
+}
+
+extension Container {
     // Start the container
     func start() async throws {
+        guard let server = await server else {return}
+        let db = SharedDatabase.db
+        
         let command = "docker start \(id)"
         do {
             let _ = try await server.execute(command)
-            status = "Up - loading status..."
-            try await fetchDetails()
+            let status = "Up - loading status..."
+
+            if var container = try await Container.read(from: db, id: id){
+                container.status = status
+                try await container.write(to: db)
+                try await fetchDetails()
+            }
         } catch {
             throw error
         }
@@ -34,17 +69,26 @@ class Container: @preconcurrency Identifiable, @preconcurrency Equatable, @preco
 
     // Stop the container
     func stop() async throws {
+        guard let server = await server else {return}
+
+        let db = SharedDatabase.db
         let command = "docker stop \(id)"
         do {
             let _ = try await server.execute(command)
-            status = "Exited - loading status..."
-            try await fetchDetails()
+            let status = "Exited - loading status..."
+
+            if var container = try await Container.read(from: db, id: id){
+                container.status = status
+                try await container.write(to: db)
+                try await fetchDetails()
+            }
         } catch {
             throw error
         }
     }
 
     func fetchDetails() async throws(ServerError) {
+        guard let server = await server else {return}
         // Command to fetch the container's command
         let commandCmd = "docker inspect --format='{{.Config.Cmd}}' \(id)"
         // Command to fetch the container's status
@@ -59,44 +103,21 @@ class Container: @preconcurrency Identifiable, @preconcurrency Equatable, @preco
                 .replacingOccurrences(of: "]", with: "")
 
             // Assign default command if cleanedCommand is empty
-            cmd = cleanedCommand.isEmpty ? "docker compose" : cleanedCommand
+            let cmd = cleanedCommand.isEmpty ? "docker compose" : cleanedCommand
 
             // Fetch the container's status
-            let statusOutput = try await server.execute(commandStatus)
-            let cleanedStatus = statusOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanedStatus = try await server.execute(commandStatus).trimmingCharacters(in: .whitespacesAndNewlines)
 
-            // Assign the status directly
-            status = cleanedStatus
+
+            var container = try await Container.read(from: SharedDatabase.db, id: id)
+            container?.cmd = cmd
+            container?.status = cleanedStatus
+
+            try await container?.write(to: SharedDatabase.db)
         } catch {
             throw ServerError.invalidStatsOutput(
-                "Failed to fetch details for container \(id): \(error.generateDescription())"
+                "Failed to fetch details for container \(name): \(error.generateDescription())"
             )
         }
-    }
-
-    init(id: String, name: String, status: String, cpuUsage: Double, memoryUsage: Double, server: Server) {
-        self.id = id
-        self.name = name
-        self.status = status
-        self.cpuUsage = cpuUsage
-        self.memoryUsage = memoryUsage
-        self.server = server
-    }
-
-    static func == (lhs: Container, rhs: Container) -> Bool {
-        lhs.id == rhs.id && lhs.name == rhs.name && lhs.status == rhs.status &&
-        lhs.cpuUsage == rhs.cpuUsage && lhs.memoryUsage == rhs.memoryUsage &&
-        lhs.server == rhs.server && lhs.cmd == rhs.cmd && lhs.fetchDetailedUpdates == rhs.fetchDetailedUpdates
-    }
-
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-        hasher.combine(name)
-        hasher.combine(status)
-        hasher.combine(cpuUsage)
-        hasher.combine(memoryUsage)
-        hasher.combine(server)
-        hasher.combine(cmd)
-        hasher.combine(fetchDetailedUpdates)
     }
 }

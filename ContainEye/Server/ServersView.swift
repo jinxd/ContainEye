@@ -9,21 +9,21 @@
 import SwiftUI
 import KeychainAccess
 import ButtonKit
+import Blackbird
 
 struct ServersView: View {
+    @BlackbirdLiveModels({try await Server.read(from: $0, matching: .all, orderBy: .descending(\.$id))}) var servers
     @Binding var sheet : ContentView.Sheet?
-    @State var dataStreamer = DataStreamer.shared
     @Environment(\.namespace) var namespace
+    @Environment(\.blackbirdDatabase) private var db
 
 
     var body: some View {
         ScrollView{
             VStack{
-                if dataStreamer.servers.isEmpty {
-                    if dataStreamer.serversLoaded && dataStreamer.errors.isEmpty {
+                if servers.results.isEmpty {
+                    if servers.didLoad {
                         ContentUnavailableView("You don't have any servers yet.", systemImage: "server.rack")
-                    } else if !dataStreamer.errors.isEmpty {
-                        DataStreamerErrorView()
                     } else {
                         ProgressView()
                             .controlSize(.extraLarge)
@@ -32,13 +32,17 @@ struct ServersView: View {
 
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 500, maximum: 800))]) {
-                    ForEach(Array(dataStreamer.servers).sorted(by: {$0.id < $1.id})) {server in
+                    ForEach(servers.results) {server in
                         NavigationLink(value: server) {
                             ServerSummaryView(server: server, hostInsteadOfLabel: false)
                                 .contextMenu{
                                     Menu {
                                         AsyncButton("Delete", systemImage: "trash", role: .destructive) {
-                                            try await dataStreamer.removeHost(server.credential.key)
+                                            try keychain().remove(server.credentialKey)
+                                            for container in try await server.containers {
+                                                try await container.delete(from: db!)
+                                            }
+                                            try await server.delete(from: db!)
                                         }
 
                                     } label: {
@@ -48,6 +52,9 @@ struct ServersView: View {
                         }
                         .matchedTransitionSource(id: server.id, in: namespace!)
                         .buttonStyle(.plain)
+                        .onTapGesture {
+                            CurrentServerId.shared.setCurrentServerId(server.id)
+                        }
                     }
                 }
 
@@ -62,8 +69,19 @@ struct ServersView: View {
             .padding()
             .padding(.top, 50)
         }
+        .animation(.smooth, value: servers.results)
+        .task{
+            while !Task.isCancelled {
+                for server in servers.results {
+                    if !server.isConnected {try? await server.connect()}
+                    await server.fetchServerStats()
+                }
+            }
+        }
         .refreshable {
-            await dataStreamer.initialize()
+            for server in servers.results {
+                await server.fetchServerStats()
+            }
         }
     }
 }

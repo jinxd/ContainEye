@@ -15,9 +15,7 @@ struct ServerSummaryView: View {
 
     var body: some View {
         VStack {
-
-            Text(hostInsteadOfLabel ? server.credential.host : server.credential.label)
-
+            Text((hostInsteadOfLabel ? server.credential?.host : server.credential?.label) ?? "Unknown")
             Grid {
                 GridRow{
                     GridItemView.Percentage(title: "CPU Usage", percentage: server.cpuUsage)

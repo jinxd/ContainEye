@@ -10,85 +10,112 @@ import NIO
 @preconcurrency import Citadel
 import KeychainAccess
 import Foundation
+import Blackbird
 
+struct Server: BlackbirdModel {
+    
+    static let primaryKey: [BlackbirdColumnKeyPath] = [\.$id]
 
-@MainActor
-@Observable
-class Server: Identifiable, @preconcurrency Hashable {
-    let id = UUID()
-    let credential: Credential
-    var cpuUsage = Double?.none
-    var memoryUsage = Double?.none
-    var diskUsage = Double?.none
-    var networkUpstream = Double?.none
-    var networkDownstream = Double?.none
-    var swapUsage = Double?.none
-    var systemLoad = Double?.none
-    var ioWait = Double?.none
-    var stealTime = Double?.none
-    var uptime = Date?.none
-    var lastUpdate: Date? = nil
-    var containers: [Container] = []
-    var containersLoaded = false
-    var errors = Set<ServerError>()
-    var updatesPaused = true
-    var dockerUpdatesPaused = true
-    var isConnected = false
+    @BlackbirdColumn var id: String
+    @BlackbirdColumn var credentialKey: String
+    @BlackbirdColumn var cpuUsage: Double?
+    @BlackbirdColumn var memoryUsage: Double?
+    @BlackbirdColumn var diskUsage: Double?
+    @BlackbirdColumn var networkUpstream: Double?
+    @BlackbirdColumn var networkDownstream: Double?
+    @BlackbirdColumn var swapUsage: Double?
+    @BlackbirdColumn var systemLoad: Double?
+    @BlackbirdColumn var ioWait: Double?
+    @BlackbirdColumn var stealTime: Double?
+    @BlackbirdColumn var uptime: Date?
+    @BlackbirdColumn var lastUpdate: Date?
+    @BlackbirdColumn var isConnected: Bool
 
-    init(credential: Credential) {
-        self.credential = credential
-
-        Task {
-            await update()
+    var credential: Credential? {
+        keychain().getCredential(for: credentialKey)
+    }
+    var containers: [Container] {
+        get async throws {
+            try await Container.read(from: SharedDatabase.db, matching: \.$serverId == id)
         }
     }
 
-    func update() async {
-        if !updatesPaused {
-            await fetchServerStats()
-            if !dockerUpdatesPaused {
-                await fetchDockerStats()
-            }
+    init(credentialKey: String) {
+        self.credentialKey = credentialKey
+        self.id = credentialKey
+        self.isConnected = false
+    }
+}
+
+extension Server {
+    var server: Server? {
+        get async throws {
+            try await Server.read(from: SharedDatabase.db, id: id)
         }
-        try? await Task.sleep(for: .seconds(0.5))
-        Task { await update() }
+    }
+    var db : Blackbird.Database {
+        SharedDatabase.db
     }
 
     func connect() async throws {
         let _ = try await execute("echo hello")
-        isConnected = true
-        updatesPaused = false
-        await SSHClientActor.shared.onDisconnect(of: credential) {[weak self] in
-            Task{@MainActor in
-                self?.isConnected = false
+        var server = self
+        server.isConnected = true
+        try await server.write(to: db)
+
+        guard let credential else { return }
+
+        await SSHClientActor.shared.onDisconnect(of: credential) {
+            Task{
+                var server = try await self.server
+                server?.isConnected = false
+                try? await server?.write(to: db)
             }
         }
     }
 
     func disconnect() async throws {
-        updatesPaused = true
+        guard let credential = try await server?.credential else { return }
         try await SSHClientActor.shared.disconnect(credential)
     }
 
     func fetchServerStats() async {
-        await fetchMetric(command: "sar -u 1 2 | grep 'Average' | awk '{print (100 - $8) / 100}'", setter: { self.cpuUsage = $0 })
-        await fetchMetric(command: "free | grep Mem | awk '{print $3/$2}'", setter: { self.memoryUsage = $0 })
-        await fetchMetric(command: "df / | grep / | awk '{ print $5 / 100 }'", setter: { self.diskUsage = $0 })
-        await fetchMetric(command: "sar -n DEV 1 2 | grep Average | grep eth0 | awk '{print $5 * 1024}'", setter: { self.networkUpstream = $0 })
-        await fetchMetric(command: "sar -n DEV 1 2 | grep Average | grep eth0 | awk '{print $6 * 1024}'", setter: { self.networkDownstream = $0 })
-        await fetchMetric(command: "free | grep Swap | awk '{print $3/$2}'", setter: { self.swapUsage = $0 })
-        await fetchMetric(command: "sar -u 1 2 | grep 'Average' | awk '{print $5 / 100}'", setter: { self.ioWait = $0 })
-        await fetchMetric(command: "sar -u 1 2 | grep 'Average' | awk '{print $6 / 100}'", setter: { self.stealTime = $0 })
-        await fetchMetric(command: "uptime | awk '{print $(NF-2) / 100}'", setter: { self.systemLoad = $0 })
-        if uptime == nil {
-            let uptimeCommand = "date +%s -d \"$(uptime -s)\""
-            let uptimeOutput = try? await execute(uptimeCommand)
-            if let uptimeOutput,
-               let timestamp = Double(uptimeOutput.trimmingCharacters(in: .whitespacesAndNewlines)) {
-                uptime = Date(timeIntervalSince1970: timestamp)
-            }
+        async let cpuUsage = fetchMetric(command: "sar -u 1 3 | grep 'Average' | awk '{print (100 - $8) / 100}'")
+        async let memoryUsage = fetchMetric(command: "free | grep Mem | awk '{print $3/$2}'")
+        async let diskUsage = fetchMetric(command: "df / | grep / | awk '{ print $5 / 100 }'")
+        async let networkUpstream = fetchMetric(command: "sar -n DEV 1 2 | grep Average | grep eth0 | awk '{print $5 * 1024}'")
+        async let networkDownstream = fetchMetric(command: "sar -n DEV 1 2 | grep Average | grep eth0 | awk '{print $6 * 1024}'")
+        async let swapUsage = fetchMetric(command: "free | grep Swap | awk '{print $3/$2}'")
+        async let ioWait = fetchMetric(command: "sar -u 1 3 | grep 'Average' | awk '{print $5 / 100}'")
+        async let stealTime = fetchMetric(command: "sar -u 1 3 | grep 'Average' | awk '{print $6 / 100}'")
+        async let systemLoad = fetchMetric(command: "uptime | awk '{print $(NF-2) / 100}'")
+
+        var newUptime = Date?.none
+        let uptimeCommand = "date +%s -d \"$(uptime -s)\""
+        let uptimeOutput = try? await execute(uptimeCommand)
+        if let uptimeOutput,
+           let timestamp = Double(uptimeOutput.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            newUptime = Date(timeIntervalSince1970: timestamp)
         }
-        lastUpdate = Date()
+        //here await all the async lets first, before proceeding and before doing try? await server
+        let (cpu, memory, disk, networkUpstreamResult, networkDownstreamResult, swap, io, steal, load) = await (cpuUsage, memoryUsage, diskUsage, networkUpstream, networkDownstream, swapUsage, ioWait, stealTime, systemLoad)
+
+        if var server = try? await server {
+            server.cpuUsage = cpu ?? server.cpuUsage
+            server.memoryUsage = memory ?? server.memoryUsage
+            server.diskUsage = disk ?? server.diskUsage
+            server.networkUpstream = networkUpstreamResult ?? server.networkUpstream
+            server.networkDownstream = networkDownstreamResult ?? server.networkDownstream
+            server.swapUsage = swap ?? server.swapUsage
+            server.ioWait = io ?? server.ioWait
+            server.stealTime = steal ?? server.stealTime
+            server.systemLoad = load ?? server.systemLoad
+            server.lastUpdate = .now
+            if let newUptime{
+                server.uptime = newUptime
+            }
+            try? await server.write(to: db)
+        }
     }
 
     func fetchDockerStats() async {
@@ -114,45 +141,38 @@ class Server: Identifiable, @preconcurrency Hashable {
 """)
             let newContainers = try parseDockerStats(from: "\(output)\n\(stopped)")
 
+
+            let containers = try await self.containers
             for newContainer in newContainers {
-                if let existingIndex = containers.firstIndex(where: { $0.id == newContainer.id }) {
-                    let existingContainer = containers[existingIndex]
+                if var existingContainer = try await Container.read(from: db, id: newContainer.id) {
                     existingContainer.name = newContainer.name
                     existingContainer.cpuUsage = newContainer.cpuUsage
                     existingContainer.memoryUsage = newContainer.memoryUsage
+                    try await existingContainer.write(to: db)
                 } else {
-                    containers.append(
-                        Container(
-                            id: newContainer.id,
-                            name: newContainer.name,
-                            status: newContainer.status,
-                            cpuUsage: newContainer.cpuUsage,
-                            memoryUsage: newContainer.memoryUsage,
-                            server: self
-                        )
-                    )
+                    let container = Container(id: newContainer.id, name: newContainer.name, status: newContainer.status, cpuUsage: newContainer.cpuUsage, memoryUsage: newContainer.memoryUsage, serverId: id)
+                    try await container.write(to: db)
                 }
             }
-
-            containers.removeAll { container in
-                !newContainers.contains(where: { $0.id == container.id })
+            for container in containers.filter(
+                {container in
+                    !newContainers.contains(where: { $0.id == container.id })
+                }) {
+                try await container.delete(from: db)
             }
-
             for container in containers.filter({ $0.fetchDetailedUpdates }) {
                 try await container.fetchDetails()
             }
-            containersLoaded = true
         } catch {
-            errors.insert(error as? ServerError ?? .otherError(error as NSError))
         }
     }
 
-    private func fetchMetric(command: String, setter: @escaping (Double?) -> Void) async {
+    private func fetchMetric(command: String) async -> Double? {
         do {
             let output = try await execute(command)
-            setter(try parseSingleValue(from: output, command: command))
+            return try parseSingleValue(from: output, command: command)
         } catch {
-            errors.insert(error as? ServerError ?? .otherError(error as NSError))
+            return nil
         }
     }
 
@@ -238,24 +258,8 @@ class Server: Identifiable, @preconcurrency Hashable {
     }
 
     func execute(_ command: String) async throws -> String {
-
-        let string: String
-        do {
-            string = try await SSHClientActor.shared.execute(command, on: credential)
-        } catch {
-            throw error
-        }
-        return string
-    }
-
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-        hasher.combine(lastUpdate)
-        hasher.combine(isConnected)
-        hasher.combine(credential)
-    }
-
-    static func == (lhs: Server, rhs: Server) -> Bool {
-        lhs.id == rhs.id && lhs.lastUpdate == rhs.lastUpdate && lhs.isConnected == rhs.isConnected
+        if let credential {
+            return try await SSHClientActor.shared.execute(command, on: credential)
+        } else {return ""}
     }
 }
