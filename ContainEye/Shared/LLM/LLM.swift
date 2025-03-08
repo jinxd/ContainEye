@@ -126,6 +126,7 @@ You have **three options** for responding:
 - **The test must verify what the user describes
 - **If the request is vague, clarify before proceeding.**
 - **Before giving a test you must first execute the command and look at the output to make sure the test will work**
+- When giving a test you should in most cases use grep to only return the important parts of the result that need to be validated, so that it only checks for the actual requested information
 
 ### **Example**
 The user asks you to generate a test to verify that the right amount of docker containers are running:
