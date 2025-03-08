@@ -35,32 +35,22 @@ struct TestServers: AppIntents.AppIntent {
         let tests = tests.map { $0.getServerTest() }
         var finishedTests: [ServerTest] = []
 
-        await withTaskCancellationHandler{
-            finishedTests = await withTaskGroup(of: ServerTest.self){group in
-                for test in tests.filter({ test in
-                    test.credentialKey != "-"
-                }) {
-                    group.addTask {
-                        var test = test
-                        test = await test.test()
-                        if test.status == .failed {
-                            await sendPushNotification(title: test.title, output: test.output ?? "No output")
-                        }
-                        try? await test.write(to: db)
-                        return test
-                    }
-                }
-                var result: [ServerTest] = []
-                for await test in group {
-                    result.append(test)
-                }
-                return result
+
+        for test in tests.filter({ test in
+            test.credentialKey != "-"
+        }) {
+            var test = test
+            test = await test.test()
+            if test.status == .failed {
+                await sendPushNotification(title: test.title, output: test.output ?? "No output")
             }
-            WidgetCenter.shared.reloadAllTimelines()
-            print(">>> Done")
-        } onCancel: {
-            print(">>> Cancelled")
+            try? await test.write(to: db)
+            finishedTests.append(test)
         }
+
+
+            WidgetCenter.shared.reloadAllTimelines()
+
         let retryIntent = TestServers()
         retryIntent.tests = finishedTests.map { $0.entity }
 
