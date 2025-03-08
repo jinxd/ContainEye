@@ -154,14 +154,12 @@ extension Server {
                     try await container.write(to: db)
                 }
             }
+            guard !Task.isCancelled else { return }
             for container in containers.filter(
                 {container in
                     !newContainers.contains(where: { $0.id == container.id })
                 }) {
                 try await container.delete(from: db)
-            }
-            for container in containers.filter({ $0.fetchDetailedUpdates }) {
-                try await container.fetchDetails()
             }
         } catch {
         }
