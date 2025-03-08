@@ -16,7 +16,7 @@ struct TestsHelp: View {
             contents: [
                 .init(
                     sectionTitle: "What are Tests?",
-                    text: Text("Tests allow you to monitor the health and functionality of your servers by running predefined commands and checking their output. You can also check whether websites change by using execute locally in the host dropdown.")
+                    text: Text("Tests allow you to monitor the health and functionality of your servers by running predefined commands and checking their output.")
                 ),
                 .init(
                     sectionTitle: "How do I add a Test?",
@@ -24,7 +24,7 @@ struct TestsHelp: View {
                 ),
                 .init(
                     sectionTitle: "What is the Command?",
-                    text: Text("The command is the actual shell command that will be executed on your server. For example: `df -h` to check disk space. When selecting run locally in the host picker, you can only enter a url to fetch the page from.")
+                    text: Text("The command is the actual shell command that will be executed on your server. For example: `df -h` to check disk space.")
                 ),
                 .init(
                     sectionTitle: "What is the Expected Output?",
