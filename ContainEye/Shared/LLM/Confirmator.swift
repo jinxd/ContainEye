@@ -111,6 +111,13 @@ private struct Confirmator: View {
                         }
                     }
                     .pickerStyle(.inline)
+                    .task{
+                        while server == nil,
+                              !Task.isCancelled{
+                            server = servers.results.first
+                            try? await Task.sleep(for: .seconds(1))
+                        }
+                    }
 
                     AsyncButton("Tap to Execute") {
                         guard let server = server else {return}

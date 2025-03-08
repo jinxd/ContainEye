@@ -43,6 +43,13 @@ struct AddServerSetupView: View {
                 }
             }
             .pickerStyle(.inline)
+            .task{
+                while test.credentialKey.isEmpty || test.credentialKey == "-",
+                      !Task.isCancelled{
+                    test.credentialKey = credentials.first?.key ?? "-"
+                    try? await Task.sleep(for: .seconds(1))
+                }
+            }
             Spacer()
             if !test.command.isEmpty {
                 VStack {
