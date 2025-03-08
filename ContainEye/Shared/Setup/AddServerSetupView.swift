@@ -61,27 +61,6 @@ struct AddServerSetupView: View {
 
                 if test.status == .failed {
                     VStack{
-                        HStack {
-                            AsyncButton{
-                                test = try await generateTest(from: test, description: testDescription.appending("\n\nYou need to fix this test. It previously failed, because the command: \n\(test.command) \n produced the output: \n\(test.output ?? "no output")\ninstead of:\n\(test.expectedOutput)\nIf it just fails, because the conditions weren't met please explain that it the expectedOutput field using regex comments.\n\n\(test.notes ?? "")"))
-                            } label: {
-                                VStack {
-                                    Image(systemName: "wand.and.sparkles")
-                                    Text("Fix").font(.caption)
-                                }
-                            }
-                            .accessibilityLabel("Fix the test")
-                            Text("This test failed!")
-                                .padding(10)
-                                .background(.red.opacity(0.2))
-                            AsyncButton{
-                                test = await test.test()
-                            } label: {
-                                Image(systemName: "arrow.clockwise")
-                            }
-                            .accessibilityLabel("Retry")
-                        }
-                        Divider()
                         ScrollView(.horizontal){
                             Text(test.output ?? "No output")
                                 .font(.caption)
@@ -113,20 +92,47 @@ struct AddServerSetupView: View {
                 }
             }
             Spacer()
-            HStack {
-                TextField("Describe what to test", text: $testDescription, axis: .vertical)
-                    .focused($field, equals: .askAI)
-                AsyncButton {
-                    test = try await generateTest(from: test, description: testDescription)
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill")
+            if test.status == .failed {
+                VStack {
+                    Text("This test failed!")
+                        .foregroundStyle(.red)
+                    HStack {
+                        AsyncButton("Clear"){
+                            test = .init(id: .random(in: (.min)...(.max)), title: "", credentialKey: credentials.first?.key ?? "", command: "", expectedOutput: "", status: .notRun)
+                        }
+                        .buttonStyle(.bordered)
+                        AsyncButton("Fix it", systemImage: "wand.and.sparkles"){
+                            test = try await generateTest(from: test, description: """
+You need to fix the test \(test.title). It previously failed, because the command:
+```\(test.command)```
+produced the output:
+```\(test.output ?? "no output")```
+instead of producing:
+```\(test.expectedOutput)```
+which is what the test tried to verify. You can ask me how to fix the test.
+The regex must match exactly the entire output of the command.
+""")
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .buttonBorderShape(.capsule)
                 }
-                .accessibilityLabel("Generate test from description")
+            } else {
+                HStack {
+                    TextField("Describe what to test", text: $testDescription, axis: .vertical)
+                        .focused($field, equals: .askAI)
+                    AsyncButton {
+                        test = try await generateTest(from: test, description: testDescription)
+                    } label: {
+                        Image(systemName: "arrow.up.circle.fill")
+                    }
+                    .accessibilityLabel("Generate test from description")
 
+                }
+                .padding(10)
+                .background(.accent.quinary, in: .capsule)
+                .padding(.horizontal, 30)
             }
-            .padding(10)
-            .background(.accent.quinary, in: .capsule)
-            .padding(.horizontal, 30)
             Spacer()
 
             NavigationLink("Learn about testing", value: Help.tests)
