@@ -32,11 +32,9 @@ struct AddServerSetupView: View {
 
             Spacer()
 
+            let allKeys = keychain().allKeys()
+            let credentials = allKeys.compactMap{keychain().getCredential(for: $0)}
             Picker("Host", selection: $test.credentialKey) {
-                Text("Local (only urls)")
-                    .tag("")
-                let allKeys = keychain().allKeys()
-                let credentials = allKeys.compactMap{keychain().getCredential(for: $0)}
                 ForEach(credentials, id: \.key) { credential in
                     Text(credential.label)
                         .tag(credential.key)
