@@ -71,6 +71,7 @@ struct ContainerDetailView: View {
                     if await !(container.server?.isConnected ?? false) {try? await container.server?.connect()}
                     await container.server?.fetchServerStats()
                     try? await container.fetchDetails()
+                    try? await Task.sleep(for: .seconds(1))
                 }
             }
             .onDisappear{

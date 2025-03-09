@@ -43,6 +43,7 @@ struct ServersView: View {
                                                 try await container.delete(from: db!)
                                             }
                                             try await server.delete(from: db!)
+                                            try keychain().remove(server.credentialKey)
                                         }
 
                                     } label: {
@@ -75,6 +76,9 @@ struct ServersView: View {
                 for server in servers.results {
                     if !server.isConnected {try? await server.connect()}
                     await server.fetchServerStats()
+                }
+                if servers.results.isEmpty {
+                    try? await Task.sleep(for: .seconds(1))
                 }
             }
         }

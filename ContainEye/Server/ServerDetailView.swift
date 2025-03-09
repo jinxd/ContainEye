@@ -85,6 +85,7 @@ struct ServerDetailView: View {
                     if !server.isConnected {try? await server.connect()}
                     await server.fetchServerStats()
                     await server.fetchDockerStats()
+                    try? await Task.sleep(for: .seconds(1))
                 }
             }
         }
