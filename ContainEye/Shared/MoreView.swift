@@ -39,7 +39,6 @@ struct MoreView: View {
                 Link("Citadel", destination: "https://github.com/orlandos-nl/Citadel")
                 Link("ButtonKit", destination: "https://github.com/Dean151/ButtonKit")
                 Link("KeychainAccess", destination: "https://github.com/kishikawakatsumi/KeychainAccess")
-                Link("mlx-libraries", destination: "https://github.com/ml-explore/mlx-swift-examples/")
             }
         }
         .navigationTitle("More")
