@@ -20,7 +20,7 @@ struct ContentView: View {
     @Namespace var namespace
 
     enum Screen: String, CaseIterable, Identifiable {
-        case serverList, testList, more, setup
+        case serverList, testList, more, setup, terminal
 
         var localizedTitle: String {
             switch self {
@@ -32,6 +32,8 @@ struct ContentView: View {
                 "more"
             case .setup:
                 "setup"
+            case .terminal:
+                "terminal"
             }
         }
         var id: String {
@@ -61,6 +63,9 @@ struct ContentView: View {
                         }
                 } else {
                     TabView(selection: $screen) {
+                        Tab("Terminal", systemImage: "apple.terminal", value: .serverList){
+                            RemoteTerminalView()
+                        }
                         Tab("Servers", systemImage: "server.rack", value: .serverList){
                             ServersView(sheet: $sheet)
                         }

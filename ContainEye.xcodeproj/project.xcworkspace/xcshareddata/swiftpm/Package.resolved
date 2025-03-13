@@ -1,5 +1,5 @@
 {
-  "originHash" : "86e8207e7cd3b15f4c4b5e4fcd2e455af50a1732a3752425d3adbca8be406e75",
+  "originHash" : "2c8b89433fa8abd5abadce5b9a9d7fcb479103efc404b2f5b8414f3447059d92",
   "pins" : [
     {
       "identity" : "aptabase-swift",
@@ -65,6 +65,15 @@
       }
     },
     {
+      "identity" : "libssh2prebuild",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/migueldeicaza/Libssh2Prebuild",
+      "state" : {
+        "branch" : "master",
+        "revision" : "2b9a34880aa7906a76872ac03077ea5aa313c72b"
+      }
+    },
+    {
       "identity" : "swift-atomics",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-atomics.git",
@@ -125,6 +134,15 @@
       "state" : {
         "revision" : "c8a44d836fe7913603e246acab7c528c2e780168",
         "version" : "1.4.0"
+      }
+    },
+    {
+      "identity" : "swiftsh.binaries",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/migueldeicaza/SwiftSH.binaries",
+      "state" : {
+        "branch" : "master",
+        "revision" : "3ce9fc6d6f26f43952a78d9431985a59008d14d2"
       }
     }
   ],

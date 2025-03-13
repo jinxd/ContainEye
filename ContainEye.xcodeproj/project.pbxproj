@@ -18,6 +18,8 @@
 		389343E72D6476EF0052277F /* KeychainAccess in Frameworks */ = {isa = PBXBuildFile; productRef = 389343E62D6476EF0052277F /* KeychainAccess */; };
 		389343E92D6476EF0052277F /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = 389343E82D6476EF0052277F /* Citadel */; };
 		389343EB2D6476EF0052277F /* Blackbird in Frameworks */ = {isa = PBXBuildFile; productRef = 389343EA2D6476EF0052277F /* Blackbird */; };
+		38CA62D22D8368E900323394 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 38CA62D12D8368E900323394 /* SwiftTerm */; };
+		38CA62D52D83692D00323394 /* CSSH in Frameworks */ = {isa = PBXBuildFile; productRef = 38CA62D42D83692D00323394 /* CSSH */; };
 		38DBC7F52D6B8ED900DA3942 /* Aptabase in Frameworks */ = {isa = PBXBuildFile; productRef = 38DBC7F42D6B8ED900DA3942 /* Aptabase */; };
 		38DBC7F72D6B8EEA00DA3942 /* Aptabase in Frameworks */ = {isa = PBXBuildFile; productRef = 38DBC7F62D6B8EEA00DA3942 /* Aptabase */; };
 /* End PBXBuildFile section */
@@ -153,9 +155,11 @@
 			files = (
 				38DBC7F52D6B8ED900DA3942 /* Aptabase in Frameworks */,
 				384638BE2D40312100AA796B /* Citadel in Frameworks */,
+				38CA62D22D8368E900323394 /* SwiftTerm in Frameworks */,
 				384638BB2D40310800AA796B /* KeychainAccess in Frameworks */,
 				384638B82D4030F900AA796B /* ButtonKit in Frameworks */,
 				380A104A2D438650009F3D42 /* Blackbird in Frameworks */,
+				38CA62D52D83692D00323394 /* CSSH in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -250,6 +254,8 @@
 				384638BD2D40312100AA796B /* Citadel */,
 				380A10492D438650009F3D42 /* Blackbird */,
 				38DBC7F42D6B8ED900DA3942 /* Aptabase */,
+				38CA62D12D8368E900323394 /* SwiftTerm */,
+				38CA62D42D83692D00323394 /* CSSH */,
 			);
 			productName = ContainEye;
 			productReference = 383319382D356EC0006CDAEA /* ContainEye.app */;
@@ -369,6 +375,8 @@
 				384638BC2D40312100AA796B /* XCRemoteSwiftPackageReference "Citadel" */,
 				380A10482D438650009F3D42 /* XCRemoteSwiftPackageReference "Blackbird" */,
 				38DBC7F32D6B8ED900DA3942 /* XCRemoteSwiftPackageReference "aptabase-swift" */,
+				38CA62D02D8368DC00323394 /* XCLocalSwiftPackageReference "SwiftTerm" */,
+				38CA62D32D83692D00323394 /* XCRemoteSwiftPackageReference "Libssh2Prebuild" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 383319392D356EC0006CDAEA /* Products */;
@@ -869,6 +877,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		38CA62D02D8368DC00323394 /* XCLocalSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = SwiftTerm;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		380A10482D438650009F3D42 /* XCRemoteSwiftPackageReference "Blackbird" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -900,6 +915,14 @@
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 0.9.2;
+			};
+		};
+		38CA62D32D83692D00323394 /* XCRemoteSwiftPackageReference "Libssh2Prebuild" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/migueldeicaza/Libssh2Prebuild";
+			requirement = {
+				branch = master;
+				kind = branch;
 			};
 		};
 		38DBC7F32D6B8ED900DA3942 /* XCRemoteSwiftPackageReference "aptabase-swift" */ = {
@@ -952,6 +975,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 380A10482D438650009F3D42 /* XCRemoteSwiftPackageReference "Blackbird" */;
 			productName = Blackbird;
+		};
+		38CA62D12D8368E900323394 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 38CA62D02D8368DC00323394 /* XCLocalSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
+		};
+		38CA62D42D83692D00323394 /* CSSH */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 38CA62D32D83692D00323394 /* XCRemoteSwiftPackageReference "Libssh2Prebuild" */;
+			productName = CSSH;
 		};
 		38DBC7F42D6B8ED900DA3942 /* Aptabase */ = {
 			isa = XCSwiftPackageProductDependency;
