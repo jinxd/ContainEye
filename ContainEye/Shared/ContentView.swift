@@ -63,7 +63,7 @@ struct ContentView: View {
                         }
                 } else {
                     TabView(selection: $screen) {
-                        Tab("Terminal", systemImage: "apple.terminal", value: .serverList){
+                        Tab("Terminal", systemImage: "apple.terminal", value: .terminal){
                             RemoteTerminalView()
                         }
                         Tab("Servers", systemImage: "server.rack", value: .serverList){
