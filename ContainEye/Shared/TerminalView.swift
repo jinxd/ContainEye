@@ -10,10 +10,12 @@ import SwiftTerm
 
 struct RemoteTerminalView: View {
     @State private var credential: Credential?
+    @State private var history = [String]()
     var body: some View {
         VStack{
             if let credential {
-                SSHTerminalView(credential: .init(key: credential.key, label: credential.label, host: credential.host, port: credential.port, username: credential.username, password: credential.password))
+                let view = SSHTerminalView(credential: .init(key: credential.key, label: credential.label, host: credential.host, port: credential.port, username: credential.username, password: credential.password))
+                view
                     .toolbarVisibility(.hidden, for: .navigationBar)
                     .toolbarVisibility(.hidden, for: .tabBar)
                     .overlay(alignment: .topTrailing){
@@ -41,6 +43,13 @@ struct RemoteTerminalView: View {
 
             }
         }
+    }
+    func shortestTwoStartingWith(_ prefix: String, in array: [String]) -> [String] {
+        return array
+            .filter { $0.hasPrefix(prefix) }
+            .sorted { $0.count < $1.count }
+            .prefix(2)
+            .map { $0 }
     }
 }
 

@@ -34,6 +34,12 @@ class SSHTerminalModel {
     var authenticationChallenge: AuthenticationChallenge?
     var sshQueue: DispatchQueue
 
+    public var currentInputLine: String {
+        terminalView?.attrStrBuffer!.array.compactMap({$0?.attrStr.string}).last { string in
+            !string.trimmingCharacters(in: .whitespaces).isEmpty
+        }?.split(separator: "#").dropFirst().joined(separator: "#") ?? ""
+    }
+
     init(credential: Credential) {
         self.credential = credential
         self.sshQueue = DispatchQueue(label: "SSH Queue")
@@ -46,10 +52,9 @@ class SSHTerminalModel {
 
         shell = try? SSHShell(sshLibrary: Libssh2.self,
                               host: credential.host,
-                              port: 22,
+                              port: UInt16(credential.port),
                               environment: [Environment(name: "LANG", variable: "en_US.UTF-8")],
                               terminal: "xterm-256color")
-
         shell?.log.enabled = false
         shell?.setCallbackQueue(queue: sshQueue)
 
@@ -142,6 +147,15 @@ class AppTerminalView: TerminalView, TerminalViewDelegate {
 
 public struct SSHTerminalView: UIViewRepresentable {
     let model: SSHTerminalModel
+    public var currentInputLine: String {
+        model.currentInputLine
+    }
+    public func setCurrentInputLine(_ newValue: String) {
+        for i in model.currentInputLine.count ..< newValue.count {
+            model.terminalView?.deleteBackward()
+        }
+        model.terminalView?.insertText(newValue)
+    }
 
     public init(credential: Credential) {
         self.model = .init(credential: credential)
