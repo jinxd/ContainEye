@@ -26,28 +26,61 @@ public struct Credential: Codable, Equatable, Hashable {
         self.password = password
     }
 }
+import MediaPlayer
 
-class SSHTerminalModel {
+class SSHTerminalModel: NSObject {
     var credential: Credential
     var shell: SSHShell?
     var terminalView: TerminalView?
     var authenticationChallenge: AuthenticationChallenge?
     var sshQueue: DispatchQueue
+    var useVolumeButtons: Bool
+    var volumeView: MPVolumeView?
+    var slider: UISlider?
+    var setBackToVolume: Float = 0.5
 
+    var lines: [String] {
+        terminalView?.attrStrBuffer!.array.compactMap({$0?.attrStr.string}) ?? []
+    }
     public var currentInputLine: String {
-        terminalView?.attrStrBuffer!.array.compactMap({$0?.attrStr.string}).last { string in
+        lines.last { string in
             !string.trimmingCharacters(in: .whitespaces).isEmpty
         }?.split(separator: "#").dropFirst().joined(separator: "#") ?? ""
     }
 
-    init(credential: Credential) {
+    init(credential: Credential, useVolumeButtons: Bool) {
         self.credential = credential
         self.sshQueue = DispatchQueue(label: "SSH Queue")
+        self.useVolumeButtons = useVolumeButtons
     }
-
+    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
+        if keyPath == "outputVolume" {
+            if let volume = change?[.newKey] as? Float {
+                guard volume != setBackToVolume, useVolumeButtons else { return }
+                if volume < setBackToVolume {
+                    terminalView?.sendKeyDown()
+                } else {
+                    terminalView?.sendKeyUp()
+                }
+                slider?.value = setBackToVolume
+            }
+        }
+    }
     func connect(terminalView: TerminalView) {
         self.terminalView = terminalView
 
+        let volumeView = MPVolumeView(frame: .init(origin: .init(x: -1000, y: -1000), size: .zero))
+        volumeView.isOpaque = false
+        volumeView
+        slider = volumeView.subviews.first(where: { $0 is UISlider }) as? UISlider
+        if let slider, useVolumeButtons {
+            slider.value = min(0.1, max(0.9, slider.value))
+            setBackToVolume = slider.value
+        }
+        try? AVAudioSession.sharedInstance().setCategory(.ambient, options: .mixWithOthers)
+        try? AVAudioSession.sharedInstance().setActive(true, options: [])
+        AVAudioSession.sharedInstance().addObserver(self, forKeyPath: "outputVolume", options: [.new], context: nil)
+        self.terminalView!.addSubview(volumeView)
         authenticationChallenge = .byPassword(username: credential.username, password: credential.password)
 
         shell = try? SSHShell(sshLibrary: Libssh2.self,
@@ -146,26 +179,33 @@ class AppTerminalView: TerminalView, TerminalViewDelegate {
 }
 
 public struct SSHTerminalView: UIViewRepresentable {
+    let terminalView : AppTerminalView
     let model: SSHTerminalModel
     public var currentInputLine: String {
         model.currentInputLine
     }
     public func setCurrentInputLine(_ newValue: String) {
-        for i in model.currentInputLine.count ..< newValue.count {
+        if currentInputLine.trimmingCharacters(in: .whitespaces) == newValue.trimmingCharacters(in: .whitespaces) {
+            terminalView.send(txt: "\n")
+            return
+        }
+        for i in 0..<model.currentInputLine.count {
             model.terminalView?.deleteBackward()
         }
         model.terminalView?.insertText(newValue)
     }
+    public var useVolumeButtons: Bool {
+        get {model.useVolumeButtons}
+        set {model.useVolumeButtons = newValue}
+    }
 
-    public init(credential: Credential) {
-        self.model = .init(credential: credential)
+    public init(credential: Credential, useVolumeButtons: Bool) {
+        self.model = .init(credential: credential, useVolumeButtons: useVolumeButtons)
+        terminalView = AppTerminalView(model: model)
+        model.connect(terminalView: terminalView)
     }
 
     public func makeUIView(context: Context) -> TerminalView {
-        let terminalView = AppTerminalView(model: model)
-        DispatchQueue.global().async {
-            model.connect(terminalView: terminalView)
-        }
         return terminalView
     }
 
