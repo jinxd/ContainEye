@@ -9,7 +9,7 @@ import SwiftUI
 import ButtonKit
 
 struct SecondSetupView: View {
-    @Binding var screen: Int?
+    @Binding var screen: Int
     @State private var credential = Credential(key: UUID().uuidString, label: "", host: "", port: 22, username: "", password: "")
     @State private var showing = Field.label
     @FocusState private var field : Field?
@@ -23,7 +23,7 @@ struct SecondSetupView: View {
     var body: some View {
         VStack {
             Spacer()
-            Text("Alright, let's add a Server")
+            Text("Let's get started by adding your SSH credentials")
                 .font(.largeTitle.bold())
                 .multilineTextAlignment(.center)
             questionText
@@ -92,7 +92,7 @@ struct SecondSetupView: View {
     func showNextField() async throws {
         if showing == .password {
             try await addServer()
-            screen = 2
+            screen += 1
         } else {
             showing = Field.allCases[Field.allCases.index(
                 after: Field.allCases
@@ -120,7 +120,7 @@ struct SecondSetupView: View {
     var questionText: Text {
         switch showing {
         case .label:
-            Text("How would you like to identify it?")
+            Text("How would you like to identify this server?")
         case .host:
             Text("What is the hostname or IP-Address to connect to the server?")
         case .port:

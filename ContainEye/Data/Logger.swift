@@ -17,7 +17,8 @@ enum Logger {
     }
 
     static func telemetry(_ message: String, with parameters: [String: Any] = [:]) {
-        Aptabase.shared.trackEvent(message, with: parameters)
+#warning("currently aptabase event parameters are not working...")
+        Aptabase.shared.trackEvent(message/*, with: parameters*/)
     }
 
     static func flushTelemetry() async {

@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct StartSetupView: View {
-    @Binding var screen: Int?
+    @Binding var screen: Int
     let date = Date()
 
     var body: some View {
@@ -41,12 +41,17 @@ struct StartSetupView: View {
             }
             Spacer()
             Button("Get started") {
-                Logger.telemetry("setup started")
-                screen = 1
+                screen += 1
             }
             .buttonStyle(.borderedProminent)
             .buttonBorderShape(.capsule)
             Spacer()
+        }
+        .onAppear{
+            Logger.telemetry("initial setup screen appeared")
+        }
+        .onDisappear{
+            Logger.telemetry("initial setup screen dismissed")
         }
     }
 }

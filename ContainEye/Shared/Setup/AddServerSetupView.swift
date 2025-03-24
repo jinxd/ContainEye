@@ -12,7 +12,7 @@ import Blackbird
 import UserNotifications
 
 struct AddServerSetupView: View {
-    @Binding var screen: Int?
+    @Binding var screen: Int
     @State private var test = ServerTest(id: .random(in: (.min)...(.max)), title: "", credentialKey: "", command: "", expectedOutput: "", status: .notRun)
     @FocusState private var field : Field?
     @Environment(\.blackbirdDatabase) private var db
@@ -76,7 +76,7 @@ struct AddServerSetupView: View {
 
                     AsyncButton("Add the test") {
                         try? await Logger.telemetry(
-                            "added test",
+                            "test.added",
                             with: [
                                 "servers":keychain().allKeys().count,
                                 "tests":ServerTest.count(in: db!, matching: \.$credentialKey != "-")
@@ -85,7 +85,9 @@ struct AddServerSetupView: View {
                         try await test.write(to: db!)
                         test = ServerTest(id: .random(in: (.min)...(.max)), title: "", credentialKey: "", command: "", expectedOutput: "", status: .notRun)
                         screen = 3
-                        let _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+                        if let allowed = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) {
+                            Logger.telemetry(allowed ? "notifications.allowed" : "notifications.denied")
+                        }
                     }
                     .buttonStyle(.bordered)
 

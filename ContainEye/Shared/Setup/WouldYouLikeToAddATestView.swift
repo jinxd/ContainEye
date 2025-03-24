@@ -8,27 +8,27 @@
 
 import SwiftUI
 
-struct WouldYouLikeToAddAnotherTestView: View {
-    @Binding var screen: Int?
+struct WouldYouLikeToAddATestView: View {
+    @Binding var screen: Int
 
     var body: some View {
         VStack {
             Spacer()
-            ContentUnavailableView("Would you like to add another test?", systemImage: "testtube.2")
+            ContentUnavailableView("Would you like to add a test for your server now?", systemImage: "testtube.2")
             Spacer()
             VStack {
                 Group{
                     Button{
                         screen = 2
                     } label: {
-                        Text("Yes, add another one!")
+                        Text("Yes, let's add one!")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     Button{
-                        UserDefaults.standard.set(ContentView.Screen.testList.rawValue, forKey: "screen")
+                        UserDefaults.standard.set(ContentView.Screen.terminal.rawValue, forKey: "screen")
                     } label: {
-                        Text("Nope")
+                        Text("Maybe later...")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
@@ -42,5 +42,5 @@ struct WouldYouLikeToAddAnotherTestView: View {
 }
 
 #Preview {
-    WouldYouLikeToAddAnotherTestView(screen: .constant(3))
+    WouldYouLikeToAddATestView(screen: .constant(3))
 }

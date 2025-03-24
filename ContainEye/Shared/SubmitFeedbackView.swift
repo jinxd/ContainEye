@@ -40,23 +40,24 @@ struct SubmitFeedbackView: View {
                 TextField("Feedback message", text: $message, axis: .vertical)
                     .lineLimit(3...10)
             }
-            Section("Directly"){
-                AsyncButton("Submit Feedback") {
-                    Logger.telemetry(
-                        "Submit Feedback",
-                        with:
-                            [
-                                "title" : title,
-                                "message" : message
-                            ]
-                    )
-                    await Logger.flushTelemetry()
-                    dismiss()
-                }
-            }
-            Section("Mail only") {
+            #warning("currently aptabase event parameters are not working...")
+//            Section("Directly"){
+//                AsyncButton("Submit Feedback") {
+//                    Logger.telemetry(
+//                        "Submit Feedback",
+//                        with:
+//                            [
+//                                "title" : title,
+//                                "message" : message
+//                            ]
+//                    )
+//                    await Logger.flushTelemetry()
+//                    dismiss()
+//                }
+//            }
+            Section("Currently Mail only") {
                 if let url = URL(string: "mailto:contact@hannesnagel.com?subject=Feedback (\(feedbackType.rawValue)): \(title)&body=\(message)") {
-                    Link("Add photos or files", destination: url)
+                    Link("Submit Feedback", destination: url)
                 }
             }
         }

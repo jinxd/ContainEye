@@ -20,6 +20,7 @@ import WidgetKit
 
 @main
 struct ContainEyeApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     let db = SharedDatabase.db
     @Environment(\.scenePhase) var scenePhase
 
@@ -39,31 +40,16 @@ struct ContainEyeApp: App {
                         BGAppRefreshTaskRequest(identifier: "apprefresh")
                     )
 
-                    Task{
+                    Task(priority: .background){
                         await ServerTest.ServerTestAppEntitiy.updateSpotlightIndex()
                         AppIntent.updateAppShortcutParameters()
                         await loadDefaultData()
+                        UIApplication.shared.registerForRemoteNotifications()
                     }
                 }
 #endif
                 .onReceive(ServerTest.changePublisher(in: db)){ _ in
                     WidgetCenter.shared.reloadAllTimelines()
-                }
-                .onChange(of: scenePhase) {
-                    switch scenePhase {
-                    case .active:
-                        Task{
-                            try? await Logger.telemetry(
-                                "app launched",
-                                with: [
-                                    "servers":keychain().allKeys().count,
-                                    "tests":ServerTest.count(in: db, matching: \.$credentialKey != "-")
-                                ]
-                            )
-                        }
-                    default:
-                        Logger.telemetry("app closed")
-                    }
                 }
         }
 #if !os(macOS)
@@ -88,22 +74,6 @@ struct ContainEyeApp: App {
             return
         }
         do {
-            let chain = Keychain()
-                .synchronizable(true)
-                .accessibility(.afterFirstUnlock)
-                .label("ContainEye")
-            for key in chain.allKeys() {
-                do {
-                    if let credential = chain.getCredential(for: key),
-                       try !keychain().contains(credential.key) {
-                        let data = try JSONEncoder().encode(credential)
-                        try keychain()
-                            .set(data, key: credential.key)
-                    }
-                } catch {
-                    print(error)
-                }
-            }
             let data = try Data(contentsOf: url)
             let tests = try JSONDecoder().decode([ServerTest].self, from: data)
 

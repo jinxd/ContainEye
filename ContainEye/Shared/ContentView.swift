@@ -59,7 +59,7 @@ struct ContentView: View {
                 if screen == .setup {
                     SetupView(sheet: $sheet)
                         .onDisappear{
-                            UserDefaults.standard.set(0, forKey: "setupScreen")
+                            UserDefaults.standard.set(1, forKey: "setupScreen")
                         }
                 } else {
                     TabView(selection: $screen) {
@@ -75,6 +75,9 @@ struct ContentView: View {
                         Tab("More", systemImage: "ellipsis", value: .more){
                             MoreView(sheet: $sheet)
                         }
+                    }
+                    .onChange(of: screen, initial: true) {
+                        Logger.telemetry("viewing screen \(screen.localizedTitle)")
                     }
                 }
             }
