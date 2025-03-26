@@ -20,20 +20,25 @@ enum GridItemView {
             VStack {
                 SwiftUI.Text(title)
                     .bold()
-                text
+                    .font(.caption2)
+                VStack {
+                    text
+                        .lineLimit(1)
+                        .contentTransition(.numericText(value: trim))
+                }
+                .padding(20)
+                .background{
+                    Circle()
+                        .fill(.background)
+                    Circle()
+                        .trim(from: 0, to: trim)
+                        .stroke(.accent, style: .init(lineWidth: 5, lineCap: .round))
+                        .padding(1)
+                }
+                .redacted(reason: redacted ? .placeholder : [])
+                .minimumScaleFactor(0.3)
             }
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background{
-                RoundedProgressRectangle(cornerRadius: 15)
-                    .fill(.background)
-                RoundedProgressRectangle(cornerRadius: 15)
-                    .trim(from: 0, to: trim)
-                    .stroke(.accent, style: .init(lineWidth: 10, lineCap: .round))
-                    .padding(3)
-            }
-            .redacted(reason: redacted ? .placeholder : [])
-            .padding(5)
+            .animation(.smooth, value: trim)
         }
     }
 
@@ -74,7 +79,7 @@ enum GridItemView {
         var body: some View {
             GridItemView(
                 title: title,
-                text: SwiftUI.Text(percentage ?? 0, format: .percent.precision(.fractionLength(2))),
+                text: SwiftUI.Text(percentage ?? 0, format: .percent.precision(.fractionLength(1))),
                 trim: percentage ?? 1,
                 redacted: percentage == nil
             )

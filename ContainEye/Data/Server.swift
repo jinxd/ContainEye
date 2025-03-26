@@ -30,7 +30,17 @@ struct Server: BlackbirdModel {
     @BlackbirdColumn var uptime: Date?
     @BlackbirdColumn var lastUpdate: Date?
     @BlackbirdColumn var isConnected: Bool
+    @BlackbirdColumn var totalDiskSpace: Double?
+    @BlackbirdColumn var totalMemory: Double?
+    @BlackbirdColumn var cpuCores: Int?
+    @BlackbirdColumn var processSortOrder: ProcessSortOrder?
 
+    enum ProcessSortOrder: String, RawRepresentable, BlackbirdStringEnum {
+        typealias RawValue = String
+        
+        case pid, command, user, memory, cpu
+        case pidReversed, commandReversed, userReversed, memoryReversed, cpuReversed
+    }
     var credential: Credential? {
         keychain().getCredential(for: credentialKey)
     }
@@ -89,6 +99,10 @@ extension Server {
         async let ioWait = fetchMetric(command: "sar -u 1 3 | grep 'Average' | awk '{print $5 / 100}'")
         async let stealTime = fetchMetric(command: "sar -u 1 3 | grep 'Average' | awk '{print $6 / 100}'")
         async let systemLoad = fetchMetric(command: "uptime | awk '{print $(NF-2) / 100}'")
+        
+        async let totalDiskSpace = fetchMetric(command: "df --output=size / | tail -n 1 | awk '{print $1 * 1024}'")
+        async let totalMemory = fetchMetric(command: "free | grep Mem | awk '{print $2 * 1024}'")
+        async let cpuCores = fetchMetric(command: "nproc")
 
         var newUptime = Date?.none
         let uptimeCommand = "date +%s -d \"$(uptime -s)\""
@@ -97,8 +111,10 @@ extension Server {
            let timestamp = Double(uptimeOutput.trimmingCharacters(in: .whitespacesAndNewlines)) {
             newUptime = Date(timeIntervalSince1970: timestamp)
         }
-        //here await all the async lets first, before proceeding and before doing try? await server
-        let (cpu, memory, disk, networkUpstreamResult, networkDownstreamResult, swap, io, steal, load) = await (cpuUsage, memoryUsage, diskUsage, networkUpstream, networkDownstream, swapUsage, ioWait, stealTime, systemLoad)
+
+        // Await all async lets before proceeding
+        let (cpu, memory, disk, networkUpstreamResult, networkDownstreamResult, swap, io, steal, load, diskSpace, memTotal, cores) =
+        await (cpuUsage, memoryUsage, diskUsage, networkUpstream, networkDownstream, swapUsage, ioWait, stealTime, systemLoad, totalDiskSpace, totalMemory, cpuCores)
 
         if var server = try? await server {
             server.cpuUsage = cpu ?? server.cpuUsage
@@ -110,6 +126,9 @@ extension Server {
             server.ioWait = io ?? server.ioWait
             server.stealTime = steal ?? server.stealTime
             server.systemLoad = load ?? server.systemLoad
+            server.totalDiskSpace = diskSpace ?? server.totalDiskSpace
+            server.totalMemory = memTotal ?? server.totalMemory
+            server.cpuCores = cores == nil ? server.cpuCores : Int(cores!)
             server.lastUpdate = .now
             if let newUptime{
                 server.uptime = newUptime
@@ -146,6 +165,7 @@ extension Server {
             for newContainer in newContainers {
                 if var existingContainer = try await Container.read(from: db, id: newContainer.id) {
                     existingContainer.name = newContainer.name
+                    existingContainer.status = newContainer.status
                     existingContainer.cpuUsage = newContainer.cpuUsage
                     existingContainer.memoryUsage = newContainer.memoryUsage
                     try await existingContainer.write(to: db)
@@ -154,7 +174,8 @@ extension Server {
                     try await container.write(to: db)
                 }
             }
-            guard !Task.isCancelled else { return }
+            await fetchProcesses()
+            guard !Task.isCancelled, stopped.isEmpty && output.isEmpty else { return }
             for container in containers.filter(
                 {container in
                     !newContainers.contains(where: { $0.id == container.id })

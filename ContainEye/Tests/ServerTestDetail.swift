@@ -301,7 +301,7 @@ struct ServerTestDetail: View {
             prompt: "\(prompt)Do the following:\n\(changeDescription)",
             systemPrompt: LLM.addTestSystemPrompt
         )
-        let llmOutput = LLM.cleanLLMOutput(dirtyOutput)
+        let llmOutput = LLM.cleanLLMOutput(dirtyOutput.output)
 
 
         let output = try JSONDecoder().decode(

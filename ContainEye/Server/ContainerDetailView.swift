@@ -15,52 +15,21 @@ struct ContainerDetailView: View {
 
     var body: some View {
         if let container {
-            ScrollView{
-                Grid {
-                    GridRow {
-                        GridItemView.Text(title: "Container", text: container.name)
-                    }
-                    .gridCellColumns(2)
-                    GridRow {
-                        GridItemView.Text(title: "Started", text: container.cmd)
-                    }
-                    .gridCellColumns(2)
-                    GridRow{
-                        GridItemView.Percentage(title: "CPU Usage", percentage: container.cpuUsage)
-                        GridItemView.Percentage(title: "Memory Usage", percentage: container.memoryUsage)
+            ContainerSummaryView(container: container.liveModel)
+            ScrollViewReader {scroll in
+                ScrollView {
+                    if container.logs.isEmpty{
+                        ContentUnavailableView("No logs available yet", systemImage: "tree", description: Text("ContainEye is trying to load them..."))
+                    } else {
+                        Text(container.logs)
+                            .frame(maxWidth: .infinity)
+                            .task{scroll.scrollTo("end")}
+                        VStack{}.id("end")
                     }
                 }
-                .tint(Color.accentColor)
                 .padding()
-                .background(Color.accentColor.quaternary.quaternary, in: RoundedProgressRectangle(cornerRadius: 15))
-                .padding(.horizontal)
-                
-                
-                Text(container.status)
-                Grid{
-                    GridRow{
-                        let isRunning = container.status.localizedCaseInsensitiveContains("up")
-                        if isRunning {
-                            AsyncButton(progress: .estimated(for: .seconds(2))) { progress in
-                                try await container.stop()
-                            } label: {
-                                GridItemView.Text(title: "Stop", text: "this container")
-                            }
-                            .asyncButtonStyle(GridItemView.AsyncProgressButtonStyle(title: "Stopping..."))
-                            .padding(.horizontal)
-                        } else {
-                            AsyncButton(progress: .estimated(for: .seconds(2))) { progress in
-                                try await container.start()
-                            } label: {
-                                GridItemView.Text(title: "Start", text: "this container")
-                            }
-                            .asyncButtonStyle(GridItemView.AsyncProgressButtonStyle(title: "Starting..."))
-                            .padding(.horizontal)
-                        }
-                    }
-                    .gridCellColumns(2)
-                }
-                .padding(.horizontal)
+                .background(Color.accentColor.tertiary, in: .rect(cornerRadius: 15))
+                .padding()
             }
             .navigationTitle(container.name)
 #if !os(macOS)
@@ -73,9 +42,6 @@ struct ContainerDetailView: View {
                     try? await container.fetchDetails()
                     try? await Task.sleep(for: .seconds(1))
                 }
-            }
-            .onDisappear{
-                CurrentServerId.shared.setCurrentServerId(container.serverId)
             }
         }
     }

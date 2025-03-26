@@ -20,7 +20,7 @@ struct ContentView: View {
     @Namespace var namespace
 
     enum Screen: String, CaseIterable, Identifiable {
-        case serverList, testList, more, setup, terminal
+        case serverList, testList, more, setup, terminal, sftp
 
         var localizedTitle: String {
             switch self {
@@ -34,6 +34,8 @@ struct ContentView: View {
                 "setup"
             case .terminal:
                 "terminal"
+            case .sftp:
+                "sftp"
             }
         }
         var id: String {
@@ -63,6 +65,9 @@ struct ContentView: View {
                         }
                 } else {
                     TabView(selection: $screen) {
+                        Tab("SFTP", systemImage: "list.bullet", value: .sftp){
+                            SFTPView()
+                        }
                         Tab("Terminal", systemImage: "apple.terminal", value: .terminal){
                             RemoteTerminalView()
                         }

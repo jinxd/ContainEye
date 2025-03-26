@@ -140,13 +140,14 @@ The regex must match exactly the entire output of the command.
             NavigationLink("Learn about testing", value: Help.tests)
         }
     }
-    func generateTest(from test: ServerTest, description: String) async throws -> ServerTest {
+    func generateTest(from test: ServerTest, description: String, using history: [[String:String]] = [[:]]) async throws -> ServerTest {
         var test = test
         let dirtyLlmOutput = await LLM.generate(
             prompt: description,
-            systemPrompt: LLM.addTestSystemPrompt
+            systemPrompt: LLM.addTestSystemPrompt,
+            history: history
         )
-        let llmOutput = LLM.cleanLLMOutput(dirtyLlmOutput)
+        let llmOutput = LLM.cleanLLMOutput(dirtyLlmOutput.output)
 
         let output = try JSONDecoder().decode(
             LLM.Output.self,
@@ -160,7 +161,21 @@ The regex must match exactly the entire output of the command.
         test.notes = testDescription
         testDescription.removeAll()
         field = nil
-        return await test.test()
+        let newtest = await test.test()
+        if newtest.status == .failed {
+            return try await generateTest(from: newtest, description: """
+You need to fix the test \(newtest.title). It previously failed, because the command:
+```\(newtest.command)```
+produced the output:
+```\(newtest.output ?? "no output")```
+instead of producing:
+```\(newtest.expectedOutput)```
+which is what the test tried to verify. You can ask me how to fix the test.
+The regex must match exactly the entire output of the command.
+""", using: dirtyLlmOutput.history)
+        } else {
+            return newtest
+        }
     }
 
 }

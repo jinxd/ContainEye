@@ -139,11 +139,11 @@ struct ServerTest: BlackbirdModel {
 
         let output = await fetchOutput()
 
-        let regex = try? Regex(test.expectedOutput)
+        let regex = try? Regex(test.expectedOutput.trimmingCharacters(in: .whitespacesAndNewlines))
         let isRegexMatch: Bool
         if let regex {
             do {
-                isRegexMatch = (try regex.wholeMatch(in: output)) != nil
+                isRegexMatch = (try regex.wholeMatch(in: output.trimmingCharacters(in: .whitespacesAndNewlines))) != nil
             } catch {
                 isRegexMatch = false
             }
@@ -151,7 +151,7 @@ struct ServerTest: BlackbirdModel {
             isRegexMatch = false
         }
 
-        if isRegexMatch || output == test.expectedOutput {
+        if isRegexMatch || output.trimmingCharacters(in: .whitespacesAndNewlines) == test.expectedOutput.trimmingCharacters(in: .whitespacesAndNewlines) {
             test.status = .success
         } else {
             test.status = .failed

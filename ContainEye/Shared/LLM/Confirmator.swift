@@ -53,6 +53,7 @@ private struct Confirmator: View {
     }) var servers
     @Environment(\.blackbirdDatabase) var db
     @FocusState private var focused: Bool
+    @State private var commandOutput: String?
 
     var body: some View {
         if confirmator.question != nil || confirmator.command != nil {
@@ -100,31 +101,39 @@ private struct Confirmator: View {
                         .background(.accent.opacity(0.1), in: .rect(cornerRadius: 15))
 
                     Spacer()
-
-                    Text("Choose where to execute the command:").monospaced()
-                    Picker("Host", selection: $server) {
-                        Text("Choose a server")
-                            .tag(Server?.none)
-                        ForEach(servers.results) { server in
-                            Text(server.credential?.label ?? "Unknown")
-                                .tag(server)
+                    if let commandOutput {
+                        Text(commandOutput)
+                            .padding()
+                            .background(.accent.opacity(0.1), in: .rect(cornerRadius: 15))
+                    } else {
+                        Text("Choose where to execute the command:").monospaced()
+                        Picker("Host", selection: $server) {
+                            Text("Choose a server")
+                                .tag(Server?.none)
+                            ForEach(servers.results) { server in
+                                Text(server.credential?.label ?? "Unknown")
+                                    .tag(server)
+                            }
+                        }
+                        .pickerStyle(.inline)
+                        .task{
+                            while server == nil,
+                                  !Task.isCancelled{
+                                server = servers.results.first
+                                try? await Task.sleep(for: .seconds(1))
+                            }
                         }
                     }
-                    .pickerStyle(.inline)
-                    .task{
-                        while server == nil,
-                              !Task.isCancelled{
-                            server = servers.results.first
-                            try? await Task.sleep(for: .seconds(1))
+                    AsyncButton(commandOutput == nil ? "Tap to Execute" : "Submit to ContainEye") {
+                        if let commandOutput {
+                            confirmator.continuation?.resume(returning: commandOutput)
+                            confirmator.command = nil
+                            answer.removeAll()
+                            self.commandOutput = nil
+                        } else {
+                            guard let server = server else {return}
+                            commandOutput = (try? await server.execute(command).trimmingFromEnd(character: "\n", upto: 2)) ?? "sth went wrong"
                         }
-                    }
-
-                    AsyncButton("Tap to Execute") {
-                        guard let server = server else {return}
-                        let output = (try? await server.execute(command)) ?? "sth went wrong"
-                        confirmator.continuation?.resume(returning: output)
-                        confirmator.command = nil
-                        answer.removeAll()
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(server == nil)
@@ -141,7 +150,7 @@ private struct Confirmator: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.regularMaterial)
             .onAppear{
-                focused = false
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 focused = true
             }
         }

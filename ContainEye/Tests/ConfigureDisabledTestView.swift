@@ -47,7 +47,7 @@ struct ConfigureDisabledTestView: View {
                             LLM.generate(
                                 prompt: aiPrompt,
                                 systemPrompt: LLM.addTestSystemPrompt
-                            )
+                            ).output
                         )
                         guard let data = llmOutput.data(using: .utf8) else {
                             return

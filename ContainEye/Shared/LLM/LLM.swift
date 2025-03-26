@@ -15,7 +15,7 @@ enum LLMEvaluatorError: Error {
 import Foundation
 
 enum LLM {
-    static func generate(prompt: String, systemPrompt: String, history: [[String: String]] = []) async -> String {
+    static func generate(prompt: String, systemPrompt: String, history: [[String: String]] = []) async -> (output: String, history: [[String:String]]) {
         Logger.telemetry("using ai", with: ["prompt": prompt])
 
         do {
@@ -73,10 +73,10 @@ enum LLM {
                 return await generate(prompt: "", systemPrompt: systemPrompt, history: conversation + newInputs)
             }
 
-            return responseString
+            return (responseString, conversation)
 
         } catch {
-            return "Failed: \(error)"
+            return ("Failed: \(error)", [[:]])
         }
     }
 
@@ -87,7 +87,7 @@ These tests are usually used to make sure the system will be in the future in th
  
 ### **Response Options**
 You have **three options** for responding:
-1. **Provide a JSON response** with a shell command and a regular expression that matches exactly the output of the shell command but only when it succeeds.
+1. **Provide a JSON response** with a shell command and a regular expression or plain string that matches exactly the entire output of the shell command but only when the test succeeds.
 2. **Ask a question** to clarify the test case before proceeding.
 3. **Execute a shell command** to retrieve necessary information before generating the response.
 
@@ -107,7 +107,7 @@ You have **three options** for responding:
         "content": {
             "title": "The title for the test here",
             "command": "Your shell command here",
-            "expectedOutput": "Your regular expression here"
+            "expectedOutput": "Your regular expression or plain string here"
         }
     }
     ```

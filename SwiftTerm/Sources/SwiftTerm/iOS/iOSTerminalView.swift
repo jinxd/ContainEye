@@ -37,6 +37,7 @@ internal var log: Logger = Logger(subsystem: "org.tirania.SwiftTerm", category: 
  * defaults, otherwise, this uses its own set of defaults colors.
  */
 open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollViewDelegate {
+    public var lines : [String] {attrStrBuffer?.array.compactMap({$0?.attrStr.string}) ?? []}
     struct FontSet {
         public let normal: UIFont
         let bold: UIFont

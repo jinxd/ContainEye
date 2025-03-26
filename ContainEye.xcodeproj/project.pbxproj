@@ -11,6 +11,7 @@
 		384638B82D4030F900AA796B /* ButtonKit in Frameworks */ = {isa = PBXBuildFile; productRef = 384638B72D4030F900AA796B /* ButtonKit */; };
 		384638BB2D40310800AA796B /* KeychainAccess in Frameworks */ = {isa = PBXBuildFile; productRef = 384638BA2D40310800AA796B /* KeychainAccess */; };
 		384638BE2D40312100AA796B /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = 384638BD2D40312100AA796B /* Citadel */; };
+		38516E4C2D92CE7D008CEC21 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 38516E4B2D92CE7D008CEC21 /* SwiftTerm */; };
 		389343C12D6474A00052277F /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 389097432D61F352001624D6 /* WidgetKit.framework */; };
 		389343C22D6474A00052277F /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 389097452D61F352001624D6 /* SwiftUI.framework */; };
 		389343CF2D6474A10052277F /* TestsWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 389343C02D6474A00052277F /* TestsWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -18,7 +19,6 @@
 		389343E72D6476EF0052277F /* KeychainAccess in Frameworks */ = {isa = PBXBuildFile; productRef = 389343E62D6476EF0052277F /* KeychainAccess */; };
 		389343E92D6476EF0052277F /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = 389343E82D6476EF0052277F /* Citadel */; };
 		389343EB2D6476EF0052277F /* Blackbird in Frameworks */ = {isa = PBXBuildFile; productRef = 389343EA2D6476EF0052277F /* Blackbird */; };
-		38CA62D22D8368E900323394 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 38CA62D12D8368E900323394 /* SwiftTerm */; };
 		38CA62D52D83692D00323394 /* CSSH in Frameworks */ = {isa = PBXBuildFile; productRef = 38CA62D42D83692D00323394 /* CSSH */; };
 		38DBC7F52D6B8ED900DA3942 /* Aptabase in Frameworks */ = {isa = PBXBuildFile; productRef = 38DBC7F42D6B8ED900DA3942 /* Aptabase */; };
 		38DBC7F72D6B8EEA00DA3942 /* Aptabase in Frameworks */ = {isa = PBXBuildFile; productRef = 38DBC7F62D6B8EEA00DA3942 /* Aptabase */; };
@@ -153,9 +153,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				38516E4C2D92CE7D008CEC21 /* SwiftTerm in Frameworks */,
 				38DBC7F52D6B8ED900DA3942 /* Aptabase in Frameworks */,
 				384638BE2D40312100AA796B /* Citadel in Frameworks */,
-				38CA62D22D8368E900323394 /* SwiftTerm in Frameworks */,
 				384638BB2D40310800AA796B /* KeychainAccess in Frameworks */,
 				384638B82D4030F900AA796B /* ButtonKit in Frameworks */,
 				380A104A2D438650009F3D42 /* Blackbird in Frameworks */,
@@ -254,8 +254,8 @@
 				384638BD2D40312100AA796B /* Citadel */,
 				380A10492D438650009F3D42 /* Blackbird */,
 				38DBC7F42D6B8ED900DA3942 /* Aptabase */,
-				38CA62D12D8368E900323394 /* SwiftTerm */,
 				38CA62D42D83692D00323394 /* CSSH */,
+				38516E4B2D92CE7D008CEC21 /* SwiftTerm */,
 			);
 			productName = ContainEye;
 			productReference = 383319382D356EC0006CDAEA /* ContainEye.app */;
@@ -956,6 +956,11 @@
 			package = 384638BC2D40312100AA796B /* XCRemoteSwiftPackageReference "Citadel" */;
 			productName = Citadel;
 		};
+		38516E4B2D92CE7D008CEC21 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 38CA62D02D8368DC00323394 /* XCLocalSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
+		};
 		389343D72D6475360052277F /* ButtonKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 384638B62D4030F900AA796B /* XCRemoteSwiftPackageReference "ButtonKit" */;
@@ -975,11 +980,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 380A10482D438650009F3D42 /* XCRemoteSwiftPackageReference "Blackbird" */;
 			productName = Blackbird;
-		};
-		38CA62D12D8368E900323394 /* SwiftTerm */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 38CA62D02D8368DC00323394 /* XCLocalSwiftPackageReference "SwiftTerm" */;
-			productName = SwiftTerm;
 		};
 		38CA62D42D83692D00323394 /* CSSH */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -26,6 +26,9 @@ struct SetupView: View {
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
+        .onChange(of: setupScreen) {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
         .animation(.default, value: setupScreen)
         .toolbar{
             Button("Cancel") {

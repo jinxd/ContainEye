@@ -34,7 +34,7 @@ struct ServersView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 500, maximum: 800))]) {
                     ForEach(servers.results) {server in
                         NavigationLink(value: server) {
-                            ServerSummaryView(server: server, hostInsteadOfLabel: false)
+                            ServerSummaryView(server: server.liveModel, hostInsteadOfLabel: false)
                                 .contextMenu{
                                     Menu {
                                         AsyncButton("Delete", systemImage: "trash", role: .destructive) {
@@ -53,9 +53,6 @@ struct ServersView: View {
                         }
                         .matchedTransitionSource(id: server.id, in: namespace!)
                         .buttonStyle(.plain)
-                        .onTapGesture {
-                            CurrentServerId.shared.setCurrentServerId(server.id)
-                        }
                     }
                 }
 

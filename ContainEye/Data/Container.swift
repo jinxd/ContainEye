@@ -16,6 +16,7 @@ struct Container: BlackbirdModel, Identifiable, Equatable, Hashable {
     @BlackbirdColumn var memoryUsage: Double
     @BlackbirdColumn var serverId: String
     @BlackbirdColumn var cmd = ""
+    @BlackbirdColumn var logs = ""
     @BlackbirdColumn var fetchDetailedUpdates = false
     @BlackbirdColumn var lastUpdate = Date()
 
@@ -93,6 +94,8 @@ extension Container {
         let commandCmd = "docker inspect --format='{{.Config.Cmd}}' \(id)"
         // Command to fetch the container's status
         let commandStatus = "docker ps -a --filter 'id=\(id)' --format '{{.Status}}'"
+        // Command to fetch the container's logs
+        let commandLogs = "docker logs --tail 50 \(id)"
 
         do {
             // Fetch the container's command
@@ -103,15 +106,20 @@ extension Container {
                 .replacingOccurrences(of: "]", with: "")
 
             // Assign default command if cleanedCommand is empty
-            let cmd = cleanedCommand.isEmpty ? "docker compose" : cleanedCommand
+            let cmd = cleanedCommand.isEmpty ? "unknown" : cleanedCommand
 
             // Fetch the container's status
             let cleanedStatus = try await server.execute(commandStatus).trimmingCharacters(in: .whitespacesAndNewlines)
 
+            // Fetch the container's logs
+            let logs = try await server.execute(commandLogs).trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard !Task.isCancelled else { return }
 
             var container = try await Container.read(from: SharedDatabase.db, id: id)
             container?.cmd = cmd
             container?.status = cleanedStatus
+            container?.logs = logs
 
             try await container?.write(to: SharedDatabase.db)
         } catch {
