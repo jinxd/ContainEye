@@ -59,8 +59,6 @@ private struct Confirmator: View {
         if confirmator.question != nil || confirmator.command != nil {
             VStack {
                 if let question = confirmator.question {
-                    Text("I have a question for you")
-                        .font(.headline)
                     Spacer()
                     Text(.init(question))
                         .padding()

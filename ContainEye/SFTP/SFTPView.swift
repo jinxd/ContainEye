@@ -9,8 +9,38 @@ import ButtonKit
 import SwiftUI
 @preconcurrency import Citadel
 
+struct SFTPItem: Identifiable, Hashable, Equatable {
+    static func == (lhs: SFTPItem, rhs: SFTPItem) -> Bool {
+        lhs.id == rhs.id && lhs.path == rhs.path
+    }
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(path)
+    }
+
+    var id = UUID().uuidString
+    var isDirectory: Bool
+    var file: SFTPPathComponent
+    var path: String
+
+    func delete(using sftp: SFTPClient) async throws {
+        if isDirectory {
+            try await sftp.rmdir(at: path)
+        } else {
+            try await sftp.remove(at: path)
+        }
+    }
+    func rename(to newName: String, using sftp: SFTPClient) async throws {
+        let newPath = "/\(path.split(separator: "/").dropLast().joined(separator: "/"))/\(newName)"
+        try await sftp.rename(at: path, to: newPath)
+    }
+    func move(to newPath: String, using sftp: SFTPClient) async throws {
+        try await sftp.rename(at: path, to: newPath)
+    }
+}
+
 struct SFTPView: View {
-    @State private var credential = {
+    @State private var credential : Credential? = {
         let keychain = keychain()
         if let key = keychain.allKeys().first {
             return keychain.getCredential(for: key)
@@ -19,10 +49,18 @@ struct SFTPView: View {
     }()
     @State private var sftp: SFTPClient?
     @State private var openedFile: String?
-    @State private var files: [SFTPPathComponent]?
+    @State private var files: [SFTPItem]?
     @State private var showHiddenFiles = false
     @State private var currentDirectory = ""
     @State private var fileContent = ""
+    @Environment(\.editMode) var editMode: Binding<EditMode>?
+    @State private var isloading = false
+
+    init() {}
+
+    init(credential: Credential) {
+        self._credential = .init(initialValue: credential)
+    }
 
     var body: some View {
         if let credential {
@@ -33,9 +71,9 @@ struct SFTPView: View {
                             HStack{
                                 Spacer()
                                 AsyncButton("Save") {
-                                    let openedFile = try await sftp?.openFile(filePath: openedFile, flags: [.create, .truncate, .write])
-                                    try await openedFile?.write(.init(string: fileContent))
-                                    try await openedFile?.close()
+                                    try await sftp?.withFile(filePath: openedFile, flags: [.create, .read, .write], { file in
+                                        try await file.write(.init(string: fileContent))
+                                    })
                                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                                 }
                                 .buttonStyle(.bordered)
@@ -43,6 +81,7 @@ struct SFTPView: View {
                                 AsyncButton {
                                     self.openedFile = nil
                                     fileContent.removeAll()
+                                    try await updateDirectories(appending: "")
                                 } label: {
                                     Image(systemName: "xmark")
                                 }
@@ -51,8 +90,13 @@ struct SFTPView: View {
                                 .controlSize(.large)
                             }
                         }
-                } else {
+                } else if let sftp {
                     HStack {
+                        AsyncButton{
+                            try await goHome()
+                        } label: {
+                            Image(systemName: "house")
+                        }
                         Picker("Server", selection: $credential) {
                             let keychain = keychain()
                             let credentials = keychain.allKeys().compactMap({keychain.getCredential(for: $0)})
@@ -67,68 +111,57 @@ struct SFTPView: View {
                         }
                         .toggleStyle(.button)
                         .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.circle)
                     }
+                    .padding(.horizontal)
                     Form{
-                        let ffiles = (files ?? []).filter({showHiddenFiles || !$0.filename.hasPrefix(".")})
-                        ForEach(ffiles, id: \.longname) { file in
-                            AsyncButton{
-                                do {
-                                    try await updateDirectories(appending: file.filename)
-                                } catch {
-                                    if let openedFile = try await sftp?.openFile(filePath: "\(currentDirectory)/\(file.filename)", flags: [.read]) {
-                                        fileContent = try await String(buffer: openedFile.readAll())
-                                        self.openedFile = try await String(buffer: openedFile.readAll())
-                                        try await openedFile.close()
-                                    }
-                                }
-                            } label: {
-                                HStack {
-                                    Text(file.filename)
-                                    Spacer()
-                                    VStack(alignment: .trailing){
-                                        Text((file.attributes.size ?? 0)/1024, format: .number) + Text("KB")
-                                        Text(file.attributes.accessModificationTime?.modificationTime ?? .now, format: .dateTime)
-                                    }
-                                }
+                        let ffiles : [SFTPItem] = (files ?? []).filter({showHiddenFiles || !$0.file.filename.hasPrefix(".")})
+                        if currentDirectory != "/" {
+                            AsyncButton("go up") {
+                                try await updateDirectories(appending: "..")
                             }
                             .foregroundStyle(.primary)
-                            .swipeActions {
-                                AsyncButton("Delete", systemImage: "trash", role: .destructive) {
-                                    do {
-                                        try await sftp?.remove(at: "\(currentDirectory)/\(file.filename)")
-                                    } catch {
-                                        try await sftp?.rmdir(at: "\(currentDirectory)/\(file.filename)")
-                                    }
-                                }
+                        }
+                        ForEach(ffiles, id: \.id) { file in
+                            FileSummaryView(sftp: sftp, file: file) { append in
+                                try await updateDirectories(appending: append)
+                            } openFile: { filename in
+                                try await openFile(named: filename)
                             }
-                            .contextMenu{
-                                AsyncButton("Delete", systemImage: "trash", role: .destructive) {
-                                    do {
-                                        try await sftp?.remove(at: "\(currentDirectory)/\(file.filename)")
-                                    } catch {
-                                        try await sftp?.rmdir(at: "\(currentDirectory)/\(file.filename)")
-                                    }
-                                }
-                            }
-
                         }
                     }
                     .refreshable {
                         try? await updateDirectories(appending: "")
                     }
+                    .safeAreaInset(edge: .bottom) {
+                        HStack {
+                            Spacer()
+                            Menu{
+                                AsyncButton("New Directory") {
+                                    try await sftp.createDirectory(atPath: "\(currentDirectory)/\(ConfirmatorManager.shared.ask("What do you want to call the new directory?"))")
+                                    try await updateDirectories(appending: "")
+                                }
+                                .foregroundStyle(.primary)
+                                AsyncButton("New File") {
+                                    try await openFile(named: "\(currentDirectory)/\(ConfirmatorManager.shared.ask("What do you want to call the new file?"))")
+                                }
+                                .foregroundStyle(.primary)
+                            } label: {
+                                Image(systemName: "plus")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .buttonBorderShape(.circle)
+                            .controlSize(.large)
+                            .padding(.bottom)
+                            .padding(.trailing)
+                        }
+                    }
                 }
             }
+            .redacted(reason: isloading ? .invalidated : [])
             .task(id: credential) {
                 do {
-                    try? await sftp?.close()
-                    sftp = try await SSHClient.connect(host: credential.host, authenticationMethod: .passwordBased(username: credential.username, password: credential.password), hostKeyValidator: .acceptAnything(), reconnect: .always).openSFTP()
-                    do {
-                        currentDirectory = "/\(credential.username)"
-                        try await updateDirectories(appending: "")
-                    } catch {
-                        currentDirectory = "/"
-                        try await updateDirectories(appending: "")
-                    }
+                    try await goHome()
                 } catch {
                     print(error)
                 }
@@ -137,13 +170,69 @@ struct SFTPView: View {
             ContentUnavailableView("You don't have any servers yet.", systemImage: "server.rack")
         }
     }
+    func goHome() async throws {
+        guard let credential else { return }
+        try? await sftp?.close()
+        sftp = try await SSHClient.connect(host: credential.host, authenticationMethod: .passwordBased(username: credential.username, password: credential.password), hostKeyValidator: .acceptAnything(), reconnect: .always).openSFTP()
+        do {
+            currentDirectory = "/\(credential.username)"
+            try await updateDirectories(appending: "")
+        } catch {
+            currentDirectory = "/"
+            try await updateDirectories(appending: "")
+        }
+    }
     func updateDirectories(appending: String) async throws {
+        isloading = true
+        defer { isloading = false}
+        if !(sftp?.isActive ?? false) {
+            try? await sftp?.close()
+            guard let credential else {return}
+            sftp = try await SSHClient.connect(host: credential.host, authenticationMethod: .passwordBased(username: credential.username, password: credential.password), hostKeyValidator: .acceptAnything(), reconnect: .always).openSFTP()
+        }
         let newDir = currentDirectory.appending(appending.isEmpty ? "" : "/").appending(appending)
-        files = try await sftp?.listDirectory(atPath: newDir).flatMap({$0.components}).sorted(by: {$0.filename < $1.filename})
-        currentDirectory = newDir
+        print(newDir)
+        if let newFiles = try await sftp?.listDirectory(atPath: newDir).flatMap({$0.components}).sorted(by: {$0.filename < $1.filename}){
+            files = []
+            let filenames: [String] = newFiles.map({$0.filename})
+            let dirs = await withTaskGroup(of: (key: String, value: Bool).self) { group in
+                for file in filenames {
+                    group.addTask{
+                        let filepath = "\(newDir)/\(file)"
+                        do {
+                            let _ = try await sftp?.listDirectory(atPath: filepath)
+                            return (filepath, true)
+                        } catch {
+                            return (filepath, false)
+                        }
+                    }
+                }
+                var returns = [String : Bool]()
+                for await result in group {
+                    returns[result.key] = result.value
+                }
+                return returns
+            }
+            currentDirectory = newDir
+            for file in newFiles {
+                let filepath = "\(newDir)/\(file.filename)"
+                files?.append(.init(isDirectory: dirs[filepath] ?? false, file: file, path: filepath))
+            }
+        }
+        print("end")
+    }
+    func openFile(named filename: String) async throws {
+        guard let sftp else { return }
+        let openedFile = try await sftp.openFile(filePath: "\(currentDirectory)/\(filename)", flags: [.read, .create])
+        do {
+            fileContent = try await String(buffer: openedFile.readAll())
+            self.openedFile = "\(currentDirectory)/\(filename)"
+            try await openedFile.close()
+        } catch {
+            try await openedFile.close()
+            throw error
+        }
     }
 }
 
-#Preview {
-    SFTPView()
-}
+
