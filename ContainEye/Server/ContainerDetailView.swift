@@ -27,6 +27,7 @@ struct ContainerDetailView: View {
                         VStack{}.id("end")
                     }
                 }
+                .defaultScrollAnchor(.center)
                 .padding()
                 .background(.accent.opacity(0.1), in: .rect(cornerRadius: 15))
                 .padding()
