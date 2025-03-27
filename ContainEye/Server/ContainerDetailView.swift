@@ -28,7 +28,7 @@ struct ContainerDetailView: View {
                     }
                 }
                 .padding()
-                .background(Color.accentColor.tertiary, in: .rect(cornerRadius: 15))
+                .background(.accent.opacity(0.1), in: .rect(cornerRadius: 15))
                 .padding()
             }
             .navigationTitle(container.name)

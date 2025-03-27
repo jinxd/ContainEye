@@ -57,7 +57,7 @@ struct ContainerSummaryView: View {
             }
             .frame(maxWidth: .infinity)
             .padding()
-            .background(Color.accentColor.quaternary.quaternary, in: RoundedProgressRectangle(cornerRadius: 15))
+            .background(.accent.opacity(0.1), in: RoundedProgressRectangle(cornerRadius: 15))
             .padding(.horizontal)
 #if !os(macOS)
             .navigationTransition(.zoom(sourceID: container.id, in: namespace!))

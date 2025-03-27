@@ -69,6 +69,7 @@ private struct Confirmator: View {
                             .focused($focused)
                         Button {
                             confirmator.continuation?.resume(returning: answer)
+                            confirmator.continuation = nil
                             confirmator.question = nil
                             answer.removeAll()
                         } label: {
@@ -85,6 +86,7 @@ private struct Confirmator: View {
 
                     Button("Cancel") {
                         confirmator.continuation?.resume(throwing: ConfirmatorError.cancelled)
+                        confirmator.continuation = nil
                         confirmator.question = nil
                         answer.removeAll()
                     }
@@ -125,6 +127,7 @@ private struct Confirmator: View {
                     AsyncButton(commandOutput == nil ? "Tap to Execute" : "Submit to ContainEye") {
                         if let commandOutput {
                             confirmator.continuation?.resume(returning: commandOutput)
+                            confirmator.continuation = nil
                             confirmator.command = nil
                             answer.removeAll()
                             self.commandOutput = nil
@@ -137,6 +140,7 @@ private struct Confirmator: View {
                     .disabled(server == nil)
                     Button("Cancel") {
                         confirmator.continuation?.resume(throwing: ConfirmatorError.cancelled)
+                        confirmator.continuation = nil
                         confirmator.command = nil
                         answer.removeAll()
                     }

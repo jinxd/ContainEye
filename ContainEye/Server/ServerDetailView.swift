@@ -115,7 +115,7 @@ struct ServerDetailView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(Color.accentColor.quaternary.quaternary, in: RoundedProgressRectangle(cornerRadius: 15))
+                    .background(.accent.opacity(0.1), in: RoundedProgressRectangle(cornerRadius: 15))
                     .padding()
                     .containerRelativeFrame(.vertical, count: 2, spacing: 10)
                     if containers.results.isEmpty {
