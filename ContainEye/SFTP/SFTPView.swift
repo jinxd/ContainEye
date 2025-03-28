@@ -125,8 +125,8 @@ struct SFTPView: View {
                         ForEach(ffiles, id: \.id) { file in
                             FileSummaryView(sftp: sftp, file: file) { append in
                                 try await updateDirectories(appending: append)
-                            } openFile: { filename in
-                                try await openFile(named: filename)
+                            } openFile: { path in
+                                try await openFile(path: path)
                             }
                         }
                     }
@@ -143,7 +143,7 @@ struct SFTPView: View {
                                 }
                                 .foregroundStyle(.primary)
                                 AsyncButton("New File") {
-                                    try await openFile(named: "\(currentDirectory)/\(ConfirmatorManager.shared.ask("What do you want to call the new file?"))")
+                                    try! await openFile(path: "\(currentDirectory)/\(ConfirmatorManager.shared.ask("What do you want to call the new file?"))")
                                 }
                                 .foregroundStyle(.primary)
                             } label: {
@@ -221,16 +221,16 @@ struct SFTPView: View {
         }
         print("end")
     }
-    func openFile(named filename: String) async throws {
+    func openFile(path: String) async throws {
         guard let sftp else { return }
-        let openedFile = try await sftp.openFile(filePath: "\(currentDirectory)/\(filename)", flags: [.read, .create])
         do {
-            fileContent = try await String(buffer: openedFile.readAll())
-            self.openedFile = "\(currentDirectory)/\(filename)"
+            let openedFile = try await sftp.openFile(filePath: path, flags: [.create, .read])
+            fileContent = (try? await String(buffer: openedFile.readAll())) ?? ""
+            self.openedFile = path
             try await openedFile.close()
         } catch {
-            try await openedFile.close()
-            throw error
+            fileContent = ""
+            self.openedFile = path
         }
     }
 }

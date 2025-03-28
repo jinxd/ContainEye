@@ -24,7 +24,7 @@ struct FileSummaryView: View {
             if file.isDirectory {
                 try await updateDirectory(file.file.filename)
             } else {
-                try await openFile(file.file.filename)
+                try await openFile(file.path)
             }
         } label: {
             HStack {
