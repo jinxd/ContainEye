@@ -143,7 +143,7 @@ struct SFTPView: View {
                                 }
                                 .foregroundStyle(.primary)
                                 AsyncButton("New File") {
-                                    try! await openFile(path: "\(currentDirectory)/\(ConfirmatorManager.shared.ask("What do you want to call the new file?"))")
+                                    try await openFile(path: "\(currentDirectory)/\(ConfirmatorManager.shared.ask("What do you want to call the new file?"))")
                                 }
                                 .foregroundStyle(.primary)
                             } label: {
