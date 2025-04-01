@@ -33,24 +33,23 @@ struct ServerSummaryView: View {
                 }
                 HStack{
                     Label(server.cpuCores == 1 ? "1 Core" : "\(server.cpuCores ?? 0) Cores", systemImage: "cpu")
-                    Spacer()
+                        .frame(maxWidth: .infinity)
                     Label("\((server.totalMemory ?? 0)/1_073_741_824.0, format: .number.precision(.fractionLength(1))) G", systemImage: "memorychip")
-                    Spacer()
+                        .frame(maxWidth: .infinity)
                     Label("\((server.totalDiskSpace ?? 0)/1_073_741_824.0, format: .number.precision(.fractionLength(0))) G", systemImage: "opticaldiscdrive")
-                    if let uptime = server.uptime {
-                        Spacer()
-                        (Text("\(Image(systemName: "power")) ") + Text(uptime, style: .relative))
-                            .lineLimit(1)
-                            .containerRelativeFrame(.horizontal) { len, axis in
-                                len/5
-                            }
-                    }
+                        .frame(maxWidth: .infinity)
+
+                    (Text("\(Image(systemName: "power")) ") + (server.uptime == nil ? Text("loading") : Text(server.uptime!, style: .relative)))
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity)
                 }
                 .padding(.vertical)
                 Divider()
                 HStack {
                     GridItemView.Percentage(title: "CPU", percentage: server.cpuUsage)
+                        .frame(maxWidth: .infinity)
                     GridItemView.Percentage(title: "RAM", percentage: server.memoryUsage)
+                        .frame(maxWidth: .infinity)
                     VStack {
                         if let networkUpstream = server.networkUpstream, let networkDownstream = server.networkDownstream {
                             Text("Network")
@@ -63,6 +62,8 @@ struct ServerSummaryView: View {
                             Label("\((networkDownstream/1024).formatted(.number.precision(.fractionLength(2)))) kb", systemImage: "arrow.down.circle")
                                 .animation(.smooth, value: networkDownstream)
                                 .lineLimit(1)
+                        } else {
+                            Text("loading up-/downstream")
                         }
                     }
                     .frame(maxWidth: .infinity)

@@ -76,7 +76,8 @@ enum LLM {
             return (responseString, conversation)
 
         } catch {
-            return ("Failed: \(error)", [[:]])
+
+            return await generate(prompt: prompt, systemPrompt: systemPrompt, history: history.suffix(3))
         }
     }
 

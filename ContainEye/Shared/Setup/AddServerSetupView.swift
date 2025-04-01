@@ -23,6 +23,8 @@ struct AddServerSetupView: View {
         case askAI
     }
 
+    @State private var currentHistory = [[String:String]]()
+
     var body: some View {
         VStack {
             Spacer()
@@ -111,11 +113,28 @@ produced the output:
 ```\(test.output ?? "no output")```
 instead of producing:
 ```\(test.expectedOutput)```
-which is what the test tried to verify. You can ask me how to fix the test.
-The regex must match exactly the entire output of the command.
+which is what the test tried to verify. You must ask the user how to fix the test using the question tool.
+The regex/string must match exactly the entire output of the command. Consider using | grep directly in the command.
 """)
                         }
                         .buttonStyle(.borderedProminent)
+
+                        AsyncButton("Add anyway and edit later") {
+                            try? await Logger.telemetry(
+                                "test.added",
+                                with: [
+                                    "servers":keychain().allKeys().count,
+                                    "tests":ServerTest.count(in: db!, matching: \.$credentialKey != "-")
+                                ]
+                            )
+                            try await test.write(to: db!)
+                            test = ServerTest(id: .random(in: (.min)...(.max)), title: "", credentialKey: "", command: "", expectedOutput: "", status: .notRun)
+                            UserDefaults.standard.set(ContentView.Screen.testList.rawValue, forKey: "screen")
+                            if let allowed = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) {
+                                Logger.telemetry(allowed ? "notifications.allowed" : "notifications.denied")
+                            }
+                        }
+                        .buttonStyle(.bordered)
                     }
                     .buttonBorderShape(.capsule)
                 }
@@ -140,12 +159,12 @@ The regex must match exactly the entire output of the command.
             NavigationLink("Learn about testing", value: Help.tests)
         }
     }
-    func generateTest(from test: ServerTest, description: String, using history: [[String:String]] = [[:]]) async throws -> ServerTest {
+    func generateTest(from test: ServerTest, description: String) async throws -> ServerTest {
         var test = test
         let dirtyLlmOutput = await LLM.generate(
             prompt: description,
             systemPrompt: LLM.addTestSystemPrompt,
-            history: history
+            history: currentHistory
         )
         let llmOutput = LLM.cleanLLMOutput(dirtyLlmOutput.output)
 
@@ -161,21 +180,8 @@ The regex must match exactly the entire output of the command.
         test.notes = testDescription
         testDescription.removeAll()
         field = nil
-        let newtest = await test.test()
-        if newtest.status == .failed {
-            return try await generateTest(from: newtest, description: """
-You need to fix the test \(newtest.title). It previously failed, because the command:
-```\(newtest.command)```
-produced the output:
-```\(newtest.output ?? "no output")```
-instead of producing:
-```\(newtest.expectedOutput)```
-which is what the test tried to verify. You can ask me how to fix the test.
-The regex must match exactly the entire output of the command.
-""", using: dirtyLlmOutput.history)
-        } else {
-            return newtest
-        }
+        currentHistory = dirtyLlmOutput.history
+        return await test.test()
     }
 
 }

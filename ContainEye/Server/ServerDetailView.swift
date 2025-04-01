@@ -79,14 +79,17 @@ struct ServerDetailView: View {
                                                 await server.fetchProcesses()
                                             }
                                         }
+                                        .gridCellAnchor(.topLeading)
                                         ForEach(processes.results) { process in
                                             GridRow{
                                                 Text(process.pid, format: .number)
                                                 Text(process.command)
+                                                    .frame(maxWidth: .infinity, alignment: .leading)
                                                 Text(process.user)
                                                 Text(process.cpuUsage, format: .number)
                                                 Text(process.memoryUsage, format: .number)
                                             }
+                                            .gridCellAnchor(.topLeading)
                                             .lineLimit(2)
                                             .overlay{
                                                 Rectangle()
