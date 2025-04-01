@@ -116,9 +116,12 @@ struct ServerTest: BlackbirdModel {
         guard let credential = keychain().getCredential(for: self.credentialKey) else {
             return "(Client Error) No credential in keychain"
         }
-            let output = try await retry { try await SSHClientActor.shared.execute(self.command, on: credential) }
-            return output
-                .trimmingFromEnd(character: "\n", upto: 1)
+            let fetchOutput: () async throws -> String = {
+                try await retry { try await SSHClientActor.shared.execute(self.command, on: credential) }
+                    .trimmingFromEnd(character: "\n", upto: 1)
+            }
+            let output = try await fetchOutput()
+            return await output.isEmpty ? try fetchOutput() : output
         } catch {
             do{
                 let _ = try await URLSession.shared.data(from: URL(string: "https://connectivitycheck.gstatic.com/generate_204")!)
