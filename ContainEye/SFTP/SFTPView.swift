@@ -167,7 +167,23 @@ struct SFTPView: View {
                 }
             }
         } else {
-            ContentUnavailableView("You don't have any servers yet.", systemImage: "server.rack")
+            let keychain = keychain()
+            let credentials = keychain.allKeys().compactMap({keychain.getCredential(for: $0)})
+            if credentials.isEmpty {
+                ContentUnavailableView("You don't have any servers yet.", systemImage: "server.rack")
+            } else {
+                VStack {
+                    Text("Select a server to connect to.")
+                        .font(.headline)
+                    List {
+                        ForEach(credentials, id: \.key) { credential in
+                            Button("Credential"){
+                                self.credential = credential
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
     func goHome() async throws {

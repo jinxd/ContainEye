@@ -168,7 +168,7 @@ struct ServerTest: BlackbirdModel {
     }
 }
 
-func retry<T>(count: Int = 15, _ block: () async throws -> T) async rethrows -> T {
+func retry<T>(count: Int = 5, _ block: () async throws -> T) async rethrows -> T {
     do {
         return try await block()
     } catch {
