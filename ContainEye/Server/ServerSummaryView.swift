@@ -32,11 +32,13 @@ struct ServerSummaryView: View {
                     }
                 }
                 HStack{
-                    Label(server.cpuCores == 1 ? "1 Core" : "\(server.cpuCores ?? 0) Cores", systemImage: "cpu")
+                    Label(server.cpuCores == 1 ? "1 Core" : "\(server.cpuCores?.formatted() ?? "loading") Cores", systemImage: "cpu")
                         .frame(maxWidth: .infinity)
                     Label("\((server.totalMemory ?? 0)/1_073_741_824.0, format: .number.precision(.fractionLength(1))) G", systemImage: "memorychip")
+                        .redacted(reason: server.totalMemory == nil ? .placeholder : [])
                         .frame(maxWidth: .infinity)
                     Label("\((server.totalDiskSpace ?? 0)/1_073_741_824.0, format: .number.precision(.fractionLength(0))) G", systemImage: "opticaldiscdrive")
+                        .redacted(reason: server.totalDiskSpace == nil ? .placeholder : [])
                         .frame(maxWidth: .infinity)
 
                     (Text("\(Image(systemName: "power")) ") + (server.uptime == nil ? Text("loading") : Text(server.uptime!, style: .relative)))
