@@ -116,6 +116,13 @@ extension Server {
         let (cpu, memory, disk, networkUpstreamResult, networkDownstreamResult, swap, io, steal, load, diskSpace, memTotal, cores) =
         await (cpuUsage, memoryUsage, diskUsage, networkUpstream, networkDownstream, swapUsage, ioWait, stealTime, systemLoad, totalDiskSpace, totalMemory, cpuCores)
 
+        guard cpu != nil || memory != nil || disk != nil ||
+        networkUpstreamResult != nil || networkDownstreamResult != nil ||
+        swap != nil || io != nil || steal != nil ||
+        load != nil || diskSpace != nil || memTotal != nil || cores != nil else {
+            return
+        }
+
         if var server = try? await server {
             server.cpuUsage = cpu ?? server.cpuUsage
             server.memoryUsage = memory ?? server.memoryUsage

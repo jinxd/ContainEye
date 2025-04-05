@@ -58,10 +58,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .current) { _ in
             Task{await self.hidden()}
         }
-        Task(priority: .background){
-            let date = await fetchOriginalPurchaseDate()?.formatted(date: .complete, time: .shortened) ?? "none"
-            Logger.telemetry("download.on \(date)")
-        }
     }
     func hidden() {
         print("hidden")

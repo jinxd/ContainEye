@@ -13,7 +13,6 @@ import Blackbird
 
 struct ContentView: View {
     @BlackbirdLiveModels({try await Server.read(from: $0, matching: .all, orderBy: .descending(\.$id))}) var servers
-    @State private var sheet = Sheet?.none
     @AppStorage("screen") private var screen = Screen.serverList
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.blackbirdDatabase) var db
@@ -42,24 +41,13 @@ struct ContentView: View {
             "\(rawValue)"
         }
     }
-
-    enum Sheet: Identifiable {
-        case feedback
-
-        var id: String {
-            switch self {
-            case .feedback:
-                "feedback"
-            }
-        }
-    }
     @State private var navigationPath = NavigationPath()
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
             VStack{
                 if screen == .setup {
-                    SetupView(sheet: $sheet)
+                    SetupView()
                         .onDisappear{
                             UserDefaults.standard.set(1, forKey: "setupScreen")
                         }
@@ -72,17 +60,14 @@ struct ContentView: View {
                             RemoteTerminalView()
                         }
                         Tab("Servers", systemImage: "server.rack", value: .serverList){
-                            ServersView(sheet: $sheet)
+                            ServersView()
                         }
                         Tab("Tests", systemImage: "testtube.2", value: .testList){
-                            ServerTestView(sheet: $sheet)
+                            ServerTestView()
                         }
                         Tab("More", systemImage: "ellipsis", value: .more){
-                            MoreView(sheet: $sheet)
+                            MoreView()
                         }
-                    }
-                    .onChange(of: screen, initial: true) {
-                        Logger.telemetry("viewing screen \(screen.localizedTitle)")
                     }
                 }
             }
@@ -110,7 +95,7 @@ struct ContentView: View {
 #if !os(macOS)
             .navigationBarTitleDisplayMode(.inline)
 #endif
-            .sheet(item: $sheet) { sheet in
+            .navigationDestination(for: Sheet.self){sheet in
                 SheetView(sheet: sheet)
 #if !os(macOS)
                     .navigationTransition(.zoom(sourceID: sheet.id, in: namespace))
@@ -134,10 +119,19 @@ struct ContentView: View {
                     .navigationTransition(.zoom(sourceID: test.id, in: namespace))
 #endif
             }
-            .navigationDestination(for: Help.self) { help in
-                HelpView(help: help)
+            .navigationDestination(for: URL.self) { url in
+                WebView(url: url)
+                    .ignoresSafeArea()
+                    .toolbar{
+                        Button{
+                            UIApplication.shared.open(url)
+                        } label: {
+                            Image(systemName: "safari")
+                        }
+                        ShareLink(item: url)
+                    }
 #if !os(macOS)
-                    .navigationTransition(.zoom(sourceID: help, in: namespace))
+                    .navigationTransition(.zoom(sourceID: url, in: namespace))
 #endif
             }
             .onContinueUserActivity(CSQueryContinuationActionType){ activity in

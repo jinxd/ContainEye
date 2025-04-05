@@ -8,7 +8,6 @@
 import SwiftUI
 
 struct SetupView: View {
-    @Binding var sheet: ContentView.Sheet?
     @AppStorage("setupScreen") private var setupScreen : Int = 0
     @AppStorage("screen") private var screen = ContentView.Screen.testList
 
@@ -16,13 +15,13 @@ struct SetupView: View {
 
         TabView(selection: $setupScreen) {
             Tab(value: 1){
-                SecondSetupView(screen: $setupScreen)
+                AddServerView(screen: $setupScreen)
             }
             Tab(value: 3){
                 WouldYouLikeToAddATestView(screen: $setupScreen)
             }
             Tab(value: 2){
-                AddServerSetupView(screen: $setupScreen)
+                AddTestView(screen: $setupScreen)
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
@@ -35,14 +34,11 @@ struct SetupView: View {
                 UserDefaults.standard.set(setupScreen == 1 ? ContentView.Screen.serverList.rawValue : ContentView.Screen.testList.rawValue, forKey: "screen")
             }
         }
-        .onChange(of: setupScreen, initial: true) {
-            Logger.telemetry("viewing screen \(setupScreen == 1 ? "server" : setupScreen == 2 ? "ask test setup" : "test setup")")
-        }
     }
 }
 
 #Preview {
-    SetupView(sheet: .constant(.none))
+    SetupView()
 }
 
 

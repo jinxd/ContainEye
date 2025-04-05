@@ -8,14 +8,17 @@
 import SwiftUI
 import PhotosUI
 import ButtonKit
+import TelemetryDeck
+
 
 struct SubmitFeedbackView: View {
     @State private var title = ""
     @State private var message = ""
-    @State private var feedbackType = FeedbackType.opinion
+    @State private var feedbackType = FeedbackType.question
     @Environment(\.dismiss) var dismiss
 
     enum FeedbackType: String, CaseIterable {
+        case question = "I don't understand something"
         case opinion = "Opinion"
         case bug = "Bug"
         case request = "Request"
@@ -40,27 +43,28 @@ struct SubmitFeedbackView: View {
                 TextField("Feedback message", text: $message, axis: .vertical)
                     .lineLimit(3...10)
             }
-            #warning("currently aptabase event parameters are not working...")
-//            Section("Directly"){
-//                AsyncButton("Submit Feedback") {
-//                    Logger.telemetry(
-//                        "Submit Feedback",
-//                        with:
-//                            [
-//                                "title" : title,
-//                                "message" : message
-//                            ]
-//                    )
-//                    await Logger.flushTelemetry()
-//                    dismiss()
-//                }
-//            }
-            Section("Currently Mail only") {
+            Section("Directly"){
+                AsyncButton("Submit Feedback") {
+                    TelemetryDeck.signal(
+                        "feedback",
+                        parameters:
+                            [
+                                "title" : title,
+                                "type" : feedbackType.rawValue,
+                                "message" : message
+                            ]
+                    )
+                    await Logger.flushTelemetry()
+                    dismiss()
+                }
+            }
+            Section("Mail only") {
                 if let url = URL(string: "mailto:contact@hannesnagel.com?subject=Feedback (\(feedbackType.rawValue)): \(title)&body=\(message)") {
-                    Link("Submit Feedback", destination: url)
+                    Link("Attach photos", destination: url)
                 }
             }
         }
+        .trackView("feedback")
         .navigationTitle("Submit Feedback")
 #if !os(macOS)
         .navigationBarTitleDisplayMode(.inline)

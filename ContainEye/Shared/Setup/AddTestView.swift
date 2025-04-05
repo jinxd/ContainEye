@@ -11,7 +11,7 @@ import ButtonKit
 import Blackbird
 import UserNotifications
 
-struct AddServerSetupView: View {
+struct AddTestView: View {
     @Binding var screen: Int
     @State private var test = ServerTest(id: .random(in: (.min)...(.max)), title: "", credentialKey: "", command: "", expectedOutput: "", status: .notRun)
     @FocusState private var field : Field?
@@ -156,8 +156,9 @@ The regex/string must match exactly the entire output of the command. Consider u
             }
             Spacer()
 
-            NavigationLink("Learn about testing", value: Help.tests)
+            NavigationLink("Learn about testing", value: URL.automatedTests)
         }
+        .trackView("setup/test")
     }
     func generateTest(from test: ServerTest, description: String) async throws -> ServerTest {
         var test = test

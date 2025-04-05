@@ -13,7 +13,6 @@ import Blackbird
 
 struct ServersView: View {
     @BlackbirdLiveModels({try await Server.read(from: $0, matching: .all, orderBy: .descending(\.$id))}) var servers
-    @Binding var sheet : ContentView.Sheet?
     @Environment(\.namespace) var namespace
     @Environment(\.blackbirdDatabase) private var db
 
@@ -24,44 +23,45 @@ struct ServersView: View {
                 if servers.results.isEmpty {
                     if servers.didLoad {
                         ContentUnavailableView("You don't have any servers yet.", systemImage: "server.rack")
+                            .trackView("servers/no-servers")
                     } else {
                         ProgressView()
                             .controlSize(.extraLarge)
                     }
-                }
-
-
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 500, maximum: 800))]) {
-                    ForEach(servers.results) {server in
-                        NavigationLink(value: server) {
-                            ServerSummaryView(server: server.liveModel, hostInsteadOfLabel: false)
-                                .contextMenu{
-                                    Menu {
-                                        AsyncButton("Delete", systemImage: "trash", role: .destructive) {
-                                            try keychain().remove(server.credentialKey)
-                                            for container in try await server.containers {
-                                                try await container.delete(from: db!)
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 500, maximum: 800))]) {
+                        ForEach(servers.results) {server in
+                            NavigationLink(value: server) {
+                                ServerSummaryView(server: server.liveModel, hostInsteadOfLabel: false)
+                                    .contextMenu{
+                                        Menu {
+                                            AsyncButton("Delete", systemImage: "trash", role: .destructive) {
+                                                try keychain().remove(server.credentialKey)
+                                                for container in try await server.containers {
+                                                    try await container.delete(from: db!)
+                                                }
+                                                try await server.delete(from: db!)
+                                                try keychain().remove(server.credentialKey)
                                             }
-                                            try await server.delete(from: db!)
-                                            try keychain().remove(server.credentialKey)
-                                        }
 
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
+                                        }
                                     }
-                                }
+                            }
+                            .matchedTransitionSource(id: server.id, in: namespace!)
+                            .buttonStyle(.plain)
                         }
-                        .matchedTransitionSource(id: server.id, in: namespace!)
-                        .buttonStyle(.plain)
                     }
+                    .trackView("servers")
                 }
 
                 Spacer()
 #if !os(macOS)
                 .drawingGroup()
 #endif
-                NavigationLink("Learn more", value: Help.servers)
-                    .matchedTransitionSource(id: Help.servers, in: namespace!)
+                NavigationLink("Learn more", value: URL.servers)
+                    .matchedTransitionSource(id: URL.servers, in: namespace!)
                 
             }
             .padding()
@@ -79,15 +79,10 @@ struct ServersView: View {
                 }
             }
         }
-        .refreshable {
-            for server in servers.results {
-                await server.fetchServerStats()
-            }
-        }
     }
 }
 
 
 #Preview {
-    ServersView(sheet: .constant(nil))
+    ServersView()
 }

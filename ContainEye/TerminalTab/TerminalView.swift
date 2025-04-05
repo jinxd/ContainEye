@@ -57,15 +57,18 @@ struct RemoteTerminalView: View {
                             view.setCurrentInputLine("history -a\n")
                             self.view = nil
                         }
+                        .trackView("terminal/connected")
 
 
                     TimelineView(.periodic(from: .now, by: 0.3)) { ctx in
-                        HStack{
+
                             let inputLine = view.currentInputLine.trimmingCharacters(in: .whitespaces)
                             let preitems = shortestStartingWith(inputLine, in: history, limit: 3)
                             let items = (preitems.isEmpty ? ["None"] : preitems)
+                        HStack{
                             ForEach(items, id: \.self) { suggestion in
                                 Button{
+                                    Logger.telemetry("tapped suggestion")
                                     view.setCurrentInputLine(suggestion)
                                 } label: {
                                     Text(suggestion)
@@ -79,6 +82,13 @@ struct RemoteTerminalView: View {
                                 .tint(suggestion == inputLine ? Color.blue : Color.black)
                                 .italic(suggestion == "None")
                                 .disabled(suggestion == "None")
+                            }
+                        }
+                        .onChange(of: inputLine){
+                            if !inputLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty{
+                                Logger.telemetry(
+                                    "terminal.typing"
+                                )
                             }
                         }
                         .padding(.horizontal)
@@ -99,6 +109,7 @@ struct RemoteTerminalView: View {
                             }
                             view = SSHTerminalView(credential: .init(key: credential.key, label: credential.label, host: credential.host, port: credential.port, username: credential.username, password: credential.password), useVolumeButtons: useVolumeButtons)
                         }
+                        .trackView("terminal/connecting")
                 }
             } else {
                 VStack {
@@ -116,6 +127,7 @@ struct RemoteTerminalView: View {
                     }
                     .pickerStyle(.inline)
                 }
+                .trackView("terminal/select-server")
             }
         }
         .preferredColorScheme(view == nil ? .none : .dark)

@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		3804821C2DA15A3500193CF5 /* TelemetryDeck in Frameworks */ = {isa = PBXBuildFile; productRef = 3804821B2DA15A3500193CF5 /* TelemetryDeck */; };
+		380482212DA15B2800193CF5 /* TelemetryDeck in Frameworks */ = {isa = PBXBuildFile; productRef = 380482202DA15B2800193CF5 /* TelemetryDeck */; };
 		380A104A2D438650009F3D42 /* Blackbird in Frameworks */ = {isa = PBXBuildFile; productRef = 380A10492D438650009F3D42 /* Blackbird */; };
 		384638B82D4030F900AA796B /* ButtonKit in Frameworks */ = {isa = PBXBuildFile; productRef = 384638B72D4030F900AA796B /* ButtonKit */; };
 		384638BB2D40310800AA796B /* KeychainAccess in Frameworks */ = {isa = PBXBuildFile; productRef = 384638BA2D40310800AA796B /* KeychainAccess */; };
@@ -95,10 +97,13 @@
 				AppIntents/IntentReturnView.swift,
 				AppIntents/TestServer.swift,
 				AppIntents/TestServers.swift,
+				Data/Container.swift,
 				Data/Credential.swift,
 				Data/DataStreamerError.swift,
 				"Data/Error+GenerateDescription.swift",
 				Data/Logger.swift,
+				Data/Process.swift,
+				Data/Server.swift,
 				Data/ServerError.swift,
 				Data/ServerTest.swift,
 				Data/SharedDatabase.swift,
@@ -160,6 +165,7 @@
 				384638B82D4030F900AA796B /* ButtonKit in Frameworks */,
 				380A104A2D438650009F3D42 /* Blackbird in Frameworks */,
 				38CA62D52D83692D00323394 /* CSSH in Frameworks */,
+				3804821C2DA15A3500193CF5 /* TelemetryDeck in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -188,6 +194,7 @@
 				389343D82D6475360052277F /* ButtonKit in Frameworks */,
 				389343C22D6474A00052277F /* SwiftUI.framework in Frameworks */,
 				389343C12D6474A00052277F /* WidgetKit.framework in Frameworks */,
+				380482212DA15B2800193CF5 /* TelemetryDeck in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -256,6 +263,7 @@
 				38DBC7F42D6B8ED900DA3942 /* Aptabase */,
 				38CA62D42D83692D00323394 /* CSSH */,
 				38516E4B2D92CE7D008CEC21 /* SwiftTerm */,
+				3804821B2DA15A3500193CF5 /* TelemetryDeck */,
 			);
 			productName = ContainEye;
 			productReference = 383319382D356EC0006CDAEA /* ContainEye.app */;
@@ -329,6 +337,7 @@
 				389343E82D6476EF0052277F /* Citadel */,
 				389343EA2D6476EF0052277F /* Blackbird */,
 				38DBC7F62D6B8EEA00DA3942 /* Aptabase */,
+				380482202DA15B2800193CF5 /* TelemetryDeck */,
 			);
 			productName = TestsWidgetExtension;
 			productReference = 389343C02D6474A00052277F /* TestsWidgetExtension.appex */;
@@ -377,6 +386,7 @@
 				38DBC7F32D6B8ED900DA3942 /* XCRemoteSwiftPackageReference "aptabase-swift" */,
 				38CA62D02D8368DC00323394 /* XCLocalSwiftPackageReference "SwiftTerm" */,
 				38CA62D32D83692D00323394 /* XCRemoteSwiftPackageReference "Libssh2Prebuild" */,
+				3804821A2DA15A3500193CF5 /* XCRemoteSwiftPackageReference "SwiftSDK" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 383319392D356EC0006CDAEA /* Products */;
@@ -885,6 +895,14 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		3804821A2DA15A3500193CF5 /* XCRemoteSwiftPackageReference "SwiftSDK" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/TelemetryDeck/SwiftSDK";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.9.2;
+			};
+		};
 		380A10482D438650009F3D42 /* XCRemoteSwiftPackageReference "Blackbird" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/marcoarment/Blackbird.git";
@@ -936,6 +954,16 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		3804821B2DA15A3500193CF5 /* TelemetryDeck */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3804821A2DA15A3500193CF5 /* XCRemoteSwiftPackageReference "SwiftSDK" */;
+			productName = TelemetryDeck;
+		};
+		380482202DA15B2800193CF5 /* TelemetryDeck */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3804821A2DA15A3500193CF5 /* XCRemoteSwiftPackageReference "SwiftSDK" */;
+			productName = TelemetryDeck;
+		};
 		380A10492D438650009F3D42 /* Blackbird */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 380A10482D438650009F3D42 /* XCRemoteSwiftPackageReference "Blackbird" */;

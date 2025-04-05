@@ -50,6 +50,10 @@ struct ContainEyeApp: App {
 #endif
                 .onReceive(ServerTest.changePublisher(in: db)){ _ in
                     WidgetCenter.shared.reloadAllTimelines()
+                    Task{try await Logger.updateData()}
+                }
+                .onReceive(Server.changePublisher(in: db)) { _ in
+                    Task{try await Logger.updateData()}
                 }
         }
 #if !os(macOS)

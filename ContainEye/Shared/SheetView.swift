@@ -7,20 +7,36 @@
 
 import SwiftUI
 
+enum Sheet: Identifiable {
+    case feedback, credits
+
+    var id: String {
+        switch self {
+        case .feedback:
+            "feedback"
+        case .credits:
+            "credits"
+        }
+    }
+}
+
 struct SheetView: View {
-    let sheet: ContentView.Sheet
+    let sheet: Sheet
     @Environment(\.namespace) var namespace
 
     var body: some View {
-        NavigationStack {
-            Group{
-                switch sheet {
-                case .feedback:
-                    SubmitFeedbackView()
+        Group{
+            switch sheet {
+            case .feedback:
+                SubmitFeedbackView()
 #if !os(macOS)
-                        .navigationTransition(.zoom(sourceID: sheet, in: namespace!))
+                    .navigationTransition(.zoom(sourceID: sheet, in: namespace!))
 #endif
-                }
+            case .credits:
+                CreditsView()
+#if !os(macOS)
+                    .navigationTransition(.zoom(sourceID: sheet, in: namespace!))
+#endif
             }
         }
     }

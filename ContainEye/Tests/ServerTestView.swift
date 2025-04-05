@@ -11,7 +11,6 @@ import ButtonKit
 import UserNotifications
 
 struct ServerTestView: View {
-    @Binding var sheet : ContentView.Sheet?
     @Environment(\.blackbirdDatabase) var db
     @BlackbirdLiveModels({
         try await ServerTest.read(
@@ -146,7 +145,7 @@ struct ServerTestView: View {
                     .animation(.smooth, value: test.results)
                     .padding(.vertical)
                 }
-                NavigationLink("Learn more", value: Help.tests)
+                NavigationLink("Learn more", value: URL.automatedTests)
 
 
             }
@@ -165,6 +164,6 @@ struct ServerTestView: View {
     let _ = Task{try await serverTest.write(to: db) }
     let serverTest2 = ServerTest(id: 19311, title: "Test", credentialKey: UUID().uuidString, command: "echo test", expectedOutput: "test", status: .success)
     let _ = Task{try await serverTest2.write(to: db) }
-    ServerTestView(sheet: .constant(nil))
+    ServerTestView()
         .environment(\.blackbirdDatabase, db)
 }

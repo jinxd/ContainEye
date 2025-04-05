@@ -1,5 +1,5 @@
 {
-  "originHash" : "56ce99f738e823c3582e1064d2ec43b4ed8c8390395802c4aa725f6fc066db87",
+  "originHash" : "67766a65c463e10adb2ace81b60987a9168ac4d3f474984d2c399ce92160b694",
   "pins" : [
     {
       "identity" : "aptabase-swift",
@@ -134,6 +134,15 @@
       "state" : {
         "revision" : "a34201439c74b53f0fd71ef11741af7e7caf01e1",
         "version" : "1.4.2"
+      }
+    },
+    {
+      "identity" : "swiftsdk",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/TelemetryDeck/SwiftSDK.git",
+      "state" : {
+        "revision" : "5cb2982470dc4830c4e7de5da4a5af1c50c304b4",
+        "version" : "2.9.2"
       }
     },
     {

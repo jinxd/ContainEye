@@ -8,12 +8,56 @@
 import Foundation
 import OSLog
 import Aptabase
+import TelemetryDeck
+import Blackbird
+import SwiftUI
+
+import os
 
 enum Logger {
     static let ui = os.Logger(subsystem: Bundle.main.bundleIdentifier!, category: "ui")
 
+    private static let lock = DispatchQueue(label: "com.nagel.ContainEye.LoggerLock", attributes: .concurrent)
+
+    nonisolated(unsafe) private static var _serverCount = ""
+    nonisolated(unsafe) private static var _serverTestCount = ""
+
+    static var serverCount: String {
+        get {
+            lock.sync { _serverCount }
+        }
+        set {
+            lock.async(flags: .barrier) { _serverCount = newValue }
+        }
+    }
+
+    static var serverTestCount: String {
+        get {
+            lock.sync { _serverTestCount }
+        }
+        set {
+            lock.async(flags: .barrier) { _serverTestCount = newValue }
+        }
+    }
+
     static func initTelemetry() {
-        Aptabase.shared.initialize(appKey: "A-SH-1638672524", with: .init(host: "https://analytics.hannesnagel.com"), userDefaultsGroup: "group.com.nagel.ContainEye")
+        let config = TelemetryDeck.Config(appID: "B2672C22-5A71-4BAE-848E-894C4A3C1D78")
+        config.defaultParameters = {
+            [
+                "tests": Logger.serverTestCount,
+                "servers": Logger.serverCount
+            ]
+        }
+        TelemetryDeck.initialize(config: config)
+
+        Aptabase.shared.initialize(
+            appKey: "A-SH-1638672524",
+            with: .init(host: "https://analytics.hannesnagel.com"),
+            userDefaultsGroup: "group.com.nagel.ContainEye"
+        )
+        Task{
+            try await updateData()
+        }
     }
 
     static func telemetry(_ message: String, with parameters: [String: Any] = [:]) {
@@ -21,7 +65,41 @@ enum Logger {
         Aptabase.shared.trackEvent(message/*, with: parameters*/)
     }
 
+    @MainActor
+    static func startDurationSignal(_ name: String, parameters: [String: String] = [:], includeBackgroundTime: Bool = false) {
+        telemetry(name.appending("/start"))
+        TelemetryDeck.startDurationSignal(name, parameters: parameters, includeBackgroundTime: includeBackgroundTime)
+    }
+    @MainActor
+    static func endDurationSignal(_ name: String, parameters: [String: String] = [:], floatValue: Double? = nil) {
+        telemetry(name.appending("/stop"))
+        TelemetryDeck.stopAndSendDurationSignal(name, parameters: parameters, floatValue: floatValue)
+    }
+
     static func flushTelemetry() async {
         await Aptabase.shared.flushNow()
+    }
+
+    static func updateData() async throws {
+        let testCount = try await ServerTest.count(in: SharedDatabase.db).formatted()
+        let count = try await Server.count(in: SharedDatabase.db).formatted()
+
+        lock.async(flags: .barrier) {
+            _serverTestCount = testCount
+            _serverCount = count
+        }
+    }
+}
+
+
+extension View {
+    func trackView(_ name: String) -> some View {
+        self
+            .onAppear{
+                Logger.startDurationSignal(name)
+            }
+            .onDisappear{
+                Logger.endDurationSignal(name)
+            }
     }
 }

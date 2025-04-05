@@ -166,11 +166,13 @@ struct SFTPView: View {
                     print(error)
                 }
             }
+            .trackView("sftp/connected")
         } else {
             let keychain = keychain()
             let credentials = keychain.allKeys().compactMap({keychain.getCredential(for: $0)})
             if credentials.isEmpty {
                 ContentUnavailableView("You don't have any servers yet.", systemImage: "server.rack")
+                    .trackView("sftp/no-servers")
             } else {
                 VStack {
                     Text("Select a server to connect to.")
@@ -183,6 +185,7 @@ struct SFTPView: View {
                         }
                     }
                 }
+                .trackView("sftp/select-server")
             }
         }
     }

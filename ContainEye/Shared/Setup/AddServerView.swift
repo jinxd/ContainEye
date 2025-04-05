@@ -8,7 +8,7 @@
 import SwiftUI
 import ButtonKit
 
-struct SecondSetupView: View {
+struct AddServerView: View {
     @Binding var screen: Int
     @State private var credential = Credential(key: UUID().uuidString, label: "", host: "", port: 22, username: "", password: "")
     @State private var showing = Field.label
@@ -77,7 +77,7 @@ struct SecondSetupView: View {
             .buttonBorderShape(.capsule)
             .disabled(nextButtonDisabled)
 
-            NavigationLink("Learn about Servers", value: Help.servers)
+            NavigationLink("Learn about Servers", value: URL.servers)
         }
         .onSubmit(of: .text) {
             guard showing != .password else { return }
