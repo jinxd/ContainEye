@@ -95,5 +95,6 @@ extension View {
             .onDisappear{
                 Logger.endDurationSignal(name)
             }
+            .trackNavigation(path: name)
     }
 }
