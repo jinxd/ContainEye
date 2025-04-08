@@ -1,5 +1,5 @@
 {
-  "originHash" : "67766a65c463e10adb2ace81b60987a9168ac4d3f474984d2c399ce92160b694",
+  "originHash" : "ab57f7d660b4785594ca1635bf808977ca871bb32b7f7c5b9a0834770fa4b737",
   "pins" : [
     {
       "identity" : "aptabase-swift",
@@ -7,7 +7,7 @@
       "location" : "https://github.com/hannesmnagel/aptabase-swift.git",
       "state" : {
         "branch" : "main",
-        "revision" : "e5347dc3e653afce91acf25eb11f425c6a7c9000"
+        "revision" : "cfd67fac2a228d448d9d2ac92ffc71589cc3ef00"
       }
     },
     {
@@ -42,8 +42,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/orlandos-nl/Citadel.git",
       "state" : {
-        "revision" : "be1a5bc51b29d64e89a223a755159b8a8c678f47",
-        "version" : "0.9.2"
+        "revision" : "f2cd2d6a089762aa84c7eca55fadc189c4bcd399",
+        "version" : "0.10.0"
       }
     },
     {
@@ -139,10 +139,10 @@
     {
       "identity" : "swiftsdk",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/TelemetryDeck/SwiftSDK.git",
+      "location" : "https://github.com/TelemetryDeck/SwiftSDK",
       "state" : {
-        "revision" : "5cb2982470dc4830c4e7de5da4a5af1c50c304b4",
-        "version" : "2.9.2"
+        "revision" : "501270cd33082c3fa430b724e849855482ed051c",
+        "version" : "2.9.3"
       }
     },
     {

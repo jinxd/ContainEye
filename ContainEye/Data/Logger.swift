@@ -52,8 +52,7 @@ enum Logger {
 
         Aptabase.shared.initialize(
             appKey: "A-SH-1638672524",
-            with: .init(host: "https://analytics.hannesnagel.com"),
-            userDefaultsGroup: "group.com.nagel.ContainEye"
+            with: .init(host: "https://analytics.hannesnagel.com")
         )
         Task{
             try await updateData()
@@ -61,8 +60,7 @@ enum Logger {
     }
 
     static func telemetry(_ message: String, with parameters: [String: Any] = [:]) {
-#warning("currently aptabase event parameters are not working...")
-        Aptabase.shared.trackEvent(message/*, with: parameters*/)
+        Aptabase.shared.trackEvent(message, with: parameters)
     }
 
     @MainActor
@@ -74,10 +72,6 @@ enum Logger {
     static func endDurationSignal(_ name: String, parameters: [String: String] = [:], floatValue: Double? = nil) {
         telemetry(name.appending("/stop"))
         TelemetryDeck.stopAndSendDurationSignal(name, parameters: parameters, floatValue: floatValue)
-    }
-
-    static func flushTelemetry() async {
-        await Aptabase.shared.flushNow()
     }
 
     static func updateData() async throws {

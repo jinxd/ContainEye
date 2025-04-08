@@ -29,9 +29,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             intent.tests = tests.map{$0.entity}
             let _ = try? await intent.perform()
             let _ = try? await intent.donate()
-            await Logger.flushTelemetry()
             completionHandler(.newData)
-
         }
         Task{
             try? await Task.sleep(for: .seconds(25))
@@ -67,7 +65,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
                     "app.closed"
                 )
             setLaunched(to: nil)
-            Task{await Logger.flushTelemetry()}
         }
     }
     func activated() {

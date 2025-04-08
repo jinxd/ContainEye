@@ -136,7 +136,6 @@ struct ServerTest: BlackbirdModel {
     func test() async -> ServerTest {
         guard credentialKey != "-" else {return self}
         Logger.telemetry("testing server")
-        await Logger.flushTelemetry()
         var test = self
         test.lastRun = .now
 
