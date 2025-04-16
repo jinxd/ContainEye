@@ -23,9 +23,13 @@ struct SFTPItem: Identifiable, Hashable, Equatable {
     var file: SFTPPathComponent
     var path: String
 
-    func delete(using sftp: SFTPClient) async throws {
+    func delete(using sftp: SFTPClient, credential: Credential) async throws {
         if isDirectory {
-            try await sftp.rmdir(at: path)
+            do {
+                try await sftp.rmdir(at: path)
+            } catch {
+                 let _ = try await SSHClientActor.shared.execute("rm -r \(path)", on: credential)
+            }
         } else {
             try await sftp.remove(at: path)
         }
@@ -123,7 +127,7 @@ struct SFTPView: View {
                             .foregroundStyle(.primary)
                         }
                         ForEach(ffiles, id: \.id) { file in
-                            FileSummaryView(sftp: sftp, file: file) { append in
+                            FileSummaryView(sftp: sftp, credential: credential, file: file) { append in
                                 try await updateDirectories(appending: append)
                             } openFile: { path in
                                 try await openFile(path: path)

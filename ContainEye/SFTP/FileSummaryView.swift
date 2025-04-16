@@ -13,6 +13,7 @@ import SwiftUI
 struct FileSummaryView: View {
     @Environment(\.editMode) var editMode
     let sftp: SFTPClient
+    let credential: Credential
     let file: SFTPItem
     let updateDirectory: (String) async throws -> Void
     let openFile: (String) async throws -> Void
@@ -51,7 +52,7 @@ struct FileSummaryView: View {
                 try await updateDirectory("")
             }
             AsyncButton("Delete", systemImage: "trash", role: .destructive) {
-                try await file.delete(using: sftp)
+                try await file.delete(using: sftp, credential: credential)
                 try await updateDirectory("")
             }
         }
@@ -61,7 +62,7 @@ struct FileSummaryView: View {
                 try await updateDirectory("")
             }
             AsyncButton("Delete", systemImage: "trash", role: .destructive) {
-                try await file.delete(using: sftp)
+                try await file.delete(using: sftp, credential: credential)
                 try await updateDirectory("")
             }
         }
