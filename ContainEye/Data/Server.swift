@@ -93,8 +93,15 @@ extension Server {
         async let cpuUsage = fetchMetric(command: "sar -u 1 3 | grep 'Average' | awk '{print (100 - $8) / 100}'")
         async let memoryUsage = fetchMetric(command: "free | grep Mem | awk '{print $3/$2}'")
         async let diskUsage = fetchMetric(command: "df / | grep / | awk '{ print $5 / 100 }'")
-        async let networkUpstream = fetchMetric(command: "sar -n DEV 1 2 | grep Average | grep eth0 | awk '{print $5 * 1024}'")
-        async let networkDownstream = fetchMetric(command: "sar -n DEV 1 2 | grep Average | grep eth0 | awk '{print $6 * 1024}'")
+        async let networkUpstream = fetchMetric(command: """
+iface=$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if ($i=="dev") print $(i+1); exit}'); \
+sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $5 * 1024}'
+""")
+
+        async let networkDownstream = fetchMetric(command: """
+iface=$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if ($i=="dev") print $(i+1); exit}'); \
+sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
+""")
         async let swapUsage = fetchMetric(command: "free | grep Swap | awk '{print $3/$2}'")
         async let ioWait = fetchMetric(command: "sar -u 1 3 | grep 'Average' | awk '{print $5 / 100}'")
         async let stealTime = fetchMetric(command: "sar -u 1 3 | grep 'Average' | awk '{print $6 / 100}'")
