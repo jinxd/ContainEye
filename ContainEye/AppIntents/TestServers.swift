@@ -41,7 +41,7 @@ struct TestServers: AppIntents.AppIntent {
             var test = test
             test = await test.test()
             if test.status == .failed {
-                await sendPushNotification(title: test.title, output: test.output ?? "No output")
+                await sendPushNotification(title: test.title, output: (test.output?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "").isEmpty ? "Empty output" : test.output!)
             }
             try? await test.write(to: db)
             finishedTests.append(test)
