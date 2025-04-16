@@ -30,10 +30,6 @@ extension SSHClient {
             }
         } catch {print("stderr threw: \(error)")}
 
-        print("stdout: ", "\"\(stdout)\"")
-        if exitCode != 0 {
-            print("stderr: ", "\"\(stderr)\"")
-        }
         return exitCode == 0 ? stdout : stderr.appending("\n").appending(stdout)
     }
 }
