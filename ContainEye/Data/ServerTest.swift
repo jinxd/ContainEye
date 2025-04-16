@@ -121,7 +121,7 @@ struct ServerTest: BlackbirdModel {
                     .trimmingFromEnd(character: "\n", upto: 1)
             }
             let output = try await fetchOutput()
-            return await output.isEmpty ? try fetchOutput() : output
+            return await output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? try fetchOutput() : output
         } catch {
             do{
                 let _ = try await URLSession.shared.data(from: URL(string: "https://connectivitycheck.gstatic.com/generate_204")!)
