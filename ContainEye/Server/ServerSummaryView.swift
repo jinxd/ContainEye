@@ -45,6 +45,7 @@ struct ServerSummaryView: View {
                         .lineLimit(1)
                         .frame(maxWidth: .infinity)
                 }
+                .lineLimit(1)
                 .padding(.vertical)
                 Divider()
                 HStack {
