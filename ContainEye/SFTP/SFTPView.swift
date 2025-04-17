@@ -7,6 +7,7 @@
 
 import ButtonKit
 import SwiftUI
+import UIKit
 @preconcurrency import Citadel
 
 struct SFTPItem: Identifiable, Hashable, Equatable {
@@ -43,6 +44,20 @@ struct SFTPItem: Identifiable, Hashable, Equatable {
     }
 }
 
+class DocumentInteractionController: NSObject, UIDocumentInteractionControllerDelegate {
+    var onDismiss: (() -> Void)?
+    
+    func documentInteractionControllerDidDismissOpenInMenu(_ controller: UIDocumentInteractionController) {
+        onDismiss?()
+    }
+}
+
+enum OpenDocumentMode {
+    case ask
+    case asText
+    case export
+}
+
 struct SFTPView: View {
     @State private var credential : Credential? = {
         let keychain = keychain()
@@ -59,11 +74,21 @@ struct SFTPView: View {
     @State private var fileContent = ""
     @Environment(\.editMode) var editMode: Binding<EditMode>?
     @State private var isloading = false
-
-    init() {}
+    @State private var documentController: UIDocumentInteractionController?
+    @State private var documentDelegate = DocumentInteractionController()
+    @State private var tempFileURL: URL?
+    
+    private let tempDirectory: URL = {
+        FileManager.default.temporaryDirectory.appendingPathComponent("ContainEye")
+    }()
+    
+    init() {
+        try? FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+    }
 
     init(credential: Credential) {
         self._credential = .init(initialValue: credential)
+        try? FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
     }
 
     var body: some View {
@@ -129,8 +154,8 @@ struct SFTPView: View {
                         ForEach(ffiles, id: \.id) { file in
                             FileSummaryView(sftp: sftp, credential: credential, file: file) { append in
                                 try await updateDirectories(appending: append)
-                            } openFile: { path in
-                                try await openFile(path: path)
+                            } openFile: { path, mode in
+                                try await openFile(path: path, mode: mode)
                             }
                         }
                     }
@@ -244,16 +269,141 @@ struct SFTPView: View {
         }
         print("end")
     }
-    func openFile(path: String) async throws {
+    func openFile(path: String, mode: OpenDocumentMode = .ask) async throws {
         guard let sftp else { return }
+        isloading = true
+        defer { isloading = false }
+        
+        // Create a temporary file URL
+        let fileName = URL(fileURLWithPath: path).lastPathComponent
+        let tempFileURL = tempDirectory.appendingPathComponent(fileName)
+        self.tempFileURL = tempFileURL
+        
         do {
+            // Read file from SFTP
             let openedFile = try await sftp.openFile(filePath: path, flags: [.create, .read])
-            fileContent = (try? await String(buffer: openedFile.readAll())) ?? ""
-            self.openedFile = path
+            let buffer = try await openedFile.readAll()
             try await openedFile.close()
+            let data = Data(buffer: buffer)
+            
+            try data.write(to: tempFileURL)
+            
+            // Handle different modes
+            switch mode {
+            case .asText:
+                if let content = String(data: data, encoding: .utf8) {
+                    await MainActor.run {
+                        self.fileContent = content
+                        self.openedFile = path
+                    }
+                }
+                
+            case .export:
+                await MainActor.run {
+                    let controller = UIDocumentInteractionController(url: tempFileURL)
+                    controller.delegate = self.documentDelegate
+                    self.documentController = controller
+                    
+                    // Set up the dismiss handler
+                    self.documentDelegate.onDismiss = {
+                        Task {
+                            do {
+                                // Read the modified file
+                                let modifiedData = try Data(contentsOf: tempFileURL)
+                                
+                                // Convert Data to ByteBuffer and write back to SFTP
+                                try await sftp.withFile(filePath: path, flags: [.create, .write]) { file in
+                                    try await file.write(.init(data: modifiedData))
+                                }
+                                
+                                // Clean up
+                                try? FileManager.default.removeItem(at: tempFileURL)
+                                self.tempFileURL = nil
+                                self.documentController = nil
+                                
+                                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                            } catch {
+                                print("Error saving file back to SFTP: \(error)")
+                            }
+                        }
+                    }
+                    
+                    // Present the document interaction controller
+                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                       let window = windowScene.windows.first,
+                       let rootViewController = window.rootViewController {
+                        controller.presentOpenInMenu(from: CGRect.zero, in: rootViewController.view, animated: true)
+                    }
+                }
+                
+            case .ask:
+                // Present action sheet
+                await MainActor.run {
+                    let alert = UIAlertController(title: "Open File", message: "How would you like to open this file?", preferredStyle: .actionSheet)
+                    
+                    // Add "Edit as Text" action
+                    alert.addAction(UIAlertAction(title: "Edit as Text", style: .default) { _ in
+                        let content = String(data: data, encoding: .utf8) ?? ""
+                        DispatchQueue.main.async {
+                            self.fileContent = content
+                            self.openedFile = path
+                        }
+                    })
+                    
+                    // Add "Export" action
+                    alert.addAction(UIAlertAction(title: "Export/Download", style: .default) { _ in
+                        let controller = UIDocumentInteractionController(url: tempFileURL)
+                        controller.delegate = self.documentDelegate
+                        self.documentController = controller
+                        
+                        // Set up the dismiss handler
+                        self.documentDelegate.onDismiss = {
+                            Task {
+                                do {
+                                    // Read the modified file
+                                    let modifiedData = try Data(contentsOf: tempFileURL)
+                                    
+                                    // Convert Data to ByteBuffer and write back to SFTP
+                                    try await sftp.withFile(filePath: path, flags: [.create, .write]) { file in
+                                        try await file.write(.init(data: modifiedData))
+                                    }
+                                    
+                                    // Clean up
+                                    try? FileManager.default.removeItem(at: tempFileURL)
+                                    self.tempFileURL = nil
+                                    self.documentController = nil
+                                    
+                                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                                } catch {
+                                    print("Error saving file back to SFTP: \(error)")
+                                }
+                            }
+                        }
+                        
+                        // Present the document interaction controller
+                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                           let window = windowScene.windows.first,
+                           let rootViewController = window.rootViewController {
+                            controller.presentOpenInMenu(from: CGRect.zero, in: rootViewController.view, animated: true)
+                        }
+                    })
+                    
+                    // Add cancel action
+                    alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in
+                        try? FileManager.default.removeItem(at: tempFileURL)
+                        self.tempFileURL = nil
+                    })
+                    
+                    // Present the alert
+                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                       let window = windowScene.windows.first,
+                       let rootViewController = window.rootViewController {
+                        rootViewController.present(alert, animated: true)
+                    }
+                }
+            }
         } catch {
-            fileContent = ""
-            self.openedFile = path
+            print("Error opening file: \(error)")
         }
     }
 }

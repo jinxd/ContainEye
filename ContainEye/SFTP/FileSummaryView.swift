@@ -16,7 +16,7 @@ struct FileSummaryView: View {
     let credential: Credential
     let file: SFTPItem
     let updateDirectory: (String) async throws -> Void
-    let openFile: (String) async throws -> Void
+    let openFile: (String,_ mode: OpenDocumentMode) async throws -> Void
 
     @State private var filename = ""
 
@@ -25,7 +25,7 @@ struct FileSummaryView: View {
             if file.isDirectory {
                 try await updateDirectory(file.file.filename)
             } else {
-                try await openFile(file.path)
+                try await openFile(file.path, .ask)
             }
         } label: {
             HStack {
@@ -56,14 +56,43 @@ struct FileSummaryView: View {
                 try await updateDirectory("")
             }
         }
-        .contextMenu{
-            AsyncButton("Rename", systemImage: "pencil.line") {
+        .contextMenu {
+            AsyncButton {
+                if file.isDirectory {
+                    try await updateDirectory(file.file.filename)
+                } else {
+                    try await openFile(file.path, .asText)
+                }
+            } label: {
+                Label("Open", systemImage: "folder")
+            }
+            
+            if !file.isDirectory {
+                AsyncButton {
+                    try await openFile(file.path, .asText)
+                } label: {
+                    Label("Open as Text", systemImage: "text.alignleft")
+                }
+                
+                AsyncButton {
+                    try await openFile(file.path, .export)
+                } label: {
+                    Label("Export", systemImage: "square.and.arrow.up")
+                }
+            }
+            
+            AsyncButton {
                 try await file.rename(to: ConfirmatorManager.shared.ask("What do you want to rename this \(file.isDirectory ? "directory" : "file") (\(file.file.filename)) to?"), using: sftp)
                 try await updateDirectory("")
+            } label: {
+                Label("Rename", systemImage: "pencil.line")
             }
-            AsyncButton("Delete", systemImage: "trash", role: .destructive) {
+            
+            AsyncButton(role: .destructive) {
                 try await file.delete(using: sftp, credential: credential)
                 try await updateDirectory("")
+            } label: {
+                Label("Delete", systemImage: "trash")
             }
         }
     }
