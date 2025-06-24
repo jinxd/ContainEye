@@ -29,7 +29,6 @@ struct TestServers: AppIntents.AppIntent {
 
     func perform() async throws -> some IntentResult & ReturnsValue<[ServerTest.ServerTestAppEntitiy]> & ShowsSnippetView {
         Logger.initTelemetry()
-        Logger.telemetry("using appintent testservers", with: ["count":tests.count])
         let db = SharedDatabase.db
         let tests = tests.map { $0.getServerTest() }
         var finishedTests: [ServerTest] = []

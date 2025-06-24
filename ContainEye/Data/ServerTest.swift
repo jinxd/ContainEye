@@ -135,7 +135,6 @@ struct ServerTest: BlackbirdModel {
 
     func test() async -> ServerTest {
         guard credentialKey != "-" else {return self}
-        Logger.telemetry("testing server")
         var test = self
         test.lastRun = .now
 
@@ -159,7 +158,7 @@ struct ServerTest: BlackbirdModel {
             test.status = .failed
         }
         test.output = output
-
+        if output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, test.status == .failed {return self}
         return test
     }
 

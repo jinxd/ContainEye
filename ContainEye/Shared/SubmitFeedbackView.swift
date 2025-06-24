@@ -54,15 +54,6 @@ struct SubmitFeedbackView: View {
                                 "message" : message
                             ]
                     )
-                    Logger.telemetry(
-                        "Submit Feedback",
-                        with:
-                            [
-                                "title" : title,
-                                "type" : feedbackType.rawValue,
-                                "message" : message
-                            ]
-                    )
                     dismiss()
                 }
             }

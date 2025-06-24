@@ -16,7 +16,6 @@ import Foundation
 
 enum LLM {
     static func generate(prompt: String, systemPrompt: String, history: [[String: String]] = []) async -> (output: String, history: [[String:String]]) {
-        Logger.telemetry("using ai", with: ["prompt": prompt])
 
         do {
             // Prepare the conversation history, ensuring the system prompt is always at the start

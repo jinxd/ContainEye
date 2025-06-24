@@ -22,8 +22,6 @@
 		389343E92D6476EF0052277F /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = 389343E82D6476EF0052277F /* Citadel */; };
 		389343EB2D6476EF0052277F /* Blackbird in Frameworks */ = {isa = PBXBuildFile; productRef = 389343EA2D6476EF0052277F /* Blackbird */; };
 		38CA62D52D83692D00323394 /* CSSH in Frameworks */ = {isa = PBXBuildFile; productRef = 38CA62D42D83692D00323394 /* CSSH */; };
-		38DBC7F52D6B8ED900DA3942 /* Aptabase in Frameworks */ = {isa = PBXBuildFile; productRef = 38DBC7F42D6B8ED900DA3942 /* Aptabase */; };
-		38DBC7F72D6B8EEA00DA3942 /* Aptabase in Frameworks */ = {isa = PBXBuildFile; productRef = 38DBC7F62D6B8EEA00DA3942 /* Aptabase */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -159,7 +157,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				38516E4C2D92CE7D008CEC21 /* SwiftTerm in Frameworks */,
-				38DBC7F52D6B8ED900DA3942 /* Aptabase in Frameworks */,
 				384638BE2D40312100AA796B /* Citadel in Frameworks */,
 				384638BB2D40310800AA796B /* KeychainAccess in Frameworks */,
 				384638B82D4030F900AA796B /* ButtonKit in Frameworks */,
@@ -189,7 +186,6 @@
 			files = (
 				389343EB2D6476EF0052277F /* Blackbird in Frameworks */,
 				389343E72D6476EF0052277F /* KeychainAccess in Frameworks */,
-				38DBC7F72D6B8EEA00DA3942 /* Aptabase in Frameworks */,
 				389343E92D6476EF0052277F /* Citadel in Frameworks */,
 				389343D82D6475360052277F /* ButtonKit in Frameworks */,
 				389343C22D6474A00052277F /* SwiftUI.framework in Frameworks */,
@@ -260,7 +256,6 @@
 				384638BA2D40310800AA796B /* KeychainAccess */,
 				384638BD2D40312100AA796B /* Citadel */,
 				380A10492D438650009F3D42 /* Blackbird */,
-				38DBC7F42D6B8ED900DA3942 /* Aptabase */,
 				38CA62D42D83692D00323394 /* CSSH */,
 				38516E4B2D92CE7D008CEC21 /* SwiftTerm */,
 				3804821B2DA15A3500193CF5 /* TelemetryDeck */,
@@ -336,7 +331,6 @@
 				389343E62D6476EF0052277F /* KeychainAccess */,
 				389343E82D6476EF0052277F /* Citadel */,
 				389343EA2D6476EF0052277F /* Blackbird */,
-				38DBC7F62D6B8EEA00DA3942 /* Aptabase */,
 				380482202DA15B2800193CF5 /* TelemetryDeck */,
 			);
 			productName = TestsWidgetExtension;
@@ -383,7 +377,6 @@
 				384638B92D40310800AA796B /* XCRemoteSwiftPackageReference "KeychainAccess" */,
 				384638BC2D40312100AA796B /* XCRemoteSwiftPackageReference "Citadel" */,
 				380A10482D438650009F3D42 /* XCRemoteSwiftPackageReference "Blackbird" */,
-				38DBC7F32D6B8ED900DA3942 /* XCRemoteSwiftPackageReference "aptabase-swift" */,
 				38CA62D02D8368DC00323394 /* XCLocalSwiftPackageReference "SwiftTerm" */,
 				38CA62D32D83692D00323394 /* XCRemoteSwiftPackageReference "Libssh2Prebuild" */,
 				3804821A2DA15A3500193CF5 /* XCRemoteSwiftPackageReference "SwiftSDK" */,
@@ -947,14 +940,6 @@
 				kind = branch;
 			};
 		};
-		38DBC7F32D6B8ED900DA3942 /* XCRemoteSwiftPackageReference "aptabase-swift" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/hannesmnagel/aptabase-swift.git";
-			requirement = {
-				branch = main;
-				kind = branch;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1017,16 +1002,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 38CA62D32D83692D00323394 /* XCRemoteSwiftPackageReference "Libssh2Prebuild" */;
 			productName = CSSH;
-		};
-		38DBC7F42D6B8ED900DA3942 /* Aptabase */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 38DBC7F32D6B8ED900DA3942 /* XCRemoteSwiftPackageReference "aptabase-swift" */;
-			productName = Aptabase;
-		};
-		38DBC7F62D6B8EEA00DA3942 /* Aptabase */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 38DBC7F32D6B8ED900DA3942 /* XCRemoteSwiftPackageReference "aptabase-swift" */;
-			productName = Aptabase;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

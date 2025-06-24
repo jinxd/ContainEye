@@ -25,7 +25,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: any Error) {
-        Logger.telemetry("silent push notification registration failed", with: ["error" : error.generateDescription()])
     }
 
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable : Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
@@ -36,7 +35,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         }
 
         let testTask = Task {
-            Logger.telemetry("received remote notification")
             let tests = (try? await ServerTest.read(from: SharedDatabase.db, matching: \.$credentialKey != "-", orderBy: .ascending(\.$lastRun), limit: 10)) ?? []
             let intent = TestServers()
             intent.tests = tests.map { $0.entity }
@@ -62,7 +60,6 @@ print("completion handler new data, ending bg task")
         Logger.initTelemetry()
 
         NotificationCenter.default.addObserver(forName: UIApplication.userDidTakeScreenshotNotification, object: nil, queue: .main) { _ in
-            Logger.telemetry("screenshot.taken")
         }
 
         super.init()
@@ -80,14 +77,12 @@ print("completion handler new data, ending bg task")
         print("activated")
         if launched == nil {
             launched = .now
-            Logger.telemetry("app.launched")
         }
     }
 
     func hidden() async {
         print("hidden")
         if launched != nil {
-            Logger.telemetry("app.closed")
             launched = nil
         }
 
@@ -104,12 +99,9 @@ print("completion handler new data, ending bg task")
             }
         }
 
-        Logger.telemetry("starting background task")
         do {
             try await Task.sleep(for: .seconds(29))
-            Logger.telemetry("background task done")
         } catch {
-            Logger.telemetry("background task interrupted", with: ["error": error.localizedDescription])
         }
     }
 

@@ -48,11 +48,11 @@ struct ContainEyeApp: App {
                     }
                 }
 #endif
-                .onReceive(ServerTest.changePublisher(in: db)){ _ in
+                .onReceive(ServerTest.changePublisher(in: db).receive(on: DispatchQueue.main)){ _ in
                     WidgetCenter.shared.reloadAllTimelines()
                     Task{try await Logger.updateData()}
                 }
-                .onReceive(Server.changePublisher(in: db)) { _ in
+                .onReceive(Server.changePublisher(in: db).receive(on: DispatchQueue.main)) { _ in
                     Task{try await Logger.updateData()}
                 }
         }

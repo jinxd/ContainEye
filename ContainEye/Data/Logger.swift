@@ -7,7 +7,6 @@
 
 import Foundation
 import OSLog
-import Aptabase
 import TelemetryDeck
 import Blackbird
 import SwiftUI
@@ -50,27 +49,18 @@ enum Logger {
         }
         TelemetryDeck.initialize(config: config)
 
-        Aptabase.shared.initialize(
-            appKey: "A-SH-1638672524",
-            with: .init(host: "https://analytics.hannesnagel.com")
-        )
         Task{
             try await updateData()
         }
     }
 
-    static func telemetry(_ message: String, with parameters: [String: Any] = [:]) {
-        Aptabase.shared.trackEvent(message, with: parameters)
-    }
 
     @MainActor
     static func startDurationSignal(_ name: String, parameters: [String: String] = [:], includeBackgroundTime: Bool = false) {
-        telemetry(name.appending("/start"))
         TelemetryDeck.startDurationSignal(name, parameters: parameters, includeBackgroundTime: includeBackgroundTime)
     }
     @MainActor
     static func endDurationSignal(_ name: String, parameters: [String: String] = [:], floatValue: Double? = nil) {
-        telemetry(name.appending("/stop"))
         TelemetryDeck.stopAndSendDurationSignal(name, parameters: parameters, floatValue: floatValue)
     }
 

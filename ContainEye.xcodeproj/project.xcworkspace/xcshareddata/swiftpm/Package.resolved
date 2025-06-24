@@ -1,22 +1,13 @@
 {
-  "originHash" : "ab57f7d660b4785594ca1635bf808977ca871bb32b7f7c5b9a0834770fa4b737",
+  "originHash" : "5dccbea9889551368c7dc7cdb4ba8c3b1c6ee54ded26b7e8b55c4515382ecc95",
   "pins" : [
-    {
-      "identity" : "aptabase-swift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/hannesmnagel/aptabase-swift.git",
-      "state" : {
-        "branch" : "main",
-        "revision" : "cfd67fac2a228d448d9d2ac92ffc71589cc3ef00"
-      }
-    },
     {
       "identity" : "bigint",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/attaswift/BigInt.git",
       "state" : {
-        "revision" : "114343a705df4725dfe7ab8a2a326b8883cfd79c",
-        "version" : "5.5.1"
+        "revision" : "99c4b9fb0f52dc9182aee106b07c3d205583b98c",
+        "version" : "5.6.0"
       }
     },
     {
@@ -42,17 +33,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/orlandos-nl/Citadel.git",
       "state" : {
-        "revision" : "f2cd2d6a089762aa84c7eca55fadc189c4bcd399",
-        "version" : "0.10.0"
-      }
-    },
-    {
-      "identity" : "colorizeswift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/mtynior/ColorizeSwift.git",
-      "state" : {
-        "revision" : "4e7daa138510b77a3cce9f6a31a116f8536347dd",
-        "version" : "1.7.0"
+        "revision" : "a4059d8cbd58408ea5fd9941dc3c461c9334b6d9",
+        "version" : "0.10.1"
       }
     },
     {
@@ -78,8 +60,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-atomics.git",
       "state" : {
-        "revision" : "cd142fd2f64be2100422d658e7411e39489da985",
-        "version" : "1.2.0"
+        "revision" : "b601256eab081c0f92f059e12818ac1d4f178ff7",
+        "version" : "1.3.0"
       }
     },
     {
@@ -87,8 +69,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-collections.git",
       "state" : {
-        "revision" : "671108c96644956dddcd89dd59c203dcdb36cec7",
-        "version" : "1.1.4"
+        "revision" : "c1805596154bb3a265fd91b8ac0c4433b4348fb0",
+        "version" : "1.2.0"
       }
     },
     {
@@ -114,8 +96,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-nio.git",
       "state" : {
-        "revision" : "c51907a839e63ebf0ba2076bba73dd96436bd1b9",
-        "version" : "2.81.0"
+        "revision" : "34d486b01cd891297ac615e40d5999536a1e138d",
+        "version" : "2.83.0"
       }
     },
     {
@@ -132,8 +114,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-system.git",
       "state" : {
-        "revision" : "a34201439c74b53f0fd71ef11741af7e7caf01e1",
-        "version" : "1.4.2"
+        "revision" : "61e4ca4b81b9e09e2ec863b00c340eb13497dac6",
+        "version" : "1.5.0"
       }
     },
     {
@@ -141,17 +123,17 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/TelemetryDeck/SwiftSDK",
       "state" : {
-        "revision" : "501270cd33082c3fa430b724e849855482ed051c",
-        "version" : "2.9.3"
+        "revision" : "a7fd1eb469589a3c8fd8cc3abe19b092b5d674dc",
+        "version" : "2.9.4"
       }
     },
     {
-      "identity" : "swiftsh.binaries",
+      "identity" : "swiftsh",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/migueldeicaza/SwiftSH.binaries",
+      "location" : "https://github.com/migueldeicaza/SwiftSH",
       "state" : {
-        "branch" : "master",
-        "revision" : "3ce9fc6d6f26f43952a78d9431985a59008d14d2"
+        "revision" : "3f2dd003fcfe03194bd7ce3701646a818abeb1f8",
+        "version" : "0.2.0"
       }
     }
   ],

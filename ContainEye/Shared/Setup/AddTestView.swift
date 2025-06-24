@@ -77,19 +77,10 @@ struct AddTestView: View {
                 } else {
 
                     AsyncButton("Add the test") {
-                        try? await Logger.telemetry(
-                            "test.added",
-                            with: [
-                                "servers":keychain().allKeys().count,
-                                "tests":ServerTest.count(in: db!, matching: \.$credentialKey != "-")
-                            ]
-                        )
                         try await test.write(to: db!)
                         test = ServerTest(id: .random(in: (.min)...(.max)), title: "", credentialKey: "", command: "", expectedOutput: "", status: .notRun)
                         screen = 3
-                        if let allowed = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) {
-                            Logger.telemetry(allowed ? "notifications.allowed" : "notifications.denied")
-                        }
+                        _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
                     }
                     .buttonStyle(.bordered)
 
@@ -120,19 +111,10 @@ The regex/string must match exactly the entire output of the command. Consider u
                         .buttonStyle(.borderedProminent)
 
                         AsyncButton("Add anyway and edit later") {
-                            try? await Logger.telemetry(
-                                "test.added",
-                                with: [
-                                    "servers":keychain().allKeys().count,
-                                    "tests":ServerTest.count(in: db!, matching: \.$credentialKey != "-")
-                                ]
-                            )
                             try await test.write(to: db!)
                             test = ServerTest(id: .random(in: (.min)...(.max)), title: "", credentialKey: "", command: "", expectedOutput: "", status: .notRun)
                             UserDefaults.standard.set(ContentView.Screen.testList.rawValue, forKey: "screen")
-                            if let allowed = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) {
-                                Logger.telemetry(allowed ? "notifications.allowed" : "notifications.denied")
-                            }
+                            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
                         }
                         .buttonStyle(.bordered)
                     }

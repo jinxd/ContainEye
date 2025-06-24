@@ -27,6 +27,7 @@ public struct Credential: Codable, Equatable, Hashable {
     }
 }
 import MediaPlayer
+import AVFoundation
 
 class SSHTerminalModel: NSObject {
     var credential: Credential
@@ -38,14 +39,61 @@ class SSHTerminalModel: NSObject {
     var volumeView: MPVolumeView?
     var slider: UISlider?
     var setBackToVolume: Float = 0.5
+    private var isObservingVolume = false
 
     var lines: [String] {
         terminalView?.attrStrBuffer!.array.compactMap({$0?.attrStr.string}) ?? []
     }
     public var currentInputLine: String {
-        lines.last { string in
-            !string.trimmingCharacters(in: .whitespaces).isEmpty
-        }?.split(separator: "#").dropFirst().joined(separator: "#") ?? ""
+        // Get the current cursor position from terminal
+        guard let terminal = terminalView?.getTerminal() else { return "" }
+        
+        let currentRow = terminal.buffer.y
+        let totalRows = terminal.rows
+        
+        // Look for the prompt line (contains $ or # at the end typically)
+        var promptLineIndex = -1
+        for i in stride(from: currentRow, through: max(0, currentRow - 20), by: -1) {
+            if i < lines.count {
+                let line = lines[i]
+                // Look for common shell prompts
+                if line.contains("$") || line.contains("#") || line.contains("%") {
+                    promptLineIndex = i
+                    break
+                }
+            }
+        }
+        
+        if promptLineIndex == -1 {
+            // Fallback to old method if no prompt found
+            return lines.last { string in
+                !string.trimmingCharacters(in: .whitespaces).isEmpty
+            }?.split(separator: "#").dropFirst().joined(separator: "#") ?? ""
+        }
+        
+        // Extract command from prompt line to current line
+        var commandParts: [String] = []
+        
+        for i in promptLineIndex...min(currentRow, lines.count - 1) {
+            let line = lines[i]
+            if i == promptLineIndex {
+                // Extract everything after the last prompt symbol
+                let promptSymbols = ["$ ", "# ", "% ", "> "]
+                var commandPart = line
+                for symbol in promptSymbols {
+                    if let range = line.range(of: symbol, options: .backwards) {
+                        commandPart = String(line[range.upperBound...])
+                        break
+                    }
+                }
+                commandParts.append(commandPart)
+            } else {
+                // Add continuation lines
+                commandParts.append(line)
+            }
+        }
+        
+        return commandParts.joined(separator: " ").trimmingCharacters(in: .whitespaces)
     }
 
     init(credential: Credential, useVolumeButtons: Bool) {
@@ -79,7 +127,10 @@ class SSHTerminalModel: NSObject {
         }
         try? AVAudioSession.sharedInstance().setCategory(.ambient, options: .mixWithOthers)
         try? AVAudioSession.sharedInstance().setActive(true, options: [])
-        AVAudioSession.sharedInstance().addObserver(self, forKeyPath: "outputVolume", options: [.new], context: nil)
+        if !isObservingVolume {
+            AVAudioSession.sharedInstance().addObserver(self, forKeyPath: "outputVolume", options: [.new], context: nil)
+            isObservingVolume = true
+        }
         self.terminalView!.addSubview(volumeView)
         authenticationChallenge = .byPassword(username: credential.username, password: credential.password)
 
@@ -99,7 +150,8 @@ class SSHTerminalModel: NSObject {
     private func connectSSH() {
         guard let shell = shell else { return }
 
-        shell.withCallback { [unowned self] (data: Data?, error: Data?) in
+        shell.withCallback { [weak self] (data: Data?, error: Data?) in
+            guard let self = self else { return }
             if let d = data {
                 let sliced = Array(d)[0...]
                 let blocksize = 1024
@@ -118,7 +170,8 @@ class SSHTerminalModel: NSObject {
         }
         .connect()
         .authenticate(authenticationChallenge)
-        .open { [unowned self] error in
+        .open { [weak self] error in
+            guard let self = self else { return }
             if let error = error {
                 self.terminalView?.feed(text: "[ERROR] \(error)\n")
             } else {
@@ -136,6 +189,36 @@ class SSHTerminalModel: NSObject {
             }
         }
     }
+    
+    func cleanup() {
+        // Disconnect SSH
+        shell?.close {
+            print("SSH connection closed")
+        }
+        shell = nil
+        
+        // Remove volume observer
+        if isObservingVolume {
+            AVAudioSession.sharedInstance().removeObserver(self, forKeyPath: "outputVolume")
+            isObservingVolume = false
+        }
+        
+        // Deactivate audio session
+        try? AVAudioSession.sharedInstance().setActive(false, options: [])
+        
+        // Clean up views
+        volumeView?.removeFromSuperview()
+        volumeView = nil
+        slider = nil
+        terminalView = nil
+        
+        print("SSHTerminalModel cleaned up")
+    }
+    
+    deinit {
+        cleanup()
+        print("SSHTerminalModel deinit")
+    }
 }
 
 class AppTerminalView: TerminalView, TerminalViewDelegate {
@@ -145,6 +228,18 @@ class AppTerminalView: TerminalView, TerminalViewDelegate {
         self.model = model
         super.init(frame: .init(x: 0, y: 0, width: 400, height: 400), font: .monospacedSystemFont(ofSize: 12, weight: .regular))
         terminalDelegate = self
+        
+        // Enable smart tab completion
+        enableSmartTabCompletion = true
+        onTabCompletion = { [weak self] input in
+            self?.handleTabCompletion(input: input)
+        }
+    }
+    
+    private func handleTabCompletion(input: String) {
+        // This can be used to trigger completion in the parent view
+        // For now, we'll just print the input for debugging
+        print("Tab completion requested for: \(input)")
     }
 
     required init?(coder: NSCoder) {
@@ -189,10 +284,14 @@ public struct SSHTerminalView: UIViewRepresentable {
             terminalView.send(txt: "\n")
             return
         }
-        for i in 0..<model.currentInputLine.count {
-            model.terminalView?.deleteBackward()
+        
+        let currentCommand = model.currentInputLine
+        // Clear current input by sending Ctrl+C then clearing line
+        model.terminalView?.send(txt: "\u{03}") // Ctrl+C to cancel current command
+        // Small delay to ensure the command is cancelled
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.model.terminalView?.insertText(newValue)
         }
-        model.terminalView?.insertText(newValue)
     }
     public var useVolumeButtons: Bool {
         get {model.useVolumeButtons}
@@ -210,5 +309,14 @@ public struct SSHTerminalView: UIViewRepresentable {
     }
 
     public func updateUIView(_ uiView: TerminalView, context: Context) {}
+    
+    public func cleanup() {
+        model.cleanup()
+    }
+    
+    public static func dismantleUIView(_ uiView: TerminalView, coordinator: Coordinator) {
+        // Additional cleanup if needed
+        print("SSHTerminalView dismantled")
+    }
 }
 

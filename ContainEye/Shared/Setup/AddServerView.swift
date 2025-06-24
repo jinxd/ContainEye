@@ -115,7 +115,6 @@ struct AddServerView: View {
             .set(data, key: credential.key)
 
 
-        Logger.telemetry("Added server", with: ["total":keychain().allKeys().count])
     }
     var questionText: Text {
         switch showing {

@@ -38,10 +38,15 @@ struct ContainerDetailView: View {
 #endif
             .task{
                 while !Task.isCancelled {
-                    if await !(container.server?.isConnected ?? false) {try? await container.server?.connect()}
-                    await container.server?.fetchServerStats()
+                    if await !(container.server?.isConnected ?? false) {
+                        try? await container.server?.connect()
+                    }
+                    
+                    // Update container stats and details
+                    await container.server?.fetchDockerStats()
                     try? await container.fetchDetails()
-                    try? await Task.sleep(for: .seconds(1))
+                    
+                    try? await Task.sleep(for: .seconds(2))
                 }
             }
         }

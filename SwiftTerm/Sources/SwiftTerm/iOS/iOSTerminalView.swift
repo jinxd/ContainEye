@@ -38,6 +38,60 @@ internal var log: Logger = Logger(subsystem: "org.tirania.SwiftTerm", category: 
  */
 open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollViewDelegate {
     public var lines : [String] {attrStrBuffer?.array.compactMap({$0?.attrStr.string}) ?? []}
+    
+    /**
+     * Extract the current input line for completion
+     */
+    public func getCurrentInputLine() -> String {
+        guard let terminal = terminal else { return "" }
+        
+        let currentRow = terminal.buffer.y
+        let lines = self.lines
+        
+        // Look for the prompt line (contains $ or # at the end typically)
+        var promptLineIndex = -1
+        for i in stride(from: currentRow, through: max(0, currentRow - 20), by: -1) {
+            if i < lines.count {
+                let line = lines[i]
+                // Look for common shell prompts
+                if line.contains("$") || line.contains("#") || line.contains("%") {
+                    promptLineIndex = i
+                    break
+                }
+            }
+        }
+        
+        if promptLineIndex == -1 {
+            // Fallback to last non-empty line
+            return lines.last { string in
+                !string.trimmingCharacters(in: .whitespaces).isEmpty
+            }?.split(separator: "#").dropFirst().joined(separator: "#") ?? ""
+        }
+        
+        // Extract command from prompt line to current line
+        var commandParts: [String] = []
+        
+        for i in promptLineIndex...min(currentRow, lines.count - 1) {
+            let line = lines[i]
+            if i == promptLineIndex {
+                // Extract everything after the last prompt symbol
+                let promptSymbols = ["$ ", "# ", "% ", "> "]
+                var commandPart = line
+                for symbol in promptSymbols {
+                    if let range = line.range(of: symbol, options: .backwards) {
+                        commandPart = String(line[range.upperBound...])
+                        break
+                    }
+                }
+                commandParts.append(commandPart)
+            } else {
+                // Add continuation lines
+                commandParts.append(line)
+            }
+        }
+        
+        return commandParts.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+    }
     struct FontSet {
         public let normal: UIFont
         let bold: UIFont
@@ -86,6 +140,16 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
      * does not do anything, and selection and panning are still processed.
      */
     public var allowMouseReporting: Bool = true
+    
+    /**
+     * Enable smart tab completion instead of sending raw tab character
+     */
+    public var enableSmartTabCompletion: Bool = true
+    
+    /**
+     * Closure for handling tab completion requests
+     */
+    public var onTabCompletion: ((String) -> Void)?
     
     var accessibility: AccessibilityService = AccessibilityService()
     var search: SearchService!
@@ -1006,7 +1070,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 data = .bytes (returnByteSequence)
                 
             case .keyboardTab:
-                data = .bytes ([9])
+                if enableSmartTabCompletion {
+                    // Extract current input line and trigger completion
+                    let currentInput = getCurrentInputLine()
+                    onTabCompletion?(currentInput)
+                    didHandleEvent = true
+                } else {
+                    data = .bytes ([9])
+                }
 
             case .keyboardF1:
                 data = .bytes (EscapeSequences.cmdF [1])

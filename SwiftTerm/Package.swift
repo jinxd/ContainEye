@@ -17,13 +17,13 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftSH.binaries", .branch("master"))
+        .package(url: "https://github.com/migueldeicaza/SwiftSH", from: "0.1.0")
     ],
     targets: [
         .target(
             name: "SwiftTerm",
             dependencies: [
-                .product(name: "SwiftSH", package: "SwiftSH.binaries")
+                .product(name: "SwiftSH", package: "SwiftSH")
             ],
             path: "Sources/SwiftTerm"
         ),

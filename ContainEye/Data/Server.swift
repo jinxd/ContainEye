@@ -189,15 +189,76 @@ sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
                 }
             }
             await fetchProcesses()
-            guard !Task.isCancelled, stopped.isEmpty && output.isEmpty else { return }
-            for container in containers.filter(
-                {container in
-                    !newContainers.contains(where: { $0.id == container.id })
-                }) {
-                try await container.delete(from: db)
+            
+            // Remove containers that no longer exist on the server
+            // Only remove if we can confirm they don't exist with multiple checks
+            for container in containers.filter({ container in
+                !newContainers.contains(where: { $0.id == container.id })
+            }) {
+                // Use multiple verification methods to be absolutely sure
+                var containerExists = false
+                var verificationFailed = false
+                
+                // Method 1: Check by ID
+                let checkByIdCommand = "docker ps -a --filter \"id=\(container.id)\" --format \"{{.ID}}\" 2>/dev/null && echo 'CMD_SUCCESS' || echo 'CMD_FAILED'"
+                if let idOutput = try? await execute(checkByIdCommand) {
+                    let lines = idOutput.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    if lines.contains("CMD_SUCCESS") {
+                        // Command executed successfully
+                        if lines.contains(container.id) {
+                            containerExists = true
+                            print("✓ Container \(container.name) (\(container.id)) confirmed by ID check")
+                        }
+                    } else if lines.contains("CMD_FAILED") {
+                        // Command failed (Docker not available, etc.)
+                        verificationFailed = true
+                        print("⚠️ Docker ID check failed for \(container.name) (\(container.id)) - keeping container")
+                    } else if lines.isEmpty || lines.allSatisfy({ $0.isEmpty }) {
+                        // Empty response - could be network issue, be conservative
+                        verificationFailed = true
+                        print("⚠️ Empty response for container ID check \(container.name) (\(container.id)) - keeping container")
+                    }
+                } else {
+                    verificationFailed = true
+                    print("⚠️ Could not execute ID check for container \(container.name) (\(container.id)) - keeping container")
+                }
+                
+                // Method 2: Check by name as backup (only if ID check succeeded)
+                if !verificationFailed && !containerExists {
+                    let checkByNameCommand = "docker ps -a --filter \"name=^/\(container.name)$\" --format \"{{.Names}}\" 2>/dev/null && echo 'CMD_SUCCESS' || echo 'CMD_FAILED'"
+                    if let nameOutput = try? await execute(checkByNameCommand) {
+                        let lines = nameOutput.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        if lines.contains("CMD_SUCCESS") {
+                            if lines.contains(container.name) {
+                                containerExists = true
+                                print("✓ Container \(container.name) (\(container.id)) confirmed by name check")
+                            }
+                        } else if lines.contains("CMD_FAILED") || lines.isEmpty || lines.allSatisfy({ $0.isEmpty }) {
+                            verificationFailed = true
+                            print("⚠️ Docker name check inconclusive for \(container.name) (\(container.id)) - keeping container")
+                        }
+                    } else {
+                        verificationFailed = true
+                        print("⚠️ Could not execute name check for container \(container.name) (\(container.id)) - keeping container")
+                    }
+                }
+                
+                // Only delete if we're absolutely certain the container doesn't exist
+                if !verificationFailed && !containerExists {
+                    try await container.delete(from: db)
+                    print("🗑️ Deleted confirmed non-existent container: \(container.name) (\(container.id))")
+                } else if verificationFailed {
+                    print("🔒 Keeping container \(container.name) (\(container.id)) due to verification failure")
+                } else {
+                    print("💾 Keeping existing container \(container.name) (\(container.id))")
+                }
             }
         } catch {
         }
+    }
+    
+    func clearCachedContainers() async throws {
+        try await Container.delete(from: db, matching: \.$serverId == id)
     }
 
     private func fetchMetric(command: String) async -> Double? {
