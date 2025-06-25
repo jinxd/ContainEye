@@ -7,8 +7,10 @@
 
 import SwiftUI
 import SwiftTerm
+import Blackbird
 
 struct RemoteTerminalView: View {
+    @BlackbirdLiveModels({try await Server.read(from: $0, matching: .all)}) var servers
     @State private var credential: Credential?
     @State private var history = [String]()
     @AppStorage("useVolumeButtons") private var useVolumeButtons = false
@@ -115,29 +117,84 @@ struct RemoteTerminalView: View {
                                 self.history = Array(Set(historyString.components(separatedBy: "\n").reversed())).filter({$0.trimmingCharacters(in: .whitespaces).count > 1})
                                     .filter({$0 != command})
                             } catch {
-                                print(error)
+                                ConfirmatorManager.shared.showError(error, title: "Terminal Connection Failed")
                             }
                             view = SSHTerminalView(credential: .init(key: credential.key, label: credential.label, host: credential.host, port: credential.port, username: credential.username, password: credential.password), useVolumeButtons: useVolumeButtons)
                         }
                         .trackView("terminal/connecting")
                 }
             } else {
-                VStack {
-                    Text("Select a server to connect to").monospaced()
-                    Picker(selection: $credential) {
-                        let keychain = keychain()
-                        let credentials = keychain.allKeys().compactMap({keychain.getCredential(for: $0)})
-                        Text("None")
-                            .tag(Credential?.none)
-                        ForEach(credentials, id: \.key) { credential in
-                            Text(credential.label)
-                                .tag(credential)
+                let keychain = keychain()
+                let credentials = keychain.allKeys().compactMap({keychain.getCredential(for: $0)})
+                
+                if credentials.isEmpty {
+                    ContentUnavailableView("You don't have any servers yet.", systemImage: "terminal")
+                        .trackView("terminal/no-servers")
+                } else {
+                    VStack {
+                        VStack {
+                            Image(systemName: "terminal.fill")
+                                .font(.system(size: 60))
+                                .foregroundStyle(.green)
+                                .symbolEffect(.pulse)
+                            
+                            Text("Connect to Terminal")
+                                .font(.largeTitle)
+                                .fontWeight(.bold)
+                                .foregroundStyle(.primary)
+                            
+                            Text("Select a server to open an SSH terminal session")
+                                .font(.body)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
                         }
-                    } label: {
+                        .padding()
+                        
+                        LazyVGrid(columns: [
+                            GridItem(.flexible()),
+                            GridItem(.flexible())
+                        ]) {
+                            ForEach(credentials, id: \.key) { credential in
+                                Button {
+                                    self.credential = credential
+                                } label: {
+                                    VStack {
+                                        if let server = servers.results.first(where: { $0.credentialKey == credential.key }) {
+                                            OSIconView(server: server, size: 32)
+                                        } else {
+                                            Image(systemName: "terminal")
+                                                .font(.title)
+                                                .foregroundStyle(.green)
+                                        }
+                                        
+                                        Text(credential.label)
+                                            .font(.headline)
+                                            .foregroundStyle(.primary)
+                                            .lineLimit(2)
+                                            .multilineTextAlignment(.center)
+                                        
+                                        Text(credential.host)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .fill(.green.opacity(0.05))
+                                            .stroke(.green.opacity(0.2), lineWidth: 1)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal)
+                        
+                        Spacer()
                     }
-                    .pickerStyle(.inline)
+                    .trackView("terminal/select-server")
                 }
-                .trackView("terminal/select-server")
             }
         }
         .preferredColorScheme(view == nil ? .none : .dark)
@@ -274,6 +331,7 @@ struct RemoteTerminalView: View {
                 self.completionSuggestions = suggestions
             }
         } catch {
+            // Don't show completion errors to user as they're not critical
             print("Completion error: \(error)")
         }
     }

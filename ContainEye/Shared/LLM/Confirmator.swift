@@ -21,6 +21,8 @@ final class ConfirmatorManager {
     var continuation: CheckedContinuation<String, any Error>?
     var question: String?
     var command: String?
+    var errorMessage: String?
+    var errorTitle: String?
 
     func ask(_ question: String) async throws -> String {
         self.question = question
@@ -34,9 +36,61 @@ final class ConfirmatorManager {
             self.continuation = con
         }
     }
+    
+    /// Show error message globally, filtering out CancellationError
+    func showError(_ error: Error, title: String = "Error") {
+        // Skip showing CancellationError and similar cancellation-related errors
+        if error is CancellationError {
+            return
+        }
+        
+        let nsError = error as NSError
+        // Skip various cancellation error codes
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+            return
+        }
+        if nsError.domain == NSCocoaErrorDomain && nsError.code == NSUserCancelledError {
+            return
+        }
+        
+        // Check for string-based cancellation indicators
+        let errorDescription = error.localizedDescription.lowercased()
+        if errorDescription.contains("cancel") || errorDescription.contains("cancelled") {
+            return
+        }
+        
+        self.errorTitle = title
+        self.errorMessage = error.localizedDescription
+    }
+    
+    /// Show custom error message
+    func showError(_ message: String, title: String = "Error") {
+        self.errorTitle = title
+        self.errorMessage = message
+    }
+    
+    /// Clear error state
+    func clearError() {
+        self.errorMessage = nil
+        self.errorTitle = nil
+    }
 }
-enum ConfirmatorError: Error {
-    case cancelled
+
+// MARK: - Global Error Reporting
+extension ConfirmatorManager {
+    /// Global error reporting function - use anywhere in the app
+    static func reportError(_ error: Error, title: String = "Error") {
+        Task { @MainActor in
+            shared.showError(error, title: title)
+        }
+    }
+    
+    /// Global error reporting function for custom messages
+    static func reportError(_ message: String, title: String = "Error") {
+        Task { @MainActor in
+            shared.showError(message, title: title)
+        }
+    }
 }
 
 import Blackbird
@@ -56,7 +110,7 @@ private struct Confirmator: View {
     @State private var commandOutput: String?
 
     var body: some View {
-        if confirmator.question != nil || confirmator.command != nil {
+        if confirmator.question != nil || confirmator.command != nil || confirmator.errorMessage != nil {
             VStack {
                 if let question = confirmator.question {
                     Spacer()
@@ -85,7 +139,7 @@ private struct Confirmator: View {
                     .padding(.horizontal, 30)
 
                     Button("Cancel") {
-                        confirmator.continuation?.resume(throwing: ConfirmatorError.cancelled)
+                        confirmator.continuation?.resume(throwing: CancellationError())
                         confirmator.continuation = nil
                         confirmator.question = nil
                         answer.removeAll()
@@ -139,12 +193,42 @@ private struct Confirmator: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(server == nil)
                     Button("Cancel") {
-                        confirmator.continuation?.resume(throwing: ConfirmatorError.cancelled)
+                        confirmator.continuation?.resume(throwing: CancellationError())
                         confirmator.continuation = nil
                         confirmator.command = nil
                         answer.removeAll()
                     }
                     .buttonStyle(.bordered)
+                } else if let errorMessage = confirmator.errorMessage {
+                    VStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 60))
+                            .foregroundStyle(.red)
+                            .symbolEffect(.pulse)
+                        
+                        Text(confirmator.errorTitle ?? "Error")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundStyle(.primary)
+                        
+                        Text(errorMessage)
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding()
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(.red.opacity(0.05))
+                                    .stroke(.red.opacity(0.2), lineWidth: 1)
+                            )
+                        
+                        Button("Dismiss") {
+                            confirmator.clearError()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                    }
+                    .padding()
                 }
             }
             .buttonBorderShape(.roundedRectangle(radius: 15))

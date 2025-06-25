@@ -34,6 +34,9 @@ struct Server: BlackbirdModel {
     @BlackbirdColumn var totalMemory: Double?
     @BlackbirdColumn var cpuCores: Int?
     @BlackbirdColumn var processSortOrder: ProcessSortOrder?
+    @BlackbirdColumn var osType: String?
+    @BlackbirdColumn var osVersion: String?
+    @BlackbirdColumn var iconData: Data?
 
     enum ProcessSortOrder: String, RawRepresentable, BlackbirdStringEnum {
         typealias RawValue = String
@@ -110,6 +113,9 @@ sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
         async let totalDiskSpace = fetchMetric(command: "df --output=size / | tail -n 1 | awk '{print $1 * 1024}'")
         async let totalMemory = fetchMetric(command: "free | grep Mem | awk '{print $2 * 1024}'")
         async let cpuCores = fetchMetric(command: "nproc")
+        
+        // Detect OS information
+        await detectOSInfo()
 
         var newUptime = Date?.none
         let uptimeCommand = "date +%s -d \"$(uptime -s)\""
@@ -355,5 +361,190 @@ sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
         if let credential {
             return try await SSHClientActor.shared.execute(command, on: credential)
         } else {return ""}
+    }
+    
+    private func detectOSInfo() async {
+        // Try multiple methods to detect OS
+        var osType: String?
+        var osVersion: String?
+        
+        // Method 1: /etc/os-release (most modern distributions)
+        if let osReleaseOutput = try? await execute("cat /etc/os-release 2>/dev/null") {
+            osType = parseOSFromRelease(osReleaseOutput)
+            osVersion = parseVersionFromRelease(osReleaseOutput)
+        }
+        
+        // Method 2: lsb_release (if available)
+        if osType == nil, let lsbOutput = try? await execute("lsb_release -d 2>/dev/null | cut -f2") {
+            osType = parseOSFromLSB(lsbOutput.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        
+        // Method 3: Check specific files for older systems
+        if osType == nil {
+            if let _ = try? await execute("test -f /etc/redhat-release && echo 'exists'") {
+                if let content = try? await execute("cat /etc/redhat-release") {
+                    osType = parseOSFromRedHat(content)
+                }
+            } else if let _ = try? await execute("test -f /etc/debian_version && echo 'exists'") {
+                osType = "debian"
+            }
+        }
+        
+        // Method 4: uname fallback
+        if osType == nil {
+            if let unameOutput = try? await execute("uname -s") {
+                osType = unameOutput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            }
+        }
+        
+        // Update server with OS info if detected
+        if let osType = osType, var server = try? await server {
+            server.osType = osType
+            server.osVersion = osVersion
+            try? await server.write(to: db)
+            
+            // Fetch icon if we don't have one
+            if server.iconData == nil {
+                await fetchOSIcon(for: osType)
+            }
+        }
+    }
+    
+    private func parseOSFromRelease(_ content: String) -> String? {
+        let lines = content.components(separatedBy: .newlines)
+        for line in lines {
+            if line.hasPrefix("ID=") {
+                let id = line.replacingOccurrences(of: "ID=", with: "").trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+                return id.lowercased()
+            }
+        }
+        
+        // Fallback to NAME field
+        for line in lines {
+            if line.hasPrefix("NAME=") {
+                let name = line.replacingOccurrences(of: "NAME=", with: "").trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+                return parseOSFromName(name)
+            }
+        }
+        return nil
+    }
+    
+    private func parseVersionFromRelease(_ content: String) -> String? {
+        let lines = content.components(separatedBy: .newlines)
+        for line in lines {
+            if line.hasPrefix("VERSION_ID=") {
+                return line.replacingOccurrences(of: "VERSION_ID=", with: "").trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            }
+        }
+        return nil
+    }
+    
+    private func parseOSFromLSB(_ content: String) -> String? {
+        return parseOSFromName(content)
+    }
+    
+    private func parseOSFromRedHat(_ content: String) -> String? {
+        let lower = content.lowercased()
+        if lower.contains("centos") { return "centos" }
+        if lower.contains("red hat") || lower.contains("rhel") { return "rhel" }
+        if lower.contains("fedora") { return "fedora" }
+        return "rhel" // Default for Red Hat family
+    }
+    
+    private func parseOSFromName(_ name: String) -> String? {
+        let lower = name.lowercased()
+        if lower.contains("ubuntu") { return "ubuntu" }
+        if lower.contains("debian") { return "debian" }
+        if lower.contains("centos") { return "centos" }
+        if lower.contains("red hat") || lower.contains("rhel") { return "rhel" }
+        if lower.contains("fedora") { return "fedora" }
+        if lower.contains("suse") || lower.contains("opensuse") { return "opensuse" }
+        if lower.contains("arch") { return "arch" }
+        if lower.contains("alpine") { return "alpine" }
+        if lower.contains("mint") { return "mint" }
+        if lower.contains("kali") { return "kali" }
+        if lower.contains("manjaro") { return "manjaro" }
+        return nil
+    }
+    
+    private func fetchOSIcon(for osType: String) async {
+        // Map OS types to icon URLs
+        let iconURLs: [String: String] = [
+            "ubuntu": "https://assets.ubuntu.com/v1/29985a98-ubuntu-logo32.png",
+            "debian": "https://www.debian.org/logos/openlogo-nd-25.png",
+            "centos": "https://wiki.centos.org/ArtWork/Brand/Logo?action=AttachFile&do=get&target=centos-logo-light.png",
+            "rhel": "https://www.redhat.com/cms/managed-files/styles/wysiwyg_full_width/s3/Logo-Red_Hat-A-Color-RGB.png",
+            "fedora": "https://fedoraproject.org/static/images/fedora-logotext.png",
+            "opensuse": "https://en.opensuse.org/images/c/cd/Button-colour.png",
+            "arch": "https://archlinux.org/static/logos/archlinux-logo-dark-90dpi.ebdee92a15b3.png",
+            "alpine": "https://alpinelinux.org/alpine-logo.png",
+            "mint": "https://www.linuxmint.com/img/logo.png",
+            "kali": "https://www.kali.org/images/kali-logo.png",
+            "manjaro": "https://manjaro.org/img/manjaro-logo.svg"
+        ]
+        
+        guard let urlString = iconURLs[osType],
+              let url = URL(string: urlString) else {
+            print("No icon URL found for OS: \(osType)")
+            return
+        }
+        
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            
+            // Verify it's a valid image
+            if data.count > 0 && (data.starts(with: [0x89, 0x50, 0x4E, 0x47]) || // PNG
+                                  data.starts(with: [0xFF, 0xD8, 0xFF]) || // JPEG
+                                  data.starts(with: [0x47, 0x49, 0x46])) { // GIF
+                
+                if var server = try? await server {
+                    server.iconData = data
+                    try? await server.write(to: db)
+                    print("Successfully downloaded icon for \(osType)")
+                }
+            }
+        } catch {
+            print("Failed to download icon for \(osType): \(error)")
+        }
+    }
+    
+    /// Get the appropriate SF Symbol name for the OS
+    var osIconName: String {
+        guard let osType = osType else { return "server.rack" }
+        
+        switch osType {
+        case "ubuntu": return "u.circle.fill"
+        case "debian": return "d.circle.fill" 
+        case "centos": return "c.circle.fill"
+        case "rhel": return "r.circle.fill"
+        case "fedora": return "f.circle.fill"
+        case "opensuse": return "s.circle.fill"
+        case "arch": return "a.circle.fill"
+        case "alpine": return "mountain.2.fill"
+        case "mint": return "m.circle.fill"
+        case "kali": return "k.circle.fill"
+        case "manjaro": return "circle.fill"
+        default: return "server.rack"
+        }
+    }
+    
+    /// Get the appropriate color for the OS
+    var osIconColor: String {
+        guard let osType = osType else { return "blue" }
+        
+        switch osType {
+        case "ubuntu": return "orange"
+        case "debian": return "red"
+        case "centos": return "purple"
+        case "rhel": return "red"
+        case "fedora": return "blue"
+        case "opensuse": return "green"
+        case "arch": return "blue"
+        case "alpine": return "blue"
+        case "mint": return "green"
+        case "kali": return "purple"
+        case "manjaro": return "green"
+        default: return "blue"
+        }
     }
 }

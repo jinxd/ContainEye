@@ -153,6 +153,7 @@ struct ContentView: View {
                 }
             }
         }
+        .confirmator()
         .environment(\.namespace, namespace)
         .task{
             if !servers.didLoad {try? await Task.sleep(for: .seconds(1))}
