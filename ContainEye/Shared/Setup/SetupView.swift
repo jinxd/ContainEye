@@ -12,15 +12,17 @@ struct SetupView: View {
     @AppStorage("screen") private var screen = ContentView.Screen.testList
 
     var body: some View {
-
         TabView(selection: $setupScreen) {
-            Tab(value: 1){
-                AddServerView(screen: $setupScreen)
+            Tab(value: 0) {
+                WelcomeView(setupScreen: $setupScreen)
             }
-            Tab(value: 3){
+            Tab(value: 1) {
+                ModernAddServerView(screen: $setupScreen)
+            }
+            Tab(value: 3) {
                 WouldYouLikeToAddATestView(screen: $setupScreen)
             }
-            Tab(value: 2){
+            Tab(value: 2) {
                 AddTestView(screen: $setupScreen)
             }
         }
@@ -28,10 +30,12 @@ struct SetupView: View {
         .onChange(of: setupScreen) {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }
-        .animation(.default, value: setupScreen)
-        .toolbar{
-            Button("Cancel") {
-                UserDefaults.standard.set(setupScreen == 1 ? ContentView.Screen.serverList.rawValue : ContentView.Screen.testList.rawValue, forKey: "screen")
+        .animation(.spring(), value: setupScreen)
+        .toolbar {
+            if setupScreen > 0 {
+                Button("Cancel") {
+                    UserDefaults.standard.set(setupScreen == 1 ? ContentView.Screen.serverList.rawValue : ContentView.Screen.testList.rawValue, forKey: "screen")
+                }
             }
         }
     }

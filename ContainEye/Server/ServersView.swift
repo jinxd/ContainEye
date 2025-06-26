@@ -15,6 +15,7 @@ struct ServersView: View {
     @BlackbirdLiveModels({try await Server.read(from: $0, matching: .all, orderBy: .descending(\.$id))}) var servers
     @Environment(\.namespace) var namespace
     @Environment(\.blackbirdDatabase) private var db
+    @State private var editingServer: Server?
 
 
     var body: some View {
@@ -35,6 +36,12 @@ struct ServersView: View {
                                 ServerSummaryView(server: server.liveModel, hostInsteadOfLabel: false)
                                     .contextMenu{
                                         Menu {
+                                            Button("Edit Server", systemImage: "pencil") {
+                                                editingServer = server
+                                            }
+                                            
+                                            Divider()
+                                            
                                             AsyncButton("Delete", systemImage: "trash", role: .destructive) {
                                                 try keychain().remove(server.credentialKey)
                                                 for container in try await server.containers {
@@ -68,6 +75,14 @@ struct ServersView: View {
             .padding(.top, 50)
         }
         .animation(.smooth, value: servers.results)
+        .sheet(item: $editingServer) { server in
+            if let credential = loadCredential(for: server.credentialKey) {
+                EditServerView(credential: credential)
+            } else {
+                Text("Failed to load server credentials")
+                    .padding()
+            }
+        }
         .task{
             while !Task.isCancelled {
                 for server in servers.results {
@@ -78,6 +93,19 @@ struct ServersView: View {
                     try? await Task.sleep(for: .seconds(1))
                 }
             }
+        }
+    }
+    
+    private func loadCredential(for key: String) -> Credential? {
+        do {
+            guard let data = try keychain().getData(key) else {
+                print("No data found for credential key \(key)")
+                return nil
+            }
+            return try JSONDecoder().decode(Credential.self, from: data)
+        } catch {
+            print("Failed to load credential for key \(key): \(error)")
+            return nil
         }
     }
 }
