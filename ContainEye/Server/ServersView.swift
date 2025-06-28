@@ -35,12 +35,12 @@ struct ServersView: View {
                             NavigationLink(value: server) {
                                 ServerSummaryView(server: server.liveModel, hostInsteadOfLabel: false)
                                     .contextMenu{
+                                        Button("Edit Server", systemImage: "pencil") {
+                                            editingServer = server
+                                        }
+
+                                        Divider()
                                         Menu {
-                                            Button("Edit Server", systemImage: "pencil") {
-                                                editingServer = server
-                                            }
-                                            
-                                            Divider()
                                             
                                             AsyncButton("Delete", systemImage: "trash", role: .destructive) {
                                                 try keychain().remove(server.credentialKey)
@@ -78,6 +78,7 @@ struct ServersView: View {
         .sheet(item: $editingServer) { server in
             if let credential = loadCredential(for: server.credentialKey) {
                 EditServerView(credential: credential)
+                    .confirmator()
             } else {
                 Text("Failed to load server credentials")
                     .padding()

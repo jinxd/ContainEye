@@ -503,3 +503,32 @@ extension String {
         return newString
     }
 }
+
+extension ServerTest.TestStatus {
+    var color: Color {
+        switch self {
+        case .success: return .green
+        case .failed: return .red
+        case .running: return .blue
+        case .notRun: return .orange
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .success: return "checkmark.circle.fill"
+        case .failed: return "xmark.circle.fill"
+        case .running: return "clock.fill"
+        case .notRun: return "clock"
+        }
+    }
+
+    var displayText: String {
+        switch self {
+        case .success: return "Passed"
+        case .failed: return "Failed"
+        case .running: return "Running"
+        case .notRun: return "Not Run"
+        }
+    }
+}

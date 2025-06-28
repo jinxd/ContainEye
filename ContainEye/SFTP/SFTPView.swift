@@ -1148,6 +1148,7 @@ struct PowerfulTextEditorView: View {
         .navigationBarHidden(true)
         .sheet(isPresented: $showingInfo) {
             FileInfoSheet(filePath: filePath, fileType: fileType, lineCount: lineCount, characterCount: characterCount)
+                .confirmator()
         }
     }
 }

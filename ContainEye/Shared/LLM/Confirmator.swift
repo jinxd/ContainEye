@@ -8,11 +8,6 @@
 import SwiftUI
 import ButtonKit
 
-extension View {
-    public func confirmator() -> some View {
-        overlay(Confirmator())
-    }
-}
 
 @MainActor @Observable
 final class ConfirmatorManager {
