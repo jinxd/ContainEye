@@ -32,7 +32,6 @@ struct RemoteTerminalView: View {
             if let credential {
                 if let view{
                     view
-                        .toolbarVisibility(.hidden, for: .navigationBar)
                         .toolbarVisibility(.hidden, for: .tabBar)
                         .overlay(alignment: .topTrailing){
                             VStack(alignment: .trailing) {
@@ -119,7 +118,27 @@ struct RemoteTerminalView: View {
                             } catch {
                                 ConfirmatorManager.shared.showError(error, title: "Terminal Connection Failed")
                             }
-                            view = SSHTerminalView(credential: .init(key: credential.key, label: credential.label, host: credential.host, port: credential.port, username: credential.username, password: credential.password), useVolumeButtons: useVolumeButtons)
+                            let swiftTermAuthMethod: SwiftTerm.AuthenticationMethod = {
+                                switch credential.authMethod ?? .password {
+                                case .password: return .password
+                                case .privateKey: return .privateKey
+                                case .privateKeyWithPassphrase: return .privateKeyWithPassphrase
+                                }
+                            }()
+                            view = SSHTerminalView(
+                                credential: .init(
+                                    key: credential.key,
+                                    label: credential.label,
+                                    host: credential.host,
+                                    port: credential.port,
+                                    username: credential.username,
+                                    password: credential.password,
+                                    authMethod: swiftTermAuthMethod,
+                                    privateKey: credential.privateKey,
+                                    passphrase: credential.passphrase
+                                ),
+                                useVolumeButtons: useVolumeButtons
+                            )
                         }
                         .trackView("terminal/connecting")
                 }
@@ -429,3 +448,4 @@ struct TerminalSettingsView: View {
         RemoteTerminalView()
     }
 }
+

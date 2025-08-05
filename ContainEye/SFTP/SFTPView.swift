@@ -225,48 +225,160 @@ struct SFTPView: View {
                     
                     Form{
                         let ffiles : [SFTPItem] = (files ?? []).filter({showHiddenFiles || !$0.file.filename.hasPrefix(".")})
-                        if currentDirectory != "/" {
-                            // Enhanced Go Up Button
-                            AsyncButton {
-                                try await updateDirectories(appending: "..")
+                        
+                        // Action buttons section
+                        Section {
+                            if currentDirectory != "/" {
+                                // Go Up Button
+                                AsyncButton {
+                                    try await updateDirectories(appending: "..")
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "arrow.up")
+                                            .font(.title3)
+                                            .foregroundStyle(.blue)
+                                        
+                                        VStack(alignment: .leading) {
+                                            Text("Go Up")
+                                                .font(.headline)
+                                                .foregroundStyle(.primary)
+                                            Text("Navigate to parent directory")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        
+                                        Spacer()
+                                        
+                                        Image(systemName: "chevron.up")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(.rect)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            
+                            // Upload Files
+                            Button {
+                                presentFilePicker()
                             } label: {
                                 HStack {
-                                    Image(systemName: "arrow.up")
+                                    Image(systemName: "icloud.and.arrow.up")
                                         .font(.title3)
                                         .foregroundStyle(.blue)
                                     
                                     VStack(alignment: .leading) {
-                                        Text("Go Up")
+                                        Text("Upload Files")
                                             .font(.headline)
                                             .foregroundStyle(.primary)
-                                        Text("Navigate to parent directory")
+                                        Text("Select files from your device")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
                                     
                                     Spacer()
                                     
-                                    Image(systemName: "chevron.up")
+                                    Image(systemName: "chevron.right")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
-                                .padding()
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(.blue.opacity(0.05))
-                                        .stroke(.blue.opacity(0.2), lineWidth: 1)
-                                )
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(.rect)
                             }
                             .buttonStyle(.plain)
-                            .listRowBackground(Color.clear)
-                            .listRowInsets(EdgeInsets())
-                            .padding(.horizontal)
+                            .disabled(isUploading)
+                            .opacity(isUploading ? 0.6 : 1.0)
+                            
+                            // New Folder
+                            Button {
+                                Task {
+                                    do {
+                                        let dirName = try await ConfirmatorManager.shared.ask("What do you want to call the new directory?")
+                                        try await sftp.createDirectory(atPath: "\(currentDirectory)/\(dirName)")
+                                        try await updateDirectories(appending: "")
+                                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                                    } catch {
+                                        ConfirmatorManager.shared.showError(error, title: "Failed to Create Directory")
+                                    }
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: "folder.badge.plus")
+                                        .font(.title3)
+                                        .foregroundStyle(.orange)
+                                    
+                                    VStack(alignment: .leading) {
+                                        Text("New Folder")
+                                            .font(.headline)
+                                            .foregroundStyle(.primary)
+                                        Text("Create a new directory")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isUploading)
+                            .opacity(isUploading ? 0.6 : 1.0)
+                            
+                            // New File
+                            Button {
+                                Task {
+                                    do {
+                                        let fileName = try await ConfirmatorManager.shared.ask("What do you want to call the new file?")
+                                        try await openFile(path: "\(currentDirectory)/\(fileName)")
+                                    } catch {
+                                        ConfirmatorManager.shared.showError(error, title: "Failed to Create File")
+                                    }
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: "doc.badge.plus")
+                                        .font(.title3)
+                                        .foregroundStyle(.green)
+                                    
+                                    VStack(alignment: .leading) {
+                                        Text("New File")
+                                            .font(.headline)
+                                            .foregroundStyle(.primary)
+                                        Text("Create a new file")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isUploading)
+                            .opacity(isUploading ? 0.6 : 1.0)
                         }
-                        ForEach(ffiles, id: \.id) { file in
-                            FileSummaryView(sftp: sftp, credential: credential, file: file) { append in
-                                try await updateDirectories(appending: append)
-                            } openFile: { path, mode in
-                                try await openFile(path: path, mode: mode)
+                        
+                        // Files and folders section
+                        if !ffiles.isEmpty {
+                            Section("Files & Folders") {
+                                ForEach(ffiles, id: \.id) { file in
+                                    FileSummaryView(sftp: sftp, credential: credential, file: file) { append in
+                                        try await updateDirectories(appending: append)
+                                    } openFile: { path, mode in
+                                        try await openFile(path: path, mode: mode)
+                                    }
+                                }
                             }
                         }
                     }
@@ -274,178 +386,63 @@ struct SFTPView: View {
                         try? await updateDirectories(appending: "")
                     }
                     .safeAreaInset(edge: .bottom) {
-                        VStack {
-                            if isUploading {
-                                VStack {
-                                    HStack {
-                                        Image(systemName: "icloud.and.arrow.up")
-                                            .font(.title3)
-                                            .foregroundStyle(.blue)
-                                            .symbolEffect(.pulse)
-                                        
-                                        VStack(alignment: .leading) {
-                                            Text("Uploading Files...")
-                                                .font(.headline)
-                                                .foregroundStyle(.primary)
-                                            
-                                            Text("\(Int(uploadProgress * 100))% complete")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        
-                                        Spacer()
-                                        
-                                        Text("\(Int(uploadProgress * 100))%")
-                                            .font(.title3)
-                                            .fontWeight(.semibold)
-                                            .foregroundStyle(.blue)
-                                            .monospacedDigit()
-                                    }
-                                    
-                                    // Custom Progress Bar
-                                    GeometryReader { geometry in
-                                        ZStack(alignment: .leading) {
-                                            // Background
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .fill(.blue.opacity(0.1))
-                                                .frame(height: 8)
-                                            
-                                            // Progress
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .fill(
-                                                    LinearGradient(
-                                                        colors: [.blue, .blue.opacity(0.7)],
-                                                        startPoint: .leading,
-                                                        endPoint: .trailing
-                                                    )
-                                                )
-                                                .frame(width: geometry.size.width * uploadProgress, height: 8)
-                                                .animation(.easeInOut(duration: 0.3), value: uploadProgress)
-                                        }
-                                    }
-                                    .frame(height: 8)
-                                }
-                                .padding()
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(.blue.opacity(0.05))
-                                        .stroke(.blue.opacity(0.2), lineWidth: 1)
-                                )
-                                .padding(.horizontal)
-                            }
-                            
+                        if isUploading {
                             VStack {
-                                // Primary Upload Button
-                                Button {
-                                    presentFilePicker()
-                                } label: {
-                                    HStack {
-                                        Image(systemName: "icloud.and.arrow.up")
-                                            .font(.title2)
-                                            .foregroundStyle(.white)
-                                        
-                                        VStack(alignment: .leading) {
-                                            Text("Upload Files")
-                                                .font(.headline)
-                                                .foregroundStyle(.white)
-                                            Text("Select files from your device")
-                                                .font(.caption)
-                                                .foregroundStyle(.white.opacity(0.8))
-                                        }
-                                        
-                                        Spacer()
-                                        
-                                        Image(systemName: "chevron.right")
-                                            .font(.caption)
-                                            .foregroundStyle(.white.opacity(0.6))
-                                    }
-                                    .padding()
-                                    .background(
-                                        LinearGradient(
-                                            colors: [.blue, .blue.opacity(0.8)],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                    )
-                                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                                    .shadow(color: .blue.opacity(0.3), radius: 8, x: 0, y: 4)
-                                }
-                                .disabled(isUploading)
-                                .opacity(isUploading ? 0.6 : 1.0)
-                                .animation(.easeInOut(duration: 0.2), value: isUploading)
-                                
-                                // Secondary Create Actions
                                 HStack {
-                                    // Create Directory Button
-                                    Button {
-                                        Task {
-                                            do {
-                                                let dirName = try await ConfirmatorManager.shared.ask("What do you want to call the new directory?")
-                                                try await sftp.createDirectory(atPath: "\(currentDirectory)/\(dirName)")
-                                                try await updateDirectories(appending: "")
-                                                UINotificationFeedbackGenerator().notificationOccurred(.success)
-                                            } catch {
-                                                ConfirmatorManager.shared.showError(error, title: "Failed to Create Directory")
-                                            }
-                                        }
-                                    } label: {
-                                        VStack {
-                                            Image(systemName: "folder.badge.plus")
-                                                .font(.title2)
-                                                .foregroundStyle(.orange)
-                                            
-                                            Text("New Folder")
-                                                .font(.caption)
-                                                .fontWeight(.medium)
-                                                .foregroundStyle(.primary)
-                                        }
-                                        .frame(maxWidth: .infinity)
-                                        .padding()
-                                        .background(.orange.opacity(0.1))
-                                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .stroke(.orange.opacity(0.3), lineWidth: 1)
-                                        )
-                                    }
-                                    .disabled(isUploading)
+                                    Image(systemName: "icloud.and.arrow.up")
+                                        .font(.title3)
+                                        .foregroundStyle(.blue)
+                                        .symbolEffect(.pulse)
                                     
-                                    // Create File Button
-                                    Button {
-                                        Task {
-                                            do {
-                                                let fileName = try await ConfirmatorManager.shared.ask("What do you want to call the new file?")
-                                                try await openFile(path: "\(currentDirectory)/\(fileName)")
-                                            } catch {
-                                                ConfirmatorManager.shared.showError(error, title: "Failed to Create File")
-                                            }
-                                        }
-                                    } label: {
-                                        VStack {
-                                            Image(systemName: "doc.badge.plus")
-                                                .font(.title2)
-                                                .foregroundStyle(.green)
-                                            
-                                            Text("New File")
-                                                .font(.caption)
-                                                .fontWeight(.medium)
-                                                .foregroundStyle(.primary)
-                                        }
-                                        .frame(maxWidth: .infinity)
-                                        .padding()
-                                        .background(.green.opacity(0.1))
-                                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .stroke(.green.opacity(0.3), lineWidth: 1)
-                                        )
+                                    VStack(alignment: .leading) {
+                                        Text("Uploading Files...")
+                                            .font(.headline)
+                                            .foregroundStyle(.primary)
+                                        
+                                        Text("\(Int(uploadProgress * 100))% complete")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
                                     }
-                                    .disabled(isUploading)
+                                    
+                                    Spacer()
+                                    
+                                    Text("\(Int(uploadProgress * 100))%")
+                                        .font(.title3)
+                                        .fontWeight(.semibold)
+                                        .foregroundStyle(.blue)
+                                        .monospacedDigit()
                                 }
-                                .opacity(isUploading ? 0.6 : 1.0)
-                                .animation(.easeInOut(duration: 0.2), value: isUploading)
+                                
+                                // Custom Progress Bar
+                                GeometryReader { geometry in
+                                    ZStack(alignment: .leading) {
+                                        // Background
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(.blue.opacity(0.1))
+                                            .frame(height: 8)
+                                        
+                                        // Progress
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: [.blue, .blue.opacity(0.7)],
+                                                    startPoint: .leading,
+                                                    endPoint: .trailing
+                                                )
+                                            )
+                                            .frame(width: geometry.size.width * uploadProgress, height: 8)
+                                            .animation(.easeInOut(duration: 0.3), value: uploadProgress)
+                                    }
+                                }
+                                .frame(height: 8)
                             }
                             .padding()
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(.blue.opacity(0.05))
+                                    .stroke(.blue.opacity(0.2), lineWidth: 1)
+                            )
+                            .padding(.horizontal)
                         }
                     }
                 }
@@ -546,7 +543,7 @@ struct SFTPView: View {
     func goHome() async throws {
         guard let credential else { return }
         try? await sftp?.close()
-        sftp = try await SSHClient.connect(host: credential.host, authenticationMethod: .passwordBased(username: credential.username, password: credential.password), hostKeyValidator: .acceptAnything(), reconnect: .always).openSFTP()
+        sftp = try await SSHClient.connect(using: credential).openSFTP()
         do {
             currentDirectory = "/\(credential.username)"
             try await updateDirectories(appending: "")
@@ -561,10 +558,11 @@ struct SFTPView: View {
         if !(sftp?.isActive ?? false) {
             try? await sftp?.close()
             guard let credential else {return}
-            sftp = try await SSHClient.connect(host: credential.host, authenticationMethod: .passwordBased(username: credential.username, password: credential.password), hostKeyValidator: .acceptAnything(), reconnect: .always).openSFTP()
+            sftp = try await SSHClient.connect(using: credential).openSFTP()
         }
-        let newDir = currentDirectory.appending(appending.isEmpty ? "" : "/").appending(appending)
-        print(newDir)
+        let newDirFull = currentDirectory.appending(appending.isEmpty ? "" : "/").appending(appending)
+        let newDir = try await sftp?.getRealPath(atPath: newDirFull) ?? newDirFull
+        
         if let newFiles = try await sftp?.listDirectory(atPath: newDir).flatMap({$0.components}).sorted(by: {$0.filename < $1.filename}){
             files = []
             let filenames: [String] = newFiles.map({$0.filename})
@@ -874,284 +872,7 @@ struct SFTPView: View {
     }
 }
 
-struct PowerfulTextEditorView: View {
-    @Binding var text: String
-    let filePath: String
-    let onSave: () async throws -> Void
-    let onClose: () async throws -> Void
-    
-    @State private var showingLineNumbers = true
-    @State private var fontSize: Double = 14
-    @State private var isSearching = false
-    @State private var searchText = ""
-    @State private var showingInfo = false
-    @State private var wordWrap = true
-    @State private var highlightSyntax = true
-    
-    private var fileName: String {
-        URL(fileURLWithPath: filePath).lastPathComponent
-    }
-    
-    private var fileExtension: String {
-        URL(fileURLWithPath: filePath).pathExtension.lowercased()
-    }
-    
-    private var fileType: String {
-        switch fileExtension {
-        case "swift": return "Swift"
-        case "js", "ts": return "JavaScript/TypeScript"
-        case "py": return "Python"
-        case "sh", "bash": return "Shell Script"
-        case "json": return "JSON"
-        case "yaml", "yml": return "YAML"
-        case "xml": return "XML"
-        case "html": return "HTML"
-        case "css": return "CSS"
-        case "md": return "Markdown"
-        case "txt": return "Plain Text"
-        case "log": return "Log File"
-        default: return "Unknown"
-        }
-    }
-    
-    private var lineCount: Int {
-        text.components(separatedBy: .newlines).count
-    }
-    
-    private var characterCount: Int {
-        text.count
-    }
-    
-    var body: some View {
-        VStack {
-            // Enhanced Header
-            VStack {
-                // File Info Header
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text(fileName)
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.primary)
-                        
-                        Text(filePath)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    
-                    Spacer()
-                    
-                    // File Type Badge
-                    Text(fileType)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.blue.opacity(0.1))
-                        .foregroundStyle(.blue)
-                        .clipShape(Capsule())
-                }
-                .padding()
-                .background(.regularMaterial)
-                
-                // Toolbar
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
-                        // Search Toggle
-                        Button {
-                            isSearching.toggle()
-                        } label: {
-                            Label("Search", systemImage: "magnifyingglass")
-                                .font(.caption)
-                                .foregroundStyle(isSearching ? .blue : .secondary)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        
-                        // Line Numbers Toggle
-                        Button {
-                            showingLineNumbers.toggle()
-                        } label: {
-                            Label("Lines", systemImage: "list.number")
-                                .font(.caption)
-                                .foregroundStyle(showingLineNumbers ? .blue : .secondary)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        
-                        // Word Wrap Toggle
-                        Button {
-                            wordWrap.toggle()
-                        } label: {
-                            Label("Wrap", systemImage: "arrow.turn.down.right")
-                                .font(.caption)
-                                .foregroundStyle(wordWrap ? .blue : .secondary)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        
-                        // Font Size Controls
-                        HStack {
-                            Button {
-                                fontSize = max(8, fontSize - 1)
-                            } label: {
-                                Image(systemName: "minus")
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            
-                            Text("\(Int(fontSize))")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                                .frame(minWidth: 20)
-                            
-                            Button {
-                                fontSize = min(24, fontSize + 1)
-                            } label: {
-                                Image(systemName: "plus")
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                        
-                        Spacer()
-                        
-                        // Info Button
-                        Button {
-                            showingInfo.toggle()
-                        } label: {
-                            Label("Info", systemImage: "info.circle")
-                                .font(.caption)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        
-                        // Save Button
-                        AsyncButton {
-                            try await onSave()
-                        } label: {
-                            Label("Save", systemImage: "square.and.arrow.down")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                        
-                        // Close Button
-                        AsyncButton {
-                            try await onClose()
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.caption)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .buttonBorderShape(.circle)
-                        .controlSize(.small)
-                        .tint(.red)
-                    }
-                    .padding(.horizontal)
-                }
-                .padding(.bottom, 8)
-                
-                // Search Bar
-                if isSearching {
-                    HStack {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(.secondary)
-                        
-                        TextField("Search in file...", text: $searchText)
-                            .textFieldStyle(.roundedBorder)
-                        
-                        if !searchText.isEmpty {
-                            Button("Clear") {
-                                searchText = ""
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.blue)
-                        }
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom)
-                }
-            }
-            .background(.regularMaterial)
-            
-            // Editor Area
-            GeometryReader { geometry in
-                HStack(alignment: .top) {
-                    // Line Numbers
-                    if showingLineNumbers {
-                        VStack(alignment: .trailing) {
-                            ForEach(1...lineCount, id: \.self) { lineNumber in
-                                Text("\(lineNumber)")
-                                    .font(.system(size: fontSize - 2, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                                    .frame(minWidth: 30, alignment: .trailing)
-                                    .padding(.vertical, 1)
-                            }
-                            Spacer()
-                        }
-                        .padding(.horizontal, 8)
-                        .background(.secondary.opacity(0.1))
-                        .frame(width: 50)
-                    }
-                    
-                    // Text Editor
-                    TextEditor(text: $text)
-                        .font(.system(size: fontSize, design: .monospaced))
-                        .scrollContentBackground(.hidden)
-                        .background(.background)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-            
-            // Status Bar
-            HStack {
-                HStack {
-                    Image(systemName: "doc.text")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("\(lineCount) lines")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                
-                Spacer()
-                
-                HStack {
-                    Image(systemName: "textformat.abc")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("\(characterCount) chars")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                
-                Spacer()
-                
-                HStack {
-                    Image(systemName: "textformat.size")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("\(Int(fontSize))pt")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-            .background(.regularMaterial)
-        }
-        .navigationBarHidden(true)
-        .sheet(isPresented: $showingInfo) {
-            FileInfoSheet(filePath: filePath, fileType: fileType, lineCount: lineCount, characterCount: characterCount)
-                .confirmator()
-        }
-    }
-}
+
 
 struct FileInfoSheet: View {
     let filePath: String

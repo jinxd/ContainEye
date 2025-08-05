@@ -32,7 +32,7 @@ actor SSHClientActor {
                 log("client closing error in \(#function): \(error.generateDescription()) \(String(describing: error))")
             }
             do{
-                client = try await SSHClient.connect(host: credential.host, authenticationMethod: .passwordBased(username: credential.username, password: credential.password), hostKeyValidator: .acceptAnything(), reconnect: .always)
+                client = try await SSHClient.connect(using: credential)
             } catch {
                 log("client connection error in \(#function): \(error.generateDescription()) \(String(describing: error))")
                 throw error
@@ -65,4 +65,34 @@ actor SSHClientActor {
     }
 
     static let shared = SSHClientActor()
+}
+
+
+extension SSHClient {
+    static func connect(using credential: Credential, reconnect: SSHReconnectMode = .always, connectTimeout: TimeAmount = .seconds(30)) async throws -> SSHClient {
+        switch credential.effectiveAuthMethod {
+        case .password:
+            try await Self.connect(host: credential.host, port: Int(credential.port), authenticationMethod: .passwordBased(username: credential.username, password: credential.password), hostKeyValidator: .acceptAnything(), reconnect: reconnect, connectTimeout: connectTimeout)
+        case .privateKey:
+            try await Self.connect(
+                host: credential.host,
+                port: Int(credential.port),
+                authenticationMethod:
+                        .ed25519(username: credential.username, privateKey: .init(sshEd25519: (credential.privateKey?.data(using: .utf8)!)!)),
+                hostKeyValidator: .acceptAnything(),
+                reconnect: reconnect,
+                connectTimeout: connectTimeout
+            )
+        case .privateKeyWithPassphrase:
+            try await Self.connect(
+                host: credential.host,
+                port: Int(credential.port),
+                authenticationMethod: 
+                        .ed25519(username: credential.username, privateKey: .init(sshEd25519: (credential.privateKey?.data(using: .utf8)!)!, decryptionKey: credential.password.data(using: .utf8)!)),
+                hostKeyValidator: .acceptAnything(),
+                reconnect: reconnect,
+                connectTimeout: connectTimeout
+            )
+        }
+    }
 }

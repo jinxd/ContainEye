@@ -55,7 +55,7 @@ struct CreditsView: View {
     
     var body: some View {
         ScrollView {
-            LazyVStack {
+            VStack {
                 // Header Section
                 VStack {
                     Image(systemName: "heart.circle.fill")
@@ -74,7 +74,45 @@ struct CreditsView: View {
                         .multilineTextAlignment(.center)
                 }
                 .padding()
-                
+
+                // Thank You Section
+                VStack {
+                    Text("Thank You! 🙏")
+                        .font(.title)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.primary)
+
+                    Text("ContainEye wouldn't be possible without these incredible open source projects and their maintainers. Their dedication to the developer community makes apps like this possible.")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 8)
+
+                    Button {
+                        if let url = URL(string: "https://github.com/hannesmnagel/ContainEye") {
+                            openURL(url)
+                        }
+                    } label: {
+                        HStack {
+                            Image(systemName: "star.fill")
+                            Text("Star ContainEye on GitHub")
+                                .fontWeight(.medium)
+                        }
+                        .foregroundStyle(.white)
+                        .padding()
+                        .background(.blue)
+                        .clipShape(Capsule())
+                    }
+                    .padding(.top)
+                }
+                .padding()
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(.green.opacity(0.05))
+                        .stroke(.green.opacity(0.2), lineWidth: 1)
+                )
+                .padding(.horizontal)
+
                 // Open Source Statement
                 VStack {
                     HStack {
@@ -98,10 +136,6 @@ struct CreditsView: View {
                         
                         Label("ContainEye source code is available on GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
                             .foregroundStyle(.blue)
-                            .font(.headline)
-                        
-                        Label("Built with ❤️ by independent developers", systemImage: "heart.fill")
-                            .foregroundStyle(.red)
                             .font(.headline)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -141,44 +175,6 @@ struct CreditsView: View {
                     RoundedRectangle(cornerRadius: 16)
                         .fill(.regularMaterial)
                         .stroke(.orange.opacity(0.2), lineWidth: 1)
-                )
-                .padding(.horizontal)
-                
-                // Thank You Section
-                VStack {
-                    Text("Thank You! 🙏")
-                        .font(.title)
-                        .fontWeight(.bold)
-                        .foregroundStyle(.primary)
-                    
-                    Text("ContainEye wouldn't be possible without these incredible open source projects and their maintainers. Their dedication to the developer community makes apps like this possible.")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 8)
-                    
-                    Button {
-                        if let url = URL(string: "https://github.com/hannesmnagel/ContainEye") {
-                            openURL(url)
-                        }
-                    } label: {
-                        HStack {
-                            Image(systemName: "star.fill")
-                            Text("Star ContainEye on GitHub")
-                                .fontWeight(.medium)
-                        }
-                        .foregroundStyle(.white)
-                        .padding()
-                        .background(.blue)
-                        .clipShape(Capsule())
-                    }
-                    .padding(.top)
-                }
-                .padding()
-                .background(
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(.green.opacity(0.05))
-                        .stroke(.green.opacity(0.2), lineWidth: 1)
                 )
                 .padding(.horizontal)
             }

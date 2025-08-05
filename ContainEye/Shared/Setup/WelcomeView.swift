@@ -31,7 +31,7 @@ struct WelcomeView: View {
             color: .orange
         ),
         WelcomeFeature(
-            icon: "testtube.2.fill",
+            icon: "testtube.2",
             title: "Automated Tests",
             description: "Set up health checks and monitoring alerts",
             color: .purple

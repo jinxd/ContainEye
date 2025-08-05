@@ -17,7 +17,7 @@ struct SetupView: View {
                 WelcomeView(setupScreen: $setupScreen)
             }
             Tab(value: 1) {
-                ModernAddServerView(screen: $setupScreen)
+                AddServerView(screen: $setupScreen)
             }
             Tab(value: 3) {
                 WouldYouLikeToAddATestView(screen: $setupScreen)

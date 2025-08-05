@@ -115,7 +115,7 @@ struct MoreView: View {
                         }
                     }
                     
-                    CardRow(icon: "person.3.sequence", title: "Credits", subtitle: "See all contributors") {
+                    CardRow(icon: "person.3.sequence", title: "Credits", subtitle: "See libraries used by this app") {
                         NavigationLink(value: Sheet.credits) {
                             EmptyView()
                         }

@@ -1,5 +1,5 @@
 //
-//  ModernSuggestedTestCard.swift
+//  SuggestedTestCard.swift
 //  ContainEye
 //
 //  Created by Hannes Nagel on 6/27/25.
@@ -10,7 +10,7 @@ import SwiftUI
 import Blackbird
 import ButtonKit
 
-struct ModernSuggestedTestCard: View {
+struct SuggestedTestCard: View {
     let test: ServerTest
     @Environment(\.blackbirdDatabase) var db
     @State private var isAdding = false
