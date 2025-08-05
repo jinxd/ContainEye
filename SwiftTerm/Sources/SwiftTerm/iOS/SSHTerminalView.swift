@@ -38,15 +38,15 @@ public enum AuthenticationMethod: Codable, Equatable, Hashable, CaseIterable {
 }
 
 public struct Credential: Codable, Equatable, Hashable {
-    var key: String
-    var label: String
-    var host: String
-    var port: Int32
-    var username: String
-    var password: String
-    var authMethod: AuthenticationMethod?
-    var privateKey: String?
-    var passphrase: String?
+    public var key: String
+    public var label: String
+    public var host: String
+    public var port: Int32
+    public var username: String
+    public var password: String
+    public var authMethod: AuthenticationMethod?
+    public var privateKey: String?
+    public var passphrase: String?
 
     public init(key: String, label: String, host: String, port: Int32, username: String, password: String, authMethod: AuthenticationMethod = .password, privateKey: String? = nil, passphrase: String? = nil) {
         self.key = key
@@ -82,21 +82,21 @@ public struct Credential: Codable, Equatable, Hashable {
     }
 
     // Legacy support for password-only credentials
-    var isPasswordAuth: Bool {
+    public var isPasswordAuth: Bool {
         (authMethod ?? .password) == .password
     }
 
-    var requiresPassphrase: Bool {
+    public var requiresPassphrase: Bool {
         (authMethod ?? .password) == .privateKeyWithPassphrase
     }
 
-    var hasPrivateKey: Bool {
+    public var hasPrivateKey: Bool {
         let method = authMethod ?? .password
         return method != .password && privateKey != nil && !privateKey!.isEmpty
     }
 
     // Get the effective auth method (defaults to password for legacy credentials)
-    var effectiveAuthMethod: AuthenticationMethod {
+    public var effectiveAuthMethod: AuthenticationMethod {
         authMethod ?? .password
     }
 }
@@ -116,60 +116,50 @@ class SSHTerminalModel: NSObject {
     var slider: UISlider?
     var setBackToVolume: Float = 0.5
     private var isObservingVolume = false
+    
+    // Directory tracking
+    private(set) var currentDirectory = "~"
+    private var lastExecutedCommand = ""
+    var onDirectoryChangeNeeded: ((String, Credential) async -> String?)?
 
     var lines: [String] {
         terminalView?.attrStrBuffer!.array.compactMap({$0?.attrStr.string}) ?? []
     }
     public var currentInputLine: String {
-        // Get the current cursor position from terminal
-        guard let terminal = terminalView?.getTerminal() else { return "" }
+        // Use the new real-time input tracking from TerminalView
+        return terminalView?.getCurrentInputLine() ?? ""
+    }
+    
+    /**
+     * Handle command execution and track directory changes
+     */
+    func handleCommandExecution(_ command: String) {
+        lastExecutedCommand = command.trimmingCharacters(in: .whitespaces)
         
-        let currentRow = terminal.buffer.y
-        let totalRows = terminal.rows
-        
-        // Look for the prompt line (contains $ or # at the end typically)
-        var promptLineIndex = -1
-        for i in stride(from: currentRow, through: max(0, currentRow - 20), by: -1) {
-            if i < lines.count {
-                let line = lines[i]
-                // Look for common shell prompts
-                if line.contains("$") || line.contains("#") || line.contains("%") {
-                    promptLineIndex = i
-                    break
+        // Check if it's a directory change command
+        if lastExecutedCommand.hasPrefix("cd ") || lastExecutedCommand == "cd" {
+            // Schedule directory update after command completes
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                Task {
+                    await self.updateCurrentDirectory()
                 }
             }
         }
+    }
+    
+    /**
+     * Update current directory by executing pwd command
+     */
+    @MainActor
+    private func updateCurrentDirectory() async {
+        guard let callback = onDirectoryChangeNeeded else { return }
         
-        if promptLineIndex == -1 {
-            // Fallback to old method if no prompt found
-            return lines.last { string in
-                !string.trimmingCharacters(in: .whitespaces).isEmpty
-            }?.split(separator: "#").dropFirst().joined(separator: "#") ?? ""
-        }
-        
-        // Extract command from prompt line to current line
-        var commandParts: [String] = []
-        
-        for i in promptLineIndex...min(currentRow, lines.count - 1) {
-            let line = lines[i]
-            if i == promptLineIndex {
-                // Extract everything after the last prompt symbol
-                let promptSymbols = ["$ ", "# ", "% ", "> "]
-                var commandPart = line
-                for symbol in promptSymbols {
-                    if let range = line.range(of: symbol, options: .backwards) {
-                        commandPart = String(line[range.upperBound...])
-                        break
-                    }
-                }
-                commandParts.append(commandPart)
-            } else {
-                // Add continuation lines
-                commandParts.append(line)
+        if let newDirectory = await callback("pwd", credential) {
+            let trimmedDirectory = newDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedDirectory.isEmpty && trimmedDirectory != currentDirectory {
+                currentDirectory = trimmedDirectory
             }
         }
-        
-        return commandParts.joined(separator: " ").trimmingCharacters(in: .whitespaces)
     }
 
     init(credential: Credential, useVolumeButtons: Bool) {
@@ -317,6 +307,11 @@ class AppTerminalView: TerminalView, TerminalViewDelegate {
         onTabCompletion = { [weak self] input in
             self?.handleTabCompletion(input: input)
         }
+        
+        // Set up command execution tracking
+        onCommandExecution = { [weak self] command in
+            self?.model.handleCommandExecution(command)
+        }
     }
     
     private func handleTabCompletion(input: String) {
@@ -364,6 +359,8 @@ public struct SSHTerminalView: UIViewRepresentable {
     }
     public func setCurrentInputLine(_ newValue: String) {
         if currentInputLine.trimmingCharacters(in: .whitespaces) == newValue.trimmingCharacters(in: .whitespaces) {
+            // Command is being executed, track it for directory changes
+            model.handleCommandExecution(newValue)
             terminalView.send(txt: "\n")
             return
         }
@@ -385,6 +382,16 @@ public struct SSHTerminalView: UIViewRepresentable {
         self.model = .init(credential: credential, useVolumeButtons: useVolumeButtons)
         terminalView = AppTerminalView(model: model)
         model.connect(terminalView: terminalView)
+    }
+    
+    /// Get the current working directory
+    public var currentDirectory: String {
+        model.currentDirectory
+    }
+    
+    /// Set callback for directory change detection
+    public func setDirectoryChangeCallback(_ callback: @escaping (String, Credential) async -> String?) {
+        model.onDirectoryChangeNeeded = callback
     }
 
     public func makeUIView(context: Context) -> TerminalView {

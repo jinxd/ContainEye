@@ -39,58 +39,54 @@ internal var log: Logger = Logger(subsystem: "org.tirania.SwiftTerm", category: 
 open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollViewDelegate {
     public var lines : [String] {attrStrBuffer?.array.compactMap({$0?.attrStr.string}) ?? []}
     
+    // Real-time command buffer tracking
+    private var currentCommandBuffer = ""
+    private var lastPromptPosition: String.Index?
+    
     /**
-     * Extract the current input line for completion
+     * Extract the current input line for completion using real-time tracking
      */
     public func getCurrentInputLine() -> String {
-        guard let terminal = terminal else { return "" }
-        
-        let currentRow = terminal.buffer.y
-        let lines = self.lines
-        
-        // Look for the prompt line (contains $ or # at the end typically)
-        var promptLineIndex = -1
-        for i in stride(from: currentRow, through: max(0, currentRow - 20), by: -1) {
-            if i < lines.count {
-                let line = lines[i]
-                // Look for common shell prompts
-                if line.contains("$") || line.contains("#") || line.contains("%") {
-                    promptLineIndex = i
-                    break
-                }
+        return currentCommandBuffer.trimmingCharacters(in: .whitespaces)
+    }
+    
+    /**
+     * Update the command buffer with new input
+     */
+    private func updateCommandBuffer(with text: String) {
+        if text == "\n" || text == "\r" {
+            // Command executed, reset buffer
+            currentCommandBuffer = ""
+        } else if text == "\u{7f}" || text == "\u{08}" {
+            // Backspace - remove last character
+            if !currentCommandBuffer.isEmpty {
+                currentCommandBuffer.removeLast()
             }
-        }
-        
-        if promptLineIndex == -1 {
-            // Fallback to last non-empty line
-            return lines.last { string in
-                !string.trimmingCharacters(in: .whitespaces).isEmpty
-            }?.split(separator: "#").dropFirst().joined(separator: "#") ?? ""
-        }
-        
-        // Extract command from prompt line to current line
-        var commandParts: [String] = []
-        
-        for i in promptLineIndex...min(currentRow, lines.count - 1) {
-            let line = lines[i]
-            if i == promptLineIndex {
-                // Extract everything after the last prompt symbol
-                let promptSymbols = ["$ ", "# ", "% ", "> "]
-                var commandPart = line
-                for symbol in promptSymbols {
-                    if let range = line.range(of: symbol, options: .backwards) {
-                        commandPart = String(line[range.upperBound...])
-                        break
-                    }
-                }
-                commandParts.append(commandPart)
+        } else if text == "\u{03}" {
+            // Ctrl+C - clear buffer
+            currentCommandBuffer = ""
+        } else if text == "\u{15}" {
+            // Ctrl+U - clear line
+            currentCommandBuffer = ""
+        } else if text == "\u{17}" {
+            // Ctrl+W - delete word
+            let trimmed = currentCommandBuffer.trimmingCharacters(in: .whitespaces)
+            if let lastSpaceIndex = trimmed.lastIndex(of: " ") {
+                currentCommandBuffer = String(trimmed[...lastSpaceIndex])
             } else {
-                // Add continuation lines
-                commandParts.append(line)
+                currentCommandBuffer = ""
             }
+        } else if !text.isEmpty && text.unicodeScalars.allSatisfy({ $0.isASCII && !$0.value.isMultiple(of: 127) }) {
+            // Regular printable text
+            currentCommandBuffer += text
         }
-        
-        return commandParts.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+    }
+    
+    /**
+     * Reset command buffer (called when prompt is detected)
+     */
+    public func resetCommandBuffer() {
+        currentCommandBuffer = ""
     }
     struct FontSet {
         public let normal: UIFont
@@ -150,6 +146,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
      * Closure for handling tab completion requests
      */
     public var onTabCompletion: ((String) -> Void)?
+    
+    /**
+     * Closure for handling command execution (when Enter is pressed)
+     */
+    public var onCommandExecution: ((String) -> Void)?
     
     var accessibility: AccessibilityService = AccessibilityService()
     var search: SearchService!
@@ -915,6 +916,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     open func insertText(_ text: String) {
         let sendData = applyTextToInput (text)
         
+        // Update command buffer for completion tracking
+        updateCommandBuffer(with: text)
+        
         if sendData == "" {
             return
         }
@@ -934,6 +938,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 
     open func deleteBackward() {
+        // Update command buffer for completion tracking
+        updateCommandBuffer(with: "\u{7f}") // DEL character
+        
         self.send ([0x7f])
         
         inputDelegate?.selectionWillChange(self)
@@ -1067,6 +1074,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 break
                 
             case .keyboardReturn:
+                // Trigger command execution callback before sending return
+                let currentCommand = getCurrentInputLine()
+                if !currentCommand.isEmpty {
+                    onCommandExecution?(currentCommand)
+                }
                 data = .bytes (returnByteSequence)
                 
             case .keyboardTab:
@@ -1119,6 +1131,23 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             }
             if let sendableData = data {
                 didHandleEvent = true
+                
+                // Update command buffer for special keys
+                switch sendableData {
+                case .text(let text):
+                    updateCommandBuffer(with: text)
+                case .bytes(let bytes):
+                    if bytes == [0x03] { // Ctrl+C
+                        updateCommandBuffer(with: "\u{03}")
+                    } else if bytes == [0x15] { // Ctrl+U
+                        updateCommandBuffer(with: "\u{15}")
+                    } else if bytes == [0x17] { // Ctrl+W
+                        updateCommandBuffer(with: "\u{17}")
+                    } else if bytes == returnByteSequence { // Enter
+                        updateCommandBuffer(with: "\n")
+                    }
+                }
+                
                 keyRepeat?.invalidate()
                 keyRepeat = Timer (fire: Date(timeInterval: 0.4, since: Date()),
                                    interval: 0.1,
