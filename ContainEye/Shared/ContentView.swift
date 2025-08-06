@@ -43,6 +43,8 @@ struct ContentView: View {
     }
     @State private var navigationPath = NavigationPath()
 
+    @State var pleaseUseAppstore = true
+
     var body: some View {
         NavigationStack(path: $navigationPath) {
             VStack{
@@ -77,6 +79,14 @@ struct ContentView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .alert("Please consider using the App Store version. This testflight group might be closed in the near future.", isPresented: $pleaseUseAppstore) {
+                Button("Remind me later") {
+                    pleaseUseAppstore = false
+                }
+                Button("Okay") {
+                    UIApplication.shared.open(URL(string: "https://apps.apple.com/de/app/containeye-terminal-docker/id6741063706")!)
+                }
+            }
 
             .toolbar{
                 if screen == .serverList{
