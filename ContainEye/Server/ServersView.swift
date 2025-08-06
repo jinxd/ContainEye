@@ -74,6 +74,7 @@ struct ServersView: View {
             .padding()
             .padding(.top, 50)
         }
+        .defaultScrollAnchor((servers.didLoad && servers.results.isEmpty) ? .center : .top)
         .animation(.smooth, value: servers.results)
         .sheet(item: $editingServer) { server in
             if let credential = loadCredential(for: server.credentialKey) {
