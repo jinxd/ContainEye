@@ -365,11 +365,13 @@ public struct SSHTerminalView: UIViewRepresentable {
             return
         }
         
-        let currentCommand = model.currentInputLine
-        // Clear current input by sending Ctrl+C then clearing line
-        model.terminalView?.send(txt: "\u{03}") // Ctrl+C to cancel current command
-        // Small delay to ensure the command is cancelled
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        // Clear current input line using proper shell control sequences
+        // Use Ctrl+U to clear the entire line (most reliable method)
+        model.terminalView?.send(txt: "\u{15}") // Ctrl+U - clear entire line
+        
+        // Small delay to ensure the line is cleared before inserting new text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            // Insert the new suggestion
             self.model.terminalView?.insertText(newValue)
         }
     }
