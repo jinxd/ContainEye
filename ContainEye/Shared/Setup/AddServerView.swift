@@ -96,10 +96,13 @@ struct AddServerView: View {
     }
     
     var body: some View {
-        VStack {
-            setupHeader
-            stepContent
+        ScrollView {
+            VStack {
+                setupHeader
+                stepContent
+            }
         }
+        .defaultScrollAnchor(.center)
     }
     
     private var setupHeader: some View {
