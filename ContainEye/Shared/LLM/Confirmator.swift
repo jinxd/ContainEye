@@ -170,7 +170,7 @@ private struct Confirmator: View {
                         .foregroundStyle(.blue)
                 }
                 
-                Text("AI Assistant")
+                Text("Question")
                     .font(.title3)
                     .fontWeight(.semibold)
             }

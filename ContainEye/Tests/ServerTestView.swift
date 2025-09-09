@@ -522,96 +522,67 @@ struct TestCard: View {
     @State private var isRunning = false
     
     var body: some View {
-        VStack(alignment: .leading) {
-            HStack {
-                ZStack {
-                    Circle()
-                        .fill(test.status.color.opacity(0.1))
-                        .frame(width: 32, height: 32)
-                    
-                    if test.status == .running || isRunning {
-                        ProgressView()
-                            .controlSize(.mini)
-                            .tint(test.status.color)
-                    } else {
-                        Image(systemName: test.status.icon)
-                            .font(.caption)
-                            .foregroundStyle(test.status.color)
-                    }
-                }
-                
-                Spacer()
-                
-                Menu {
-                    AsyncButton("Run Test", systemImage: "play.fill") {
-                        await runTest()
-                    }
-                    
-                    NavigationLink(value: test) {
-                        Label("Edit Test", systemImage: "pencil")
-                    }
-                    
-                    Divider()
-                    
-                    Button("Delete Test", systemImage: "trash", role: .destructive) {
-                        deleteTest()
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(4)
-                }
+        Menu {
+            AsyncButton("Run Test", systemImage: "play.fill") {
+                await runTest()
             }
-            
+
+            NavigationLink(value: test) {
+                Label("Edit Test", systemImage: "pencil")
+            }
+
+            Divider()
+
+            Button("Delete Test", systemImage: "trash", role: .destructive) {
+                deleteTest()
+            }
+        } label: {
             VStack(alignment: .leading) {
-                Text(test.title)
-                    .font(.headline)
-                    .fontWeight(.medium)
-                    .lineLimit(2)
-                
-                if let lastRun = test.lastRun {
-                    Text("Last run: \(lastRun, style: .relative) ago")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("Never run")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            
-            Spacer()
-            
-            HStack {
-                AsyncButton {
-                    await runTest()
-                } label: {
-                    HStack(spacing: 4) {
-                        if isRunning {
+                HStack {
+                    ZStack {
+                        Circle()
+                            .fill(test.status.color.opacity(0.1))
+                            .frame(width: 32, height: 32)
+
+                        if test.status == .running || isRunning {
                             ProgressView()
                                 .controlSize(.mini)
-                                .tint(.white)
+                                .tint(test.status.color)
                         } else {
-                            Image(systemName: "play.fill")
-                                .font(.caption2)
+                            Image(systemName: test.status.icon)
+                                .font(.caption)
+                                .foregroundStyle(test.status.color)
                         }
-                        Text("Run")
-                            .font(.caption)
-                            .fontWeight(.medium)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
-                    .background(.blue)
-                    .foregroundStyle(.white)
-                    .clipShape(Capsule())
+
+                    Spacer()
                 }
-                .disabled(isRunning)
+
+                VStack(alignment: .leading) {
+                    Text(test.title)
+                        .font(.headline)
+                        .fontWeight(.medium)
+                        .lineLimit(2)
+
+                    if let lastRun = test.lastRun {
+                        Text("Last run: \(lastRun, style: .relative) ago")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Never run")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer()
             }
+            .padding()
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
         }
-        .padding()
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
+        .multilineTextAlignment(.leading)
+        .buttonStyle(.plain)
     }
     
     private func runTest() async {
