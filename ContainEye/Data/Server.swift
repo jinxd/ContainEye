@@ -438,7 +438,13 @@ sysctl vm.swapusage | awk '{
 
     func execute(_ command: String) async throws -> String {
         if let credential {
-            return try await SSHClientActor.shared.execute(command, on: credential)
+            // Ensure PATH includes common Docker/OrbStack locations
+            // This is crucial for macOS where docker may not be in the default non-interactive PATH
+            let wrappedCommand = """
+            export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.orbstack/bin:$HOME/.docker/bin:$PATH"
+            \(command)
+            """
+            return try await SSHClientActor.shared.execute(wrappedCommand, on: credential)
         } else {return ""}
     }
     
