@@ -37,6 +37,7 @@ struct Server: BlackbirdModel {
     @BlackbirdColumn var osType: String?
     @BlackbirdColumn var osVersion: String?
     @BlackbirdColumn var iconData: Data?
+    @BlackbirdColumn var containerRuntime: String?
 
     enum ProcessSortOrder: String, RawRepresentable, BlackbirdStringEnum {
         typealias RawValue = String
@@ -114,8 +115,9 @@ sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
         async let totalMemory = fetchMetric(command: "free | grep Mem | awk '{print $2 * 1024}'")
         async let cpuCores = fetchMetric(command: "nproc")
         
-        // Detect OS information
+        // Detect OS information and container runtime
         await detectOSInfo()
+        await detectContainerRuntime()
 
         var newUptime = Date?.none
         let uptimeCommand = "date +%s -d \"$(uptime -s)\""
@@ -363,6 +365,55 @@ sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
         } else {return ""}
     }
     
+    private func detectContainerRuntime() async {
+        var runtime: String? = nil
+
+        // Method 1: Check docker info output for OrbStack
+        if let dockerInfo = try? await execute("docker info 2>/dev/null | grep -i 'operating system\\|orbstack'") {
+            if dockerInfo.lowercased().contains("orbstack") {
+                runtime = "orbstack"
+            }
+        }
+
+        // Method 2: Check if orbstack command exists
+        if runtime == nil {
+            if let _ = try? await execute("which orbctl 2>/dev/null") {
+                runtime = "orbstack"
+            }
+        }
+
+        // Method 3: Check Docker context
+        if runtime == nil {
+            if let contextOutput = try? await execute("docker context show 2>/dev/null") {
+                if contextOutput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().contains("orbstack") {
+                    runtime = "orbstack"
+                }
+            }
+        }
+
+        // Method 4: Check docker version output
+        if runtime == nil {
+            if let versionOutput = try? await execute("docker version 2>/dev/null | grep -i orbstack") {
+                if !versionOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    runtime = "orbstack"
+                }
+            }
+        }
+
+        // Default to docker if we can execute docker commands but didn't detect OrbStack
+        if runtime == nil {
+            if let _ = try? await execute("docker --version 2>/dev/null") {
+                runtime = "docker"
+            }
+        }
+
+        // Update server with container runtime if detected
+        if let runtime = runtime, var server = try? await server {
+            server.containerRuntime = runtime
+            try? await server.write(to: db)
+        }
+    }
+
     private func detectOSInfo() async {
         // Try multiple methods to detect OS
         var osType: String?
@@ -531,7 +582,7 @@ sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
     /// Get the appropriate color for the OS
     var osIconColor: String {
         guard let osType = osType else { return "blue" }
-        
+
         switch osType {
         case "ubuntu": return "orange"
         case "debian": return "red"
@@ -545,6 +596,28 @@ sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
         case "kali": return "purple"
         case "manjaro": return "green"
         default: return "blue"
+        }
+    }
+
+    /// Get the appropriate SF Symbol name for the container runtime
+    var containerRuntimeIcon: String {
+        guard let runtime = containerRuntime else { return "shippingbox" }
+
+        switch runtime.lowercased() {
+        case "orbstack": return "square.stack.3d.up"
+        case "docker": return "shippingbox"
+        default: return "shippingbox"
+        }
+    }
+
+    /// Get the display name for the container runtime
+    var containerRuntimeDisplayName: String {
+        guard let runtime = containerRuntime else { return "Container Runtime" }
+
+        switch runtime.lowercased() {
+        case "orbstack": return "OrbStack"
+        case "docker": return "Docker"
+        default: return runtime.capitalized
         }
     }
 }

@@ -214,6 +214,16 @@ struct ServerDetailView: View {
             HStack {
                 Text("Containers")
                     .font(.headline)
+
+                if let server = server, server.containerRuntime != nil {
+                    Label(server.containerRuntimeDisplayName, systemImage: server.containerRuntimeIcon)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.secondary.opacity(0.1), in: Capsule())
+                }
+
                 Spacer()
                 AsyncButton("Clear Cache", role: .destructive) {
                     showingClearContainersAlert = true
