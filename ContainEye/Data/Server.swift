@@ -446,23 +446,28 @@ sysctl vm.swapusage | awk '{
         var runtime: String? = nil
 
         // Method 1: Check docker info output for OrbStack
-        if let dockerInfo = try? await execute("docker info 2>/dev/null | grep -i 'operating system\\|orbstack'") {
-            if dockerInfo.lowercased().contains("orbstack") {
+        if let dockerInfo = try? await execute("docker info 2>/dev/null | grep -i 'operating system\\|orbstack' || true") {
+            let trimmed = dockerInfo.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty && trimmed.lowercased().contains("orbstack") {
                 runtime = "orbstack"
             }
         }
 
         // Method 2: Check if orbstack command exists
         if runtime == nil {
-            if let _ = try? await execute("which orbctl 2>/dev/null") {
-                runtime = "orbstack"
+            if let orbctlPath = try? await execute("which orbctl 2>/dev/null || true") {
+                let trimmed = orbctlPath.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty && !trimmed.contains("not found") {
+                    runtime = "orbstack"
+                }
             }
         }
 
         // Method 3: Check Docker context
         if runtime == nil {
-            if let contextOutput = try? await execute("docker context show 2>/dev/null") {
-                if contextOutput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().contains("orbstack") {
+            if let contextOutput = try? await execute("docker context show 2>/dev/null || true") {
+                let trimmed = contextOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty && trimmed.lowercased().contains("orbstack") {
                     runtime = "orbstack"
                 }
             }
@@ -470,8 +475,9 @@ sysctl vm.swapusage | awk '{
 
         // Method 4: Check docker version output
         if runtime == nil {
-            if let versionOutput = try? await execute("docker version 2>/dev/null | grep -i orbstack") {
-                if !versionOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let versionOutput = try? await execute("docker version 2>/dev/null | grep -i orbstack || true") {
+                let trimmed = versionOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
                     runtime = "orbstack"
                 }
             }
@@ -479,8 +485,11 @@ sysctl vm.swapusage | awk '{
 
         // Default to docker if we can execute docker commands but didn't detect OrbStack
         if runtime == nil {
-            if let _ = try? await execute("docker --version 2>/dev/null") {
-                runtime = "docker"
+            if let dockerVersion = try? await execute("docker --version 2>/dev/null || true") {
+                let trimmed = dockerVersion.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty && trimmed.lowercased().contains("docker") {
+                    runtime = "docker"
+                }
             }
         }
 
