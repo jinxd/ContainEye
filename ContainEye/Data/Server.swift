@@ -240,8 +240,8 @@ sysctl vm.swapusage | awk '{
         do {
             let output = try await execute("""
     docker stats --no-stream --format "{{.ID}} {{.Name}} {{.CPUPerc}} {{.MemUsage}}" | while read id name cpu mem; do
-        status=$(docker ps --filter "id=$id" --format "{{.Status}}")
-        
+        cstatus=$(docker ps --filter "id=$id" --format "{{.Status}}")
+
         # Fetch total memory for the container using docker inspect
         totalMem=$(docker inspect --format '{{.HostConfig.Memory}}' $id)
 
@@ -249,13 +249,13 @@ sysctl vm.swapusage | awk '{
         if [ -z "$totalMem" ] || [ "$totalMem" -eq 0 ]; then
             totalMem="N/A"
         fi
-        
+
         # Output the stats with both used memory and total memory
-        echo "$id $name $cpu $mem $status"
+        echo "$id $name $cpu $mem $cstatus"
     done
 """)
             let stopped = try await execute("""
-    docker ps -a --filter "status=exited" --format "{{.ID}} {{.Names}} {{.Status}}" | awk '{id=$1; name=$2; status=$3; cpu="0"; mem="0 / 0"; totalMem="N/A"; print id, name, cpu, mem, status}'
+    docker ps -a --filter "status=exited" --format "{{.ID}} {{.Names}} {{.Status}}" | awk '{id=$1; name=$2; cstatus=$3; cpu="0"; mem="0 / 0"; totalMem="N/A"; print id, name, cpu, mem, cstatus}'
 """)
             let newContainers = try parseDockerStats(from: "\(output)\n\(stopped)")
 
