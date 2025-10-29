@@ -38,6 +38,7 @@ struct Server: BlackbirdModel {
     @BlackbirdColumn var osVersion: String?
     @BlackbirdColumn var iconData: Data?
     @BlackbirdColumn var containerRuntime: String?
+    @BlackbirdColumn var isMacOS: Bool?
 
     enum ProcessSortOrder: String, RawRepresentable, BlackbirdStringEnum {
         typealias RawValue = String
@@ -94,37 +95,113 @@ extension Server {
     }
 
     func fetchServerStats() async {
-        async let cpuUsage = fetchMetric(command: "sar -u 1 3 | grep 'Average' | awk '{print (100 - $8) / 100}'")
-        async let memoryUsage = fetchMetric(command: "free | grep Mem | awk '{print $3/$2}'")
-        async let diskUsage = fetchMetric(command: "df / | grep / | awk '{ print $5 / 100 }'")
-        async let networkUpstream = fetchMetric(command: """
+        // Detect OS information and container runtime first
+        await detectOSInfo()
+        await detectContainerRuntime()
+
+        // Check if this is a macOS server
+        let isMacOS = try? await server?.isMacOS ?? false
+
+        // Use OS-specific commands
+        async let cpuUsage: Double? = isMacOS == true ?
+            fetchMetric(command: "ps -A -o %cpu | awk '{s+=$1} END {print s/100}'") :
+            fetchMetric(command: "sar -u 1 3 | grep 'Average' | awk '{print (100 - $8) / 100}'")
+
+        async let memoryUsage: Double? = isMacOS == true ?
+            fetchMetric(command: """
+vm_stat | awk '
+/Pages active/ {active=$3}
+/Pages inactive/ {inactive=$3}
+/Pages speculative/ {speculative=$3}
+/Pages wired/ {wired=$3}
+/Pages free/ {free=$3}
+END {
+    gsub(/\\./, "", active); gsub(/\\./, "", inactive); gsub(/\\./, "", speculative);
+    gsub(/\\./, "", wired); gsub(/\\./, "", free);
+    used = (active + inactive + speculative + wired) * 4096;
+    total = (active + inactive + speculative + wired + free) * 4096;
+    print used/total
+}'
+""") :
+            fetchMetric(command: "free | grep Mem | awk '{print $3/$2}'")
+
+        async let diskUsage: Double? = isMacOS == true ?
+            fetchMetric(command: "df -k / | awk 'NR==2 {print $5 / 100}'") :
+            fetchMetric(command: "df / | grep / | awk '{ print $5 / 100 }'")
+
+        async let networkUpstream: Double? = isMacOS == true ?
+            nil : // Network stats are complex on macOS, skip for now
+            fetchMetric(command: """
 iface=$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if ($i=="dev") print $(i+1); exit}'); \
 sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $5 * 1024}'
 """)
 
-        async let networkDownstream = fetchMetric(command: """
+        async let networkDownstream: Double? = isMacOS == true ?
+            nil : // Network stats are complex on macOS, skip for now
+            fetchMetric(command: """
 iface=$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if ($i=="dev") print $(i+1); exit}'); \
 sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
 """)
-        async let swapUsage = fetchMetric(command: "free | grep Swap | awk '{print $3/$2}'")
-        async let ioWait = fetchMetric(command: "sar -u 1 3 | grep 'Average' | awk '{print $5 / 100}'")
-        async let stealTime = fetchMetric(command: "sar -u 1 3 | grep 'Average' | awk '{print $6 / 100}'")
-        async let systemLoad = fetchMetric(command: "uptime | awk '{print $(NF-2) / 100}'")
-        
-        async let totalDiskSpace = fetchMetric(command: "df --output=size / | tail -n 1 | awk '{print $1 * 1024}'")
-        async let totalMemory = fetchMetric(command: "free | grep Mem | awk '{print $2 * 1024}'")
-        async let cpuCores = fetchMetric(command: "nproc")
-        
-        // Detect OS information and container runtime
-        await detectOSInfo()
-        await detectContainerRuntime()
+
+        async let swapUsage: Double? = isMacOS == true ?
+            fetchMetric(command: """
+sysctl vm.swapusage | awk '{
+    for(i=1;i<=NF;i++) {
+        if($i ~ /used/) {
+            split($(i+2), a, "M");
+            used=a[1];
+        }
+        if($i ~ /total/) {
+            split($(i+2), b, "M");
+            total=b[1];
+        }
+    }
+    if(total > 0) print used/total; else print 0
+}'
+""") :
+            fetchMetric(command: "free | grep Swap | awk '{print $3/$2}'")
+
+        async let ioWait: Double? = isMacOS == true ?
+            nil : // IO wait not readily available on macOS
+            fetchMetric(command: "sar -u 1 3 | grep 'Average' | awk '{print $5 / 100}'")
+
+        async let stealTime: Double? = isMacOS == true ?
+            nil : // Steal time is a virtualization metric, not applicable to macOS
+            fetchMetric(command: "sar -u 1 3 | grep 'Average' | awk '{print $6 / 100}'")
+
+        async let systemLoad: Double? = isMacOS == true ?
+            fetchMetric(command: "uptime | awk '{print $(NF-2) / 100}'") :
+            fetchMetric(command: "uptime | awk '{print $(NF-2) / 100}'")
+
+        async let totalDiskSpace: Double? = isMacOS == true ?
+            fetchMetric(command: "df -k / | awk 'NR==2 {print $2 * 1024}'") :
+            fetchMetric(command: "df --output=size / | tail -n 1 | awk '{print $1 * 1024}'")
+
+        async let totalMemory: Double? = isMacOS == true ?
+            fetchMetric(command: "sysctl -n hw.memsize") :
+            fetchMetric(command: "free | grep Mem | awk '{print $2 * 1024}'")
+
+        async let cpuCores: Double? = isMacOS == true ?
+            fetchMetric(command: "sysctl -n hw.ncpu") :
+            fetchMetric(command: "nproc")
 
         var newUptime = Date?.none
-        let uptimeCommand = "date +%s -d \"$(uptime -s)\""
-        let uptimeOutput = try? await execute(uptimeCommand)
-        if let uptimeOutput,
-           let timestamp = Double(uptimeOutput.trimmingCharacters(in: .whitespacesAndNewlines)) {
-            newUptime = Date(timeIntervalSince1970: timestamp)
+        if isMacOS == true {
+            // macOS: use sysctl kern.boottime
+            let uptimeCommand = "sysctl -n kern.boottime | awk '{print $4}' | sed 's/,//'"
+            let uptimeOutput = try? await execute(uptimeCommand)
+            if let uptimeOutput,
+               let timestamp = Double(uptimeOutput.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                newUptime = Date(timeIntervalSince1970: timestamp)
+            }
+        } else {
+            // Linux: use uptime -s
+            let uptimeCommand = "date +%s -d \"$(uptime -s)\""
+            let uptimeOutput = try? await execute(uptimeCommand)
+            if let uptimeOutput,
+               let timestamp = Double(uptimeOutput.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                newUptime = Date(timeIntervalSince1970: timestamp)
+            }
         }
 
         // Await all async lets before proceeding
@@ -418,20 +495,35 @@ sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
         // Try multiple methods to detect OS
         var osType: String?
         var osVersion: String?
-        
-        // Method 1: /etc/os-release (most modern distributions)
-        if let osReleaseOutput = try? await execute("cat /etc/os-release 2>/dev/null") {
+        var isMacOS = false
+
+        // Method 0: Check if it's macOS first using uname
+        if let unameOutput = try? await execute("uname -s") {
+            let unameValue = unameOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+            if unameValue.lowercased() == "darwin" {
+                isMacOS = true
+                osType = "macos"
+
+                // Get macOS version
+                if let versionOutput = try? await execute("sw_vers -productVersion") {
+                    osVersion = versionOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+        }
+
+        // Method 1: /etc/os-release (most modern Linux distributions)
+        if !isMacOS, let osReleaseOutput = try? await execute("cat /etc/os-release 2>/dev/null") {
             osType = parseOSFromRelease(osReleaseOutput)
             osVersion = parseVersionFromRelease(osReleaseOutput)
         }
-        
+
         // Method 2: lsb_release (if available)
-        if osType == nil, let lsbOutput = try? await execute("lsb_release -d 2>/dev/null | cut -f2") {
+        if osType == nil && !isMacOS, let lsbOutput = try? await execute("lsb_release -d 2>/dev/null | cut -f2") {
             osType = parseOSFromLSB(lsbOutput.trimmingCharacters(in: .whitespacesAndNewlines))
         }
-        
+
         // Method 3: Check specific files for older systems
-        if osType == nil {
+        if osType == nil && !isMacOS {
             if let _ = try? await execute("test -f /etc/redhat-release && echo 'exists'") {
                 if let content = try? await execute("cat /etc/redhat-release") {
                     osType = parseOSFromRedHat(content)
@@ -440,20 +532,14 @@ sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
                 osType = "debian"
             }
         }
-        
-        // Method 4: uname fallback
-        if osType == nil {
-            if let unameOutput = try? await execute("uname -s") {
-                osType = unameOutput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            }
-        }
-        
+
         // Update server with OS info if detected
         if let osType = osType, var server = try? await server {
             server.osType = osType
             server.osVersion = osVersion
+            server.isMacOS = isMacOS
             try? await server.write(to: db)
-            
+
             // Fetch icon if we don't have one
             if server.iconData == nil {
                 await fetchOSIcon(for: osType)
@@ -562,10 +648,11 @@ sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
     /// Get the appropriate SF Symbol name for the OS
     var osIconName: String {
         guard let osType = osType else { return "server.rack" }
-        
+
         switch osType {
+        case "macos": return "apple.logo"
         case "ubuntu": return "u.circle.fill"
-        case "debian": return "d.circle.fill" 
+        case "debian": return "d.circle.fill"
         case "centos": return "c.circle.fill"
         case "rhel": return "r.circle.fill"
         case "fedora": return "f.circle.fill"
@@ -584,6 +671,7 @@ sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
         guard let osType = osType else { return "blue" }
 
         switch osType {
+        case "macos": return "gray"
         case "ubuntu": return "orange"
         case "debian": return "red"
         case "centos": return "purple"
