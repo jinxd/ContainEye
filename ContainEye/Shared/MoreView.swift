@@ -133,6 +133,32 @@ struct MoreView: View {
                             EmptyView()
                         }
                     }
+
+                    CardRow(icon: "info.circle", title: "Launch Tracking Info", subtitle: "View current tracking status") {
+                        Button {
+                            print(LaunchTracker.getDebugInfo())
+                        } label: {
+                            EmptyView()
+                        }
+                    }
+
+                    CardRow(icon: "arrow.counterclockwise", title: "Reset Launch Tracking", subtitle: "Clear launch count and review history") {
+                        Button {
+                            LaunchTracker.resetTracking()
+                        } label: {
+                            EmptyView()
+                        }
+                    }
+
+                    CardRow(icon: "star.bubble", title: "Force Review Prompt", subtitle: "Test review request UI") {
+                        Button {
+                            Task {
+                                await LaunchTracker.requestReview()
+                            }
+                        } label: {
+                            EmptyView()
+                        }
+                    }
                 }
                 #endif
             }

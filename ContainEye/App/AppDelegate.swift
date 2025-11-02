@@ -77,6 +77,12 @@ print("completion handler new data, ending bg task")
         print("activated")
         if launched == nil {
             launched = .now
+
+            // Track app launch
+            LaunchTracker.recordLaunch()
+
+            // Check if we should request a review
+            await LaunchTracker.checkAndRequestReview()
         }
     }
 
