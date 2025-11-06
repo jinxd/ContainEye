@@ -53,23 +53,25 @@ struct ServerSummaryView: View {
                         .frame(maxWidth: .infinity)
                     GridItemView.Percentage(title: "RAM", percentage: server.memoryUsage)
                         .frame(maxWidth: .infinity)
-                    VStack {
-                        if let networkUpstream = server.networkUpstream, let networkDownstream = server.networkDownstream {
-                            Text("Network")
-                                .font(.caption2)
-                                .bold()
-                                .padding(.bottom, 10)
-                            Label("\((networkUpstream/1024).formatted(.number.precision(.fractionLength(2)))) kb", systemImage: "arrow.up.circle")
-                                .animation(.smooth, value: networkUpstream)
-                                .lineLimit(1)
-                            Label("\((networkDownstream/1024).formatted(.number.precision(.fractionLength(2)))) kb", systemImage: "arrow.down.circle")
-                                .animation(.smooth, value: networkDownstream)
-                                .lineLimit(1)
-                        } else {
-                            Text("loading up-/downstream")
+                    if server.isMacOS != true {
+                        VStack {
+                            if let networkUpstream = server.networkUpstream, let networkDownstream = server.networkDownstream {
+                                Text("Network")
+                                    .font(.caption2)
+                                    .bold()
+                                    .padding(.bottom, 10)
+                                Label("\((networkUpstream/1024).formatted(.number.precision(.fractionLength(2)))) kb", systemImage: "arrow.up.circle")
+                                    .animation(.smooth, value: networkUpstream)
+                                    .lineLimit(1)
+                                Label("\((networkDownstream/1024).formatted(.number.precision(.fractionLength(2)))) kb", systemImage: "arrow.down.circle")
+                                    .animation(.smooth, value: networkDownstream)
+                                    .lineLimit(1)
+                            } else {
+                                Text("loading up-/downstream")
+                            }
                         }
+                        .frame(maxWidth: .infinity)
                     }
-                    .frame(maxWidth: .infinity)
                     GridItemView.Percentage(title: "Disk", percentage: server.diskUsage)
                         .frame(maxWidth: .infinity)
                 }
