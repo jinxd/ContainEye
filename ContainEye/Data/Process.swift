@@ -26,22 +26,46 @@ struct Process: BlackbirdModel, Identifiable, Hashable, Codable {
 
 extension Server {
     func fetchProcesses() async {
-        let sortFlag: String
+        // Check if this is a macOS server
+        let isMacOS = self.isMacOS ?? false
 
-        switch processSortOrder ?? .cpuReversed {
-        case .pid: sortFlag = "pid"
-        case .pidReversed: sortFlag = "-pid"
-        case .command: sortFlag = "command"
-        case .commandReversed: sortFlag = "-command"
-        case .user: sortFlag = "user"
-        case .userReversed: sortFlag = "-user"
-        case .memory: sortFlag = "%mem"
-        case .memoryReversed: sortFlag = "-%mem"
-        case .cpu: sortFlag = "%cpu"
-        case .cpuReversed: sortFlag = "-%cpu"
+        let command: String
+
+        if isMacOS {
+            // macOS uses BSD-style ps which doesn't support --no-headers or --sort
+            let sortCommand: String
+            switch processSortOrder ?? .cpuReversed {
+            case .pid: sortCommand = "sort -n -k1,1"
+            case .pidReversed: sortCommand = "sort -rn -k1,1"
+            case .command: sortCommand = "sort -k5"
+            case .commandReversed: sortCommand = "sort -r -k5"
+            case .user: sortCommand = "sort -k2,2"
+            case .userReversed: sortCommand = "sort -r -k2,2"
+            case .memory: sortCommand = "sort -n -k4,4"
+            case .memoryReversed: sortCommand = "sort -rn -k4,4"
+            case .cpu: sortCommand = "sort -n -k3,3"
+            case .cpuReversed: sortCommand = "sort -rn -k3,3"
+            }
+
+            command = "ps -eo pid,user,%cpu,%mem,command | tail -n +2 | awk '{print $1, $2, $3, $4, substr($0, index($0,$5))}' | \(sortCommand) | head -n 50"
+        } else {
+            // Linux uses GNU ps with --no-headers and --sort
+            let sortFlag: String
+            switch processSortOrder ?? .cpuReversed {
+            case .pid: sortFlag = "pid"
+            case .pidReversed: sortFlag = "-pid"
+            case .command: sortFlag = "command"
+            case .commandReversed: sortFlag = "-command"
+            case .user: sortFlag = "user"
+            case .userReversed: sortFlag = "-user"
+            case .memory: sortFlag = "%mem"
+            case .memoryReversed: sortFlag = "-%mem"
+            case .cpu: sortFlag = "%cpu"
+            case .cpuReversed: sortFlag = "-%cpu"
+            }
+
+            command = "ps -eo pid,user,%cpu,%mem,command --no-headers --sort=\(sortFlag) | awk '{print $1, $2, $3, $4, substr($0, index($0,$5))}' | head -n 50"
         }
-
-        let command = "ps -eo pid,user,%cpu,%mem,command --no-headers --sort=\(sortFlag) | awk '{print $1, $2, $3, $4, substr($0, index($0,$5))}' | head -n 50"
 
         guard let output = try? await execute(command) else { return }
 

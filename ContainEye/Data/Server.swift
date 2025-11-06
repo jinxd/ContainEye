@@ -37,6 +37,8 @@ struct Server: BlackbirdModel {
     @BlackbirdColumn var osType: String?
     @BlackbirdColumn var osVersion: String?
     @BlackbirdColumn var iconData: Data?
+    @BlackbirdColumn var containerRuntime: String?
+    @BlackbirdColumn var isMacOS: Bool?
 
     enum ProcessSortOrder: String, RawRepresentable, BlackbirdStringEnum {
         typealias RawValue = String
@@ -93,36 +95,113 @@ extension Server {
     }
 
     func fetchServerStats() async {
-        async let cpuUsage = fetchMetric(command: "sar -u 1 3 | grep 'Average' | awk '{print (100 - $8) / 100}'")
-        async let memoryUsage = fetchMetric(command: "free | grep Mem | awk '{print $3/$2}'")
-        async let diskUsage = fetchMetric(command: "df / | grep / | awk '{ print $5 / 100 }'")
-        async let networkUpstream = fetchMetric(command: """
+        // Detect OS information and container runtime first
+        await detectOSInfo()
+        await detectContainerRuntime()
+
+        // Check if this is a macOS server
+        let isMacOS = try? await server?.isMacOS ?? false
+
+        // Use OS-specific commands
+        async let cpuUsage: Double? = isMacOS == true ?
+            fetchMetric(command: "ps -A -o %cpu | awk '{s+=$1} END {print s/100}'") :
+            fetchMetric(command: "sar -u 1 3 | grep 'Average' | awk '{print (100 - $8) / 100}'")
+
+        async let memoryUsage: Double? = isMacOS == true ?
+            fetchMetric(command: """
+vm_stat | awk '
+/Pages active/ {active=$3}
+/Pages inactive/ {inactive=$3}
+/Pages speculative/ {speculative=$3}
+/Pages wired/ {wired=$3}
+/Pages free/ {free=$3}
+END {
+    gsub(/\\./, "", active); gsub(/\\./, "", inactive); gsub(/\\./, "", speculative);
+    gsub(/\\./, "", wired); gsub(/\\./, "", free);
+    used = (active + inactive + speculative + wired) * 4096;
+    total = (active + inactive + speculative + wired + free) * 4096;
+    print used/total
+}'
+""") :
+            fetchMetric(command: "free | grep Mem | awk '{print $3/$2}'")
+
+        async let diskUsage: Double? = isMacOS == true ?
+            fetchMetric(command: "df -k / | awk 'NR==2 {print $5 / 100}'") :
+            fetchMetric(command: "df / | grep / | awk '{ print $5 / 100 }'")
+
+        async let networkUpstream: Double? = isMacOS == true ?
+            nil : // Network stats are complex on macOS, skip for now
+            fetchMetric(command: """
 iface=$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if ($i=="dev") print $(i+1); exit}'); \
 sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $5 * 1024}'
 """)
 
-        async let networkDownstream = fetchMetric(command: """
+        async let networkDownstream: Double? = isMacOS == true ?
+            nil : // Network stats are complex on macOS, skip for now
+            fetchMetric(command: """
 iface=$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if ($i=="dev") print $(i+1); exit}'); \
 sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
 """)
-        async let swapUsage = fetchMetric(command: "free | grep Swap | awk '{print $3/$2}'")
-        async let ioWait = fetchMetric(command: "sar -u 1 3 | grep 'Average' | awk '{print $5 / 100}'")
-        async let stealTime = fetchMetric(command: "sar -u 1 3 | grep 'Average' | awk '{print $6 / 100}'")
-        async let systemLoad = fetchMetric(command: "uptime | awk '{print $(NF-2) / 100}'")
-        
-        async let totalDiskSpace = fetchMetric(command: "df --output=size / | tail -n 1 | awk '{print $1 * 1024}'")
-        async let totalMemory = fetchMetric(command: "free | grep Mem | awk '{print $2 * 1024}'")
-        async let cpuCores = fetchMetric(command: "nproc")
-        
-        // Detect OS information
-        await detectOSInfo()
+
+        async let swapUsage: Double? = isMacOS == true ?
+            fetchMetric(command: """
+sysctl vm.swapusage | awk '{
+    for(i=1;i<=NF;i++) {
+        if($i ~ /used/) {
+            split($(i+2), a, "M");
+            used=a[1];
+        }
+        if($i ~ /total/) {
+            split($(i+2), b, "M");
+            total=b[1];
+        }
+    }
+    if(total > 0) print used/total; else print 0
+}'
+""") :
+            fetchMetric(command: "free | grep Swap | awk '{print $3/$2}'")
+
+        async let ioWait: Double? = isMacOS == true ?
+            nil : // IO wait not readily available on macOS
+            fetchMetric(command: "sar -u 1 3 | grep 'Average' | awk '{print $5 / 100}'")
+
+        async let stealTime: Double? = isMacOS == true ?
+            nil : // Steal time is a virtualization metric, not applicable to macOS
+            fetchMetric(command: "sar -u 1 3 | grep 'Average' | awk '{print $6 / 100}'")
+
+        async let systemLoad: Double? = isMacOS == true ?
+            fetchMetric(command: "uptime | awk '{print $(NF-2) / 100}'") :
+            fetchMetric(command: "uptime | awk '{print $(NF-2) / 100}'")
+
+        async let totalDiskSpace: Double? = isMacOS == true ?
+            fetchMetric(command: "df -k / | awk 'NR==2 {print $2 * 1024}'") :
+            fetchMetric(command: "df --output=size / | tail -n 1 | awk '{print $1 * 1024}'")
+
+        async let totalMemory: Double? = isMacOS == true ?
+            fetchMetric(command: "sysctl -n hw.memsize") :
+            fetchMetric(command: "free | grep Mem | awk '{print $2 * 1024}'")
+
+        async let cpuCores: Double? = isMacOS == true ?
+            fetchMetric(command: "sysctl -n hw.ncpu") :
+            fetchMetric(command: "nproc")
 
         var newUptime = Date?.none
-        let uptimeCommand = "date +%s -d \"$(uptime -s)\""
-        let uptimeOutput = try? await execute(uptimeCommand)
-        if let uptimeOutput,
-           let timestamp = Double(uptimeOutput.trimmingCharacters(in: .whitespacesAndNewlines)) {
-            newUptime = Date(timeIntervalSince1970: timestamp)
+        if isMacOS == true {
+            // macOS: use sysctl kern.boottime
+            let uptimeCommand = "sysctl -n kern.boottime | awk '{print $4}' | sed 's/,//'"
+            let uptimeOutput = try? await execute(uptimeCommand)
+            if let uptimeOutput,
+               let timestamp = Double(uptimeOutput.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                newUptime = Date(timeIntervalSince1970: timestamp)
+            }
+        } else {
+            // Linux: use uptime -s
+            let uptimeCommand = "date +%s -d \"$(uptime -s)\""
+            let uptimeOutput = try? await execute(uptimeCommand)
+            if let uptimeOutput,
+               let timestamp = Double(uptimeOutput.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                newUptime = Date(timeIntervalSince1970: timestamp)
+            }
         }
 
         // Await all async lets before proceeding
@@ -161,8 +240,8 @@ sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
         do {
             let output = try await execute("""
     docker stats --no-stream --format "{{.ID}} {{.Name}} {{.CPUPerc}} {{.MemUsage}}" | while read id name cpu mem; do
-        status=$(docker ps --filter "id=$id" --format "{{.Status}}")
-        
+        cstatus=$(docker ps --filter "id=$id" --format "{{.Status}}")
+
         # Fetch total memory for the container using docker inspect
         totalMem=$(docker inspect --format '{{.HostConfig.Memory}}' $id)
 
@@ -170,13 +249,13 @@ sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
         if [ -z "$totalMem" ] || [ "$totalMem" -eq 0 ]; then
             totalMem="N/A"
         fi
-        
+
         # Output the stats with both used memory and total memory
-        echo "$id $name $cpu $mem $status"
+        echo "$id $name $cpu $mem $cstatus"
     done
 """)
             let stopped = try await execute("""
-    docker ps -a --filter "status=exited" --format "{{.ID}} {{.Names}} {{.Status}}" | awk '{id=$1; name=$2; status=$3; cpu="0"; mem="0 / 0"; totalMem="N/A"; print id, name, cpu, mem, status}'
+    docker ps -a --filter "status=exited" --format "{{.ID}} {{.Names}} {{.Status}}" | awk '{id=$1; name=$2; cstatus=$3; cpu="0"; mem="0 / 0"; totalMem="N/A"; print id, name, cpu, mem, cstatus}'
 """)
             let newContainers = try parseDockerStats(from: "\(output)\n\(stopped)")
 
@@ -359,28 +438,107 @@ sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
 
     func execute(_ command: String) async throws -> String {
         if let credential {
-            return try await SSHClientActor.shared.execute(command, on: credential)
+            // Ensure PATH includes common Docker/OrbStack locations
+            // This is crucial for macOS where docker may not be in the default non-interactive PATH
+            let wrappedCommand = """
+            export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.orbstack/bin:$HOME/.docker/bin:$PATH"
+            \(command)
+            """
+            return try await SSHClientActor.shared.execute(wrappedCommand, on: credential)
         } else {return ""}
     }
     
+    private func detectContainerRuntime() async {
+        var runtime: String? = nil
+
+        // Method 1: Check docker info output for OrbStack
+        if let dockerInfo = try? await execute("docker info 2>/dev/null | grep -i 'operating system\\|orbstack' || true") {
+            let trimmed = dockerInfo.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty && trimmed.lowercased().contains("orbstack") {
+                runtime = "orbstack"
+            }
+        }
+
+        // Method 2: Check if orbstack command exists
+        if runtime == nil {
+            if let orbctlPath = try? await execute("which orbctl 2>/dev/null || true") {
+                let trimmed = orbctlPath.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty && !trimmed.contains("not found") {
+                    runtime = "orbstack"
+                }
+            }
+        }
+
+        // Method 3: Check Docker context
+        if runtime == nil {
+            if let contextOutput = try? await execute("docker context show 2>/dev/null || true") {
+                let trimmed = contextOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty && trimmed.lowercased().contains("orbstack") {
+                    runtime = "orbstack"
+                }
+            }
+        }
+
+        // Method 4: Check docker version output
+        if runtime == nil {
+            if let versionOutput = try? await execute("docker version 2>/dev/null | grep -i orbstack || true") {
+                let trimmed = versionOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    runtime = "orbstack"
+                }
+            }
+        }
+
+        // Default to docker if we can execute docker commands but didn't detect OrbStack
+        if runtime == nil {
+            if let dockerVersion = try? await execute("docker --version 2>/dev/null || true") {
+                let trimmed = dockerVersion.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty && trimmed.lowercased().contains("docker") {
+                    runtime = "docker"
+                }
+            }
+        }
+
+        // Update server with container runtime if detected
+        if let runtime = runtime, var server = try? await server {
+            server.containerRuntime = runtime
+            try? await server.write(to: db)
+        }
+    }
+
     private func detectOSInfo() async {
         // Try multiple methods to detect OS
         var osType: String?
         var osVersion: String?
-        
-        // Method 1: /etc/os-release (most modern distributions)
-        if let osReleaseOutput = try? await execute("cat /etc/os-release 2>/dev/null") {
+        var isMacOS = false
+
+        // Method 0: Check if it's macOS first using uname
+        if let unameOutput = try? await execute("uname -s") {
+            let unameValue = unameOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+            if unameValue.lowercased() == "darwin" {
+                isMacOS = true
+                osType = "macos"
+
+                // Get macOS version
+                if let versionOutput = try? await execute("sw_vers -productVersion") {
+                    osVersion = versionOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+        }
+
+        // Method 1: /etc/os-release (most modern Linux distributions)
+        if !isMacOS, let osReleaseOutput = try? await execute("cat /etc/os-release 2>/dev/null") {
             osType = parseOSFromRelease(osReleaseOutput)
             osVersion = parseVersionFromRelease(osReleaseOutput)
         }
-        
+
         // Method 2: lsb_release (if available)
-        if osType == nil, let lsbOutput = try? await execute("lsb_release -d 2>/dev/null | cut -f2") {
+        if osType == nil && !isMacOS, let lsbOutput = try? await execute("lsb_release -d 2>/dev/null | cut -f2") {
             osType = parseOSFromLSB(lsbOutput.trimmingCharacters(in: .whitespacesAndNewlines))
         }
-        
+
         // Method 3: Check specific files for older systems
-        if osType == nil {
+        if osType == nil && !isMacOS {
             if let _ = try? await execute("test -f /etc/redhat-release && echo 'exists'") {
                 if let content = try? await execute("cat /etc/redhat-release") {
                     osType = parseOSFromRedHat(content)
@@ -389,20 +547,14 @@ sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
                 osType = "debian"
             }
         }
-        
-        // Method 4: uname fallback
-        if osType == nil {
-            if let unameOutput = try? await execute("uname -s") {
-                osType = unameOutput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            }
-        }
-        
+
         // Update server with OS info if detected
         if let osType = osType, var server = try? await server {
             server.osType = osType
             server.osVersion = osVersion
+            server.isMacOS = isMacOS
             try? await server.write(to: db)
-            
+
             // Fetch icon if we don't have one
             if server.iconData == nil {
                 await fetchOSIcon(for: osType)
@@ -511,10 +663,11 @@ sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
     /// Get the appropriate SF Symbol name for the OS
     var osIconName: String {
         guard let osType = osType else { return "server.rack" }
-        
+
         switch osType {
+        case "macos": return "apple.logo"
         case "ubuntu": return "u.circle.fill"
-        case "debian": return "d.circle.fill" 
+        case "debian": return "d.circle.fill"
         case "centos": return "c.circle.fill"
         case "rhel": return "r.circle.fill"
         case "fedora": return "f.circle.fill"
@@ -531,8 +684,9 @@ sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
     /// Get the appropriate color for the OS
     var osIconColor: String {
         guard let osType = osType else { return "blue" }
-        
+
         switch osType {
+        case "macos": return "gray"
         case "ubuntu": return "orange"
         case "debian": return "red"
         case "centos": return "purple"
@@ -545,6 +699,28 @@ sar -n DEV 1 2 | grep Average | grep $iface | awk '{print $6 * 1024}'
         case "kali": return "purple"
         case "manjaro": return "green"
         default: return "blue"
+        }
+    }
+
+    /// Get the appropriate SF Symbol name for the container runtime
+    var containerRuntimeIcon: String {
+        guard let runtime = containerRuntime else { return "shippingbox" }
+
+        switch runtime.lowercased() {
+        case "orbstack": return "square.stack.3d.up"
+        case "docker": return "shippingbox"
+        default: return "shippingbox"
+        }
+    }
+
+    /// Get the display name for the container runtime
+    var containerRuntimeDisplayName: String {
+        guard let runtime = containerRuntime else { return "Container Runtime" }
+
+        switch runtime.lowercased() {
+        case "orbstack": return "OrbStack"
+        case "docker": return "Docker"
+        default: return runtime.capitalized
         }
     }
 }
