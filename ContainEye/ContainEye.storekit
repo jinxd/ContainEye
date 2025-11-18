@@ -24,7 +24,7 @@
     "_developerTeamID" : "X5933694SW",
     "_disableDialogs" : false,
     "_failTransactionsEnabled" : false,
-    "_lastSynchronizedDate" : 785182462.92154598,
+    "_lastSynchronizedDate" : 785188622.93805206,
     "_locale" : "en_US",
     "_renewalBillingIssuesEnabled" : false,
     "_storefront" : "USA",
@@ -56,7 +56,7 @@
           "localizations" : [
             {
               "description" : "Donate a tad more",
-              "displayName" : "Supporter+",
+              "displayName" : "Munchie Master",
               "locale" : "en_US"
             }
           ],
@@ -84,7 +84,7 @@
           "localizations" : [
             {
               "description" : "Support with a monthly donation",
-              "displayName" : "Supporter",
+              "displayName" : "Pretzel Pal",
               "locale" : "en_US"
             }
           ],
@@ -112,7 +112,7 @@
           "localizations" : [
             {
               "description" : "Support with a small annual donation",
-              "displayName" : "Supporter",
+              "displayName" : "Snack Pack Pro",
               "locale" : "en_US"
             }
           ],

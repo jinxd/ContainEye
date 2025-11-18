@@ -21,6 +21,9 @@ struct ServersView: View {
     var body: some View {
         ScrollView{
             VStack{
+                // Supporter banner
+                SupporterBanner()
+
                 if servers.results.isEmpty {
                     if servers.didLoad {
                         ContentUnavailableView("You don't have any servers yet.", systemImage: "server.rack")
@@ -72,7 +75,6 @@ struct ServersView: View {
                 
             }
             .padding()
-            .padding(.top, 50)
         }
         .defaultScrollAnchor((servers.didLoad && servers.results.isEmpty) ? .center : .top)
         .animation(.smooth, value: servers.results)
