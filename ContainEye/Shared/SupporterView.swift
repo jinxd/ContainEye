@@ -7,149 +7,123 @@
 
 import SwiftUI
 import StoreKit
+import ButtonKit
 
 struct SupporterView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var isPurchasing = false
-    @State private var showError = false
-    @State private var errorMessage = ""
 
     private var storeManager: StoreKitManager {
         StoreKitManager.shared
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 24) {
-                    // Header
-                    VStack(spacing: 12) {
-                        Image(systemName: "heart.circle.fill")
-                            .font(.system(size: 70))
-                            .foregroundStyle(.red.gradient)
-                            .symbolEffect(.pulse)
+        ScrollView {
+            VStack {
+                // Header
+                VStack(spacing: 12) {
+                    Image(systemName: "heart.circle.fill")
+                        .font(.system(size: 70))
+                        .foregroundStyle(.red.gradient)
+                        .symbolEffect(.pulse)
 
-                        Text("Become a Supporter")
-                            .font(.largeTitle)
-                            .fontWeight(.bold)
+                    Text("Become a Supporter")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
 
-                        Text("ContainEye is free and open source. Support the development with a small donation!")
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
-                    }
-                    .padding(.top)
-
-                    // Current Status
-                    if storeManager.hasActiveSubscription {
-                        VStack(spacing: 8) {
-                            Image(systemName: "checkmark.seal.fill")
-                                .font(.system(size: 40))
-                                .foregroundStyle(.green)
-
-                            Text("Thank You!")
-                                .font(.title2)
-                                .fontWeight(.semibold)
-
-                            if let tier = storeManager.currentSubscriptionTier {
-                                Text("Active: \(tier)")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(.green.opacity(0.1))
-                                .stroke(.green.opacity(0.3), lineWidth: 2)
-                        )
-                        .padding(.horizontal)
-                    }
-
-                    // Subscription Options
-                    VStack(spacing: 16) {
-                        ForEach(storeManager.products, id: \.id) { product in
-                            SubscriptionCard(
-                                product: product,
-                                isPurchasing: isPurchasing,
-                                isActive: storeManager.purchasedSubscriptions.contains(product.id)
-                            ) {
-                                await purchaseProduct(product)
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-
-                    // Benefits Section
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("Why Support?")
-                            .font(.title2)
-                            .fontWeight(.semibold)
-
-                        BenefitRow(icon: "heart.fill", text: "Support ongoing development", color: .red)
-                        BenefitRow(icon: "wrench.and.screwdriver.fill", text: "Help maintain the app", color: .orange)
-                        BenefitRow(icon: "sparkles", text: "Enable new features", color: .yellow)
-                        BenefitRow(icon: "shield.fill", text: "Keep ContainEye free for everyone", color: .blue)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
-                    .background(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(.regularMaterial)
-                    )
-                    .padding(.horizontal)
-
-                    // Restore Button
-                    Button {
-                        Task {
-                            await restorePurchases()
-                        }
-                    } label: {
-                        Text("Restore Purchases")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.bottom)
-
-                    // Footer
-                    Text("ContainEye will always be free and open source. Your support helps keep it that way!")
-                        .font(.caption)
+                    Text("ContainEye is free and open source. Support the development with a small donation!")
+                        .font(.body)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
-                        .padding(.bottom)
                 }
-            }
-            .navigationTitle("Supporter")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
-                        dismiss()
+                .padding(.top)
+
+                // Current Status
+                if storeManager.hasActiveSubscription {
+                    VStack(spacing: 8) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.green)
+
+                        Text("Thank You!")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(.green.opacity(0.1))
+                            .stroke(.green.opacity(0.3), lineWidth: 2)
+                    )
+                    .padding(.horizontal)
+                }
+
+                // Subscription Options
+                VStack {
+                    ForEach(storeManager.products, id: \.id) { product in
+                        SubscriptionCard(
+                            product: product,
+                            isPurchasing: isPurchasing,
+                            isActive: storeManager.purchasedSubscriptions.contains(product.id)
+                        ) {
+                            await purchaseProduct(product)
+                        }
                     }
                 }
-            }
-            .alert("Error", isPresented: $showError) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                Text(errorMessage)
+                .padding(.horizontal)
+
+                Spacer(minLength: 50)
+                // Benefits Section
+                VStack(alignment: .leading) {
+                    Text("Why Support?")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+
+                    BenefitRow(icon: "heart.fill", text: "Support ongoing development", color: .red)
+                    BenefitRow(icon: "wrench.and.screwdriver.fill", text: "Help maintain the app", color: .orange)
+                    BenefitRow(icon: "sparkles", text: "Enable new features", color: .yellow)
+                    BenefitRow(icon: "shield.fill", text: "Keep ContainEye free for everyone", color: .blue)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(.regularMaterial)
+                )
+                .padding(.horizontal)
+
+                // Restore Button
+                Button {
+                    Task {
+                        await restorePurchases()
+                    }
+                } label: {
+                    Text("Restore Purchases")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.bottom)
+
+                // Footer
+                Text("ContainEye will always be free and open source. Your support helps keep it that way!")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+                    .padding(.bottom)
             }
         }
+        .navigationTitle("Supporter")
+        .navigationBarTitleDisplayMode(.inline)
         .trackView("supporter")
     }
 
     private func purchaseProduct(_ product: Product) async {
         isPurchasing = true
         defer { isPurchasing = false }
-
-        do {
-            _ = try await storeManager.purchase(product)
-        } catch {
-            errorMessage = error.localizedDescription
-            showError = true
-        }
+        _ = try? await storeManager.purchase(product)
     }
 
     private func restorePurchases() async {
@@ -184,7 +158,7 @@ struct SubscriptionCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(product.displayName)
@@ -222,18 +196,11 @@ struct SubscriptionCard: View {
                 Spacer()
 
                 if !isActive {
-                    Button {
-                        Task {
-                            await onPurchase()
-                        }
+                    AsyncButton {
+                        await onPurchase()
                     } label: {
-                        if isPurchasing {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
                             Text("Subscribe")
                                 .fontWeight(.semibold)
-                        }
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(highlightColor)
@@ -245,29 +212,8 @@ struct SubscriptionCard: View {
         .background(
             RoundedRectangle(cornerRadius: 16)
                 .fill(.regularMaterial)
-                .stroke(isActive ? .green : highlightColor.opacity(0.3), lineWidth: isActive ? 2 : 1)
+                .stroke(isActive ? .green : highlightColor.opacity(0.3), lineWidth: isActive ? 5 : (isMonthly ? 1 : isLargeYearly ? 3 : 2))
         )
-        .overlay {
-            if isLargeYearly {
-                VStack {
-                    HStack {
-                        Spacer()
-                        Text("BEST VALUE")
-                            .font(.caption2)
-                            .fontWeight(.bold)
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(
-                                Capsule()
-                                    .fill(highlightColor.gradient)
-                            )
-                            .offset(x: -8, y: -8)
-                    }
-                    Spacer()
-                }
-            }
-        }
     }
 }
 

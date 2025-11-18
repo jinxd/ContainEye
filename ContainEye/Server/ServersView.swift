@@ -75,7 +75,6 @@ struct ServersView: View {
                 
             }
             .padding()
-            .padding(.top, 50)
         }
         .defaultScrollAnchor((servers.didLoad && servers.results.isEmpty) ? .center : .top)
         .animation(.smooth, value: servers.results)

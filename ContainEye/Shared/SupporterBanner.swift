@@ -21,70 +21,52 @@ struct SupporterBanner: View {
 
     var body: some View {
         if shouldShowBanner && !isDismissed {
-            VStack(spacing: 0) {
-                HStack(spacing: 12) {
-                    // Icon
-                    Image(systemName: "heart.circle.fill")
-                        .font(.title)
-                        .foregroundStyle(.red.gradient)
-                        .symbolEffect(.pulse)
 
-                    // Content
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Support ContainEye")
-                            .font(.headline)
-                            .fontWeight(.semibold)
-
-                        Text("Help keep this app free and open source")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Spacer()
-
-                    // Dismiss button
-                    Button {
-                        withAnimation(.smooth) {
-                            dismissBanner()
-                        }
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding()
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(.red.opacity(0.1))
-                        .stroke(.red.opacity(0.3), lineWidth: 1)
-                )
-
-                // Action button
-                NavigationLink(value: Sheet.supporter) {
+            NavigationLink(value: Sheet.supporter) {
+                VStack(spacing: 0) {
                     HStack {
-                        Text("Become a Supporter")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
+                        // Icon
+                        Image(systemName: "heart.circle.fill")
+                            .font(.title)
+                            .foregroundStyle(.red.gradient)
+                            .symbolEffect(.pulse)
 
-                        Image(systemName: "arrow.right")
-                            .font(.caption)
+                        // Content
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Support ContainEye")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+
+                            Text("Help keep this app free and open source")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        // Dismiss button
+                        Button {
+                            withAnimation(.smooth) {
+                                dismissBanner()
+                            }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
+                    .padding()
                     .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(.red.gradient)
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(.red.opacity(0.1))
+                            .stroke(.red.gradient, lineWidth: 3)
                     )
                 }
-                .buttonStyle(.plain)
-                .padding(.top, 8)
+                .padding(.bottom)
             }
-            .padding(.horizontal)
-            .padding(.bottom, 12)
-            .transition(.move(edge: .top).combined(with: .opacity))
+            .buttonStyle(.plain)
+            .transition(.move(edge: .top).combined(with: .scale))
         }
     }
 

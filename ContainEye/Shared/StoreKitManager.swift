@@ -15,7 +15,7 @@ class StoreKitManager {
     static let shared = StoreKitManager()
 
     var products: [Product] = []
-    var purchasedSubscriptions: Set<String> = []
+    var purchasedSubscriptions: Set<String> = ["loading"]
     var subscriptionStatus: Product.SubscriptionInfo.Status?
 
     private var updateListenerTask: Task<Void, Error>?
@@ -136,17 +136,6 @@ class StoreKitManager {
 
     var hasActiveSubscription: Bool {
         !purchasedSubscriptions.isEmpty
-    }
-
-    var currentSubscriptionTier: String? {
-        if purchasedSubscriptions.contains("containeye.largeyearly") {
-            return "Supporter+"
-        } else if purchasedSubscriptions.contains("containeye.yearly") {
-            return "Supporter (Yearly)"
-        } else if purchasedSubscriptions.contains("containeye.monthly") {
-            return "Supporter (Monthly)"
-        }
-        return nil
     }
 }
 
