@@ -10,10 +10,13 @@ import StoreKit
 
 struct SupporterView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var storeManager = StoreKitManager.shared
     @State private var isPurchasing = false
     @State private var showError = false
     @State private var errorMessage = ""
+
+    private var storeManager: StoreKitManager {
+        StoreKitManager.shared
+    }
 
     var body: some View {
         NavigationStack {

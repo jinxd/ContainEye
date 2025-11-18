@@ -8,9 +8,12 @@
 import SwiftUI
 
 struct SupporterBanner: View {
-    @State private var storeManager = StoreKitManager.shared
     @State private var isDismissed = false
     @Environment(\.namespace) var namespace
+
+    private var storeManager: StoreKitManager {
+        StoreKitManager.shared
+    }
 
     // UserDefaults keys
     private let lastDismissedKey = "supporterBannerLastDismissed"
