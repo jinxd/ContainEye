@@ -29,7 +29,7 @@ class StoreKitManager {
         }
     }
 
-    deinit {
+    @MainActor deinit {
         updateListenerTask?.cancel()
     }
 
@@ -56,7 +56,7 @@ class StoreKitManager {
         }
     }
 
-    func purchase(_ product: Product) async throws -> Transaction? {
+    func purchase(_ product: Product) async throws -> StoreKit.Transaction? {
         let result = try await product.purchase()
 
         switch result {
@@ -113,7 +113,7 @@ class StoreKitManager {
         return Task.detached {
             for await result in Transaction.updates {
                 do {
-                    let transaction = try self.checkVerified(result)
+                    let transaction = try await self.checkVerified(result)
 
                     await self.updateSubscriptionStatus()
 
