@@ -106,6 +106,22 @@ struct SupporterView: View {
                 }
                 .padding(.bottom)
 
+                // Legal Links
+                HStack(spacing: 20) {
+                    Link("Privacy Policy", destination: URL(string: "https://hannesnagel.com/containeye/privacy")!)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("•")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Link("Terms of Use", destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.bottom, 8)
+
                 // Footer
                 Text("ContainEye will always be free and open source. Your support helps keep it that way!")
                     .font(.caption)
