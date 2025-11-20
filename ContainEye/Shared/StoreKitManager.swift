@@ -8,6 +8,7 @@
 import Foundation
 import StoreKit
 import SwiftUI
+import TelemetryDeck
 
 @MainActor
 @Observable
@@ -62,6 +63,7 @@ class StoreKitManager {
         switch result {
         case .success(let verification):
             let transaction = try checkVerified(verification)
+            TelemetryDeck.purchaseCompleted(transaction: transaction)
             await updateSubscriptionStatus()
             await transaction.finish()
             return transaction
