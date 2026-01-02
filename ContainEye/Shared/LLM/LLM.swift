@@ -48,23 +48,19 @@ enum LLM {
                 switch aiResponse.type {
                 case "question":
                     let answer = try await ConfirmatorManager.shared.ask(aiResponse.content)
-                    let jsonResponse = """
-                    {
-                        "type": "answer",
-                        "content": "\(answer)"
+                    // Properly encode JSON to handle quotes, newlines, etc.
+                    if let jsonData = try? JSONSerialization.data(withJSONObject: ["type": "answer", "content": answer]),
+                       let jsonResponse = String(data: jsonData, encoding: .utf8) {
+                        newInputs.append(["role": "user", "content": jsonResponse])
                     }
-                    """
-                    newInputs.append(["role": "user", "content": jsonResponse])
 
                 case "execute":
                     let result = try await ConfirmatorManager.shared.execute(aiResponse.content)
-                    let jsonResponse = """
-                    {
-                        "type": "command_output",
-                        "content": "\(result)"
+                    // Properly encode JSON to handle quotes, newlines, etc.
+                    if let jsonData = try? JSONSerialization.data(withJSONObject: ["type": "command_output", "content": result]),
+                       let jsonResponse = String(data: jsonData, encoding: .utf8) {
+                        newInputs.append(["role": "user", "content": jsonResponse])
                     }
-                    """
-                    newInputs.append(["role": "user", "content": jsonResponse])
 
                 default:
                     break

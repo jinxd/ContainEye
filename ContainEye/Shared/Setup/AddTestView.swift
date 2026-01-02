@@ -77,10 +77,14 @@ struct AddTestView: View {
                 } else {
 
                     AsyncButton("Add the test") {
-                        try await test.write(to: db!)
-                        test = ServerTest(id: .random(in: (.min)...(.max)), title: "", credentialKey: "", command: "", expectedOutput: "", status: .notRun)
-                        screen = 3
-                        _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+                        do {
+                            try await test.write(to: db!)
+                            test = ServerTest(id: .random(in: (.min)...(.max)), title: "", credentialKey: "", command: "", expectedOutput: "", status: .notRun)
+                            screen = 3
+                            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+                        } catch {
+                            await ConfirmatorManager.shared.reportError(error)
+                        }
                     }
                     .buttonStyle(.bordered)
 
@@ -97,7 +101,8 @@ struct AddTestView: View {
                         }
                         .buttonStyle(.bordered)
                         AsyncButton("Fix it", systemImage: "wand.and.sparkles"){
-                            test = try await generateTest(from: test, description: """
+                            do {
+                                test = try await generateTest(from: test, description: """
 You need to fix the test \(test.title). It previously failed, because the command:
 ```\(test.command)```
 produced the output:
@@ -107,14 +112,21 @@ instead of producing:
 which is what the test tried to verify. You must ask the user how to fix the test using the question tool.
 The regex/string must match exactly the entire output of the command. Consider using | grep directly in the command.
 """)
+                            } catch {
+                                await ConfirmatorManager.shared.reportError(error)
+                            }
                         }
                         .buttonStyle(.borderedProminent)
 
                         AsyncButton("Add anyway and edit later") {
-                            try await test.write(to: db!)
-                            test = ServerTest(id: .random(in: (.min)...(.max)), title: "", credentialKey: "", command: "", expectedOutput: "", status: .notRun)
-                            UserDefaults.standard.set(ContentView.Screen.testList.rawValue, forKey: "screen")
-                            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+                            do {
+                                try await test.write(to: db!)
+                                test = ServerTest(id: .random(in: (.min)...(.max)), title: "", credentialKey: "", command: "", expectedOutput: "", status: .notRun)
+                                UserDefaults.standard.set(ContentView.Screen.testList.rawValue, forKey: "screen")
+                                _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+                            } catch {
+                                await ConfirmatorManager.shared.reportError(error)
+                            }
                         }
                         .buttonStyle(.bordered)
                     }
