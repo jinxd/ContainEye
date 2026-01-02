@@ -137,6 +137,7 @@ The regex/string must match exactly the entire output of the command. Consider u
                     TextField("Describe what to test", text: $testDescription, axis: .vertical)
                         .focused($field, equals: .askAI)
                     AsyncButton {
+                        field = nil  // Dismiss keyboard when starting AI generation
                         do {
                             test = try await generateTest(from: test, description: testDescription)
                         } catch {
@@ -178,7 +179,6 @@ The regex/string must match exactly the entire output of the command. Consider u
         test.expectedOutput = output.content.expectedOutput
         test.notes = testDescription
         testDescription.removeAll()
-        field = nil
         currentHistory = dirtyLlmOutput.history
         return await test.test()
     }
