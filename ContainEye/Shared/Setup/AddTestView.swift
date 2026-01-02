@@ -125,7 +125,11 @@ The regex/string must match exactly the entire output of the command. Consider u
                     TextField("Describe what to test", text: $testDescription, axis: .vertical)
                         .focused($field, equals: .askAI)
                     AsyncButton {
-                        test = try await generateTest(from: test, description: testDescription)
+                        do {
+                            test = try await generateTest(from: test, description: testDescription)
+                        } catch {
+                            await ConfirmatorManager.shared.reportError(error)
+                        }
                     } label: {
                         Image(systemName: "arrow.up.circle.fill")
                     }

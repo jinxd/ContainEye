@@ -75,8 +75,10 @@ enum LLM {
             return (responseString, conversation)
 
         } catch {
-
-            return await generate(prompt: prompt, systemPrompt: systemPrompt, history: history.suffix(3))
+            // Log error for debugging
+            print("LLM generation error: \(error)")
+            // Return error message instead of infinite retry
+            return ("Error: Failed to generate response - \(error.localizedDescription)", history)
         }
     }
 
