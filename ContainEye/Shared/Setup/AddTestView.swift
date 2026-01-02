@@ -83,7 +83,7 @@ struct AddTestView: View {
                             screen = 3
                             _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
                         } catch {
-                            await ConfirmatorManager.shared.reportError(error)
+                            await ConfirmatorManager.reportError(error)
                         }
                     }
                     .buttonStyle(.bordered)
@@ -113,7 +113,7 @@ which is what the test tried to verify. You must ask the user how to fix the tes
 The regex/string must match exactly the entire output of the command. Consider using | grep directly in the command.
 """)
                             } catch {
-                                await ConfirmatorManager.shared.reportError(error)
+                                await ConfirmatorManager.reportError(error)
                             }
                         }
                         .buttonStyle(.borderedProminent)
@@ -125,7 +125,7 @@ The regex/string must match exactly the entire output of the command. Consider u
                                 UserDefaults.standard.set(ContentView.Screen.testList.rawValue, forKey: "screen")
                                 _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
                             } catch {
-                                await ConfirmatorManager.shared.reportError(error)
+                                await ConfirmatorManager.reportError(error)
                             }
                         }
                         .buttonStyle(.bordered)
@@ -140,7 +140,7 @@ The regex/string must match exactly the entire output of the command. Consider u
                         do {
                             test = try await generateTest(from: test, description: testDescription)
                         } catch {
-                            await ConfirmatorManager.shared.reportError(error)
+                            await ConfirmatorManager.reportError(error)
                         }
                     } label: {
                         Image(systemName: "arrow.up.circle.fill")
