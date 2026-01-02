@@ -33,38 +33,42 @@ enum LLM {
             // Append AI response to the conversation history
             conversation.append(["role": "assistant", "content": responseString])
 
-            // Define regex patterns for JSON syntax
-            let questionPattern = /"type":\s*"question".*?"content":\s*"([^"]+)"/.dotMatchesNewlines()
-            let executePattern = /"type":\s*"execute",.*?"content":\s*"([^"]+)"/.dotMatchesNewlines()
-
             var newInputs: [[String: String]] = []
 
-
-            print(responseString, responseString.matches(of: questionPattern).count, responseString.matches(of: executePattern).count)
-            // Process questions
-            for match in responseString.matches(of: questionPattern) {
-                let question = match.1
-                let answer = try await ConfirmatorManager.shared.ask(String(question))
-                let jsonResponse = """
-                {
-                    "type": "answer",
-                    "content": "\(answer)"
-                }
-                """
-                newInputs.append(["role": "user", "content": jsonResponse])
+            // Try to parse as JSON to handle questions and execute commands
+            struct AIResponse: Decodable {
+                let type: String
+                let content: String
             }
 
-            // Process commands
-            for match in responseString.matches(of: executePattern) {
-                let command = match.1
-                let result = try await ConfirmatorManager.shared.execute(String(command))
-                let jsonResponse = """
-                {
-                    "type": "command_output",
-                    "content": "\(result)"
-                }	
-                """
-                newInputs.append(["role": "user", "content": jsonResponse])
+            // Check if response is valid JSON
+            if let jsonData = responseString.data(using: .utf8),
+               let aiResponse = try? JSONDecoder().decode(AIResponse.self, from: jsonData) {
+
+                switch aiResponse.type {
+                case "question":
+                    let answer = try await ConfirmatorManager.shared.ask(aiResponse.content)
+                    let jsonResponse = """
+                    {
+                        "type": "answer",
+                        "content": "\(answer)"
+                    }
+                    """
+                    newInputs.append(["role": "user", "content": jsonResponse])
+
+                case "execute":
+                    let result = try await ConfirmatorManager.shared.execute(aiResponse.content)
+                    let jsonResponse = """
+                    {
+                        "type": "command_output",
+                        "content": "\(result)"
+                    }
+                    """
+                    newInputs.append(["role": "user", "content": jsonResponse])
+
+                default:
+                    break
+                }
             }
 
             // If new input exists, recurse with updated history
