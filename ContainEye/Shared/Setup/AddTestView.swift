@@ -168,12 +168,50 @@ The regex/string must match exactly the entire output of the command. Consider u
         )
         let llmOutput = LLM.cleanLLMOutput(dirtyLlmOutput.output)
 
-        let output = try JSONDecoder().decode(
-            LLM.Output.self,
-            from: Data(
-                llmOutput.utf8
+        // Check if the response is actually a final "response" type
+        if llmOutput.contains("\"type\"") && !llmOutput.contains("\"type\":\"response\"") && !llmOutput.contains("\"type\": \"response\"") {
+            print("AI returned non-response type")
+            print("Raw response: \(llmOutput)")
+            throw NSError(
+                domain: "AITestGeneration",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "AI didn't provide a final test. The response was: \(llmOutput.prefix(100))"]
             )
-        )
+        }
+
+        // Decode with detailed error handling
+        let output: LLM.Output
+        do {
+            output = try JSONDecoder().decode(
+                LLM.Output.self,
+                from: Data(llmOutput.utf8)
+            )
+        } catch let DecodingError.keyNotFound(key, context) {
+            print("Missing field '\(key.stringValue)' in AI response")
+            print("Raw response: \(llmOutput)")
+            throw NSError(
+                domain: "AITestGeneration",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "AI response is missing the field '\(key.stringValue)'. Please try again with a more specific description."]
+            )
+        } catch let DecodingError.typeMismatch(type, context) {
+            print("Type mismatch in AI response: expected \(type)")
+            print("Context: \(context.debugDescription)")
+            print("Raw response: \(llmOutput)")
+            throw NSError(
+                domain: "AITestGeneration",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "AI returned an unexpected response format. Please try again."]
+            )
+        } catch {
+            print("JSON decoding failed: \(error)")
+            print("Raw response: \(llmOutput)")
+            throw NSError(
+                domain: "AITestGeneration",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to understand AI response: \(error.localizedDescription)"]
+            )
+        }
         test.title = output.content.title
         test.command = output.content.command
         test.expectedOutput = output.content.expectedOutput
