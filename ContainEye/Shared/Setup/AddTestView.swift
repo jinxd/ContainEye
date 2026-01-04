@@ -189,27 +189,52 @@ The regex/string must match exactly the entire output of the command. Consider u
         } catch let DecodingError.keyNotFound(key, context) {
             print("Missing field '\(key.stringValue)' in AI response")
             print("Raw response: \(llmOutput)")
+            let errorMsg = """
+            AI response is missing the field '\(key.stringValue)'.
+
+            Raw AI response:
+            \(llmOutput)
+
+            Please try again with a more specific description.
+            """
             throw NSError(
                 domain: "AITestGeneration",
                 code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "AI response is missing the field '\(key.stringValue)'. Please try again with a more specific description."]
+                userInfo: [NSLocalizedDescriptionKey: errorMsg]
             )
         } catch let DecodingError.typeMismatch(type, context) {
             print("Type mismatch in AI response: expected \(type)")
             print("Context: \(context.debugDescription)")
             print("Raw response: \(llmOutput)")
+            let errorMsg = """
+            AI returned an unexpected response format.
+            Expected: \(type)
+
+            Raw AI response:
+            \(llmOutput)
+
+            Please try again.
+            """
             throw NSError(
                 domain: "AITestGeneration",
                 code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "AI returned an unexpected response format. Please try again."]
+                userInfo: [NSLocalizedDescriptionKey: errorMsg]
             )
         } catch {
             print("JSON decoding failed: \(error)")
             print("Raw response: \(llmOutput)")
+            let errorMsg = """
+            Failed to understand AI response.
+
+            Raw AI response:
+            \(llmOutput)
+
+            Error: \(error.localizedDescription)
+            """
             throw NSError(
                 domain: "AITestGeneration",
                 code: 3,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to understand AI response: \(error.localizedDescription)"]
+                userInfo: [NSLocalizedDescriptionKey: errorMsg]
             )
         }
         test.title = output.content.title
