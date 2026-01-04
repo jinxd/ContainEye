@@ -400,20 +400,43 @@ private struct Confirmator: View {
             // Error content
             VStack(spacing: 16) {
                 if let errorMessage = confirmator.errorMessage {
-                    Text(errorMessage)
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(nil)
-                        .padding()
-                        .background(.red.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(.red.opacity(0.2), lineWidth: 1)
-                        )
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Details")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.secondary)
+
+                            Spacer()
+
+                            Button {
+                                UIPasteboard.general.string = errorMessage
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "doc.on.doc")
+                                    Text("Copy")
+                                }
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                            }
+                        }
+
+                        Text(errorMessage)
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(nil)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding()
+                    .background(.red.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(.red.opacity(0.2), lineWidth: 1)
+                    )
                 }
             }
-            
+
             // Actions
             Button("Dismiss") {
                 confirmator.clearError()

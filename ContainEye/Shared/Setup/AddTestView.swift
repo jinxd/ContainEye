@@ -77,10 +77,14 @@ struct AddTestView: View {
                 } else {
 
                     AsyncButton("Add the test") {
-                        try await test.write(to: db!)
-                        test = ServerTest(id: .random(in: (.min)...(.max)), title: "", credentialKey: "", command: "", expectedOutput: "", status: .notRun)
-                        screen = 3
-                        _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+                        do {
+                            try await test.write(to: db!)
+                            test = ServerTest(id: .random(in: (.min)...(.max)), title: "", credentialKey: "", command: "", expectedOutput: "", status: .notRun)
+                            screen = 3
+                            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+                        } catch {
+                            await ConfirmatorManager.reportError(error)
+                        }
                     }
                     .buttonStyle(.bordered)
 
@@ -97,7 +101,8 @@ struct AddTestView: View {
                         }
                         .buttonStyle(.bordered)
                         AsyncButton("Fix it", systemImage: "wand.and.sparkles"){
-                            test = try await generateTest(from: test, description: """
+                            do {
+                                test = try await generateTest(from: test, description: """
 You need to fix the test \(test.title). It previously failed, because the command:
 ```\(test.command)```
 produced the output:
@@ -107,14 +112,21 @@ instead of producing:
 which is what the test tried to verify. You must ask the user how to fix the test using the question tool.
 The regex/string must match exactly the entire output of the command. Consider using | grep directly in the command.
 """)
+                            } catch {
+                                await ConfirmatorManager.reportError(error)
+                            }
                         }
                         .buttonStyle(.borderedProminent)
 
                         AsyncButton("Add anyway and edit later") {
-                            try await test.write(to: db!)
-                            test = ServerTest(id: .random(in: (.min)...(.max)), title: "", credentialKey: "", command: "", expectedOutput: "", status: .notRun)
-                            UserDefaults.standard.set(ContentView.Screen.testList.rawValue, forKey: "screen")
-                            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+                            do {
+                                try await test.write(to: db!)
+                                test = ServerTest(id: .random(in: (.min)...(.max)), title: "", credentialKey: "", command: "", expectedOutput: "", status: .notRun)
+                                UserDefaults.standard.set(ContentView.Screen.testList.rawValue, forKey: "screen")
+                                _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+                            } catch {
+                                await ConfirmatorManager.reportError(error)
+                            }
                         }
                         .buttonStyle(.bordered)
                     }
@@ -125,7 +137,12 @@ The regex/string must match exactly the entire output of the command. Consider u
                     TextField("Describe what to test", text: $testDescription, axis: .vertical)
                         .focused($field, equals: .askAI)
                     AsyncButton {
-                        test = try await generateTest(from: test, description: testDescription)
+                        field = nil  // Dismiss keyboard when starting AI generation
+                        do {
+                            test = try await generateTest(from: test, description: testDescription)
+                        } catch {
+                            await ConfirmatorManager.reportError(error)
+                        }
                     } label: {
                         Image(systemName: "arrow.up.circle.fill")
                     }
@@ -151,18 +168,80 @@ The regex/string must match exactly the entire output of the command. Consider u
         )
         let llmOutput = LLM.cleanLLMOutput(dirtyLlmOutput.output)
 
-        let output = try JSONDecoder().decode(
-            LLM.Output.self,
-            from: Data(
-                llmOutput.utf8
+        // Check if the response is actually a final "response" type
+        if llmOutput.contains("\"type\"") && !llmOutput.contains("\"type\":\"response\"") && !llmOutput.contains("\"type\": \"response\"") {
+            print("AI returned non-response type")
+            print("Raw response: \(llmOutput)")
+            throw NSError(
+                domain: "AITestGeneration",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "AI didn't provide a final test. The response was: \(llmOutput.prefix(100))"]
             )
-        )
+        }
+
+        // Decode with detailed error handling
+        let output: LLM.Output
+        do {
+            output = try JSONDecoder().decode(
+                LLM.Output.self,
+                from: Data(llmOutput.utf8)
+            )
+        } catch let DecodingError.keyNotFound(key, context) {
+            print("Missing field '\(key.stringValue)' in AI response")
+            print("Raw response: \(llmOutput)")
+            let errorMsg = """
+            AI response is missing the field '\(key.stringValue)'.
+
+            Raw AI response:
+            \(llmOutput)
+
+            Please try again with a more specific description.
+            """
+            throw NSError(
+                domain: "AITestGeneration",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: errorMsg]
+            )
+        } catch let DecodingError.typeMismatch(type, context) {
+            print("Type mismatch in AI response: expected \(type)")
+            print("Context: \(context.debugDescription)")
+            print("Raw response: \(llmOutput)")
+            let errorMsg = """
+            AI returned an unexpected response format.
+            Expected: \(type)
+
+            Raw AI response:
+            \(llmOutput)
+
+            Please try again.
+            """
+            throw NSError(
+                domain: "AITestGeneration",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: errorMsg]
+            )
+        } catch {
+            print("JSON decoding failed: \(error)")
+            print("Raw response: \(llmOutput)")
+            let errorMsg = """
+            Failed to understand AI response.
+
+            Raw AI response:
+            \(llmOutput)
+
+            Error: \(error.localizedDescription)
+            """
+            throw NSError(
+                domain: "AITestGeneration",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: errorMsg]
+            )
+        }
         test.title = output.content.title
         test.command = output.content.command
         test.expectedOutput = output.content.expectedOutput
         test.notes = testDescription
         testDescription.removeAll()
-        field = nil
         currentHistory = dirtyLlmOutput.history
         return await test.test()
     }
