@@ -1,0 +1,19 @@
+html,
+body,
+#terminal {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: #0d1117;
+}
+
+body {
+  overflow: hidden;
+}
+
+.xterm {
+  padding: 8px;
+  -webkit-touch-callout: default;
+  touch-action: manipulation;
+}

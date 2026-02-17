@@ -13,7 +13,7 @@ ContainEye is a comprehensive server monitoring solution consisting of:
 - **Server Monitoring**: Real-time CPU, memory, disk, and network metrics via SSH
 - **Container Management**: Docker container oversight and control
 - **SFTP File Transfer**: Remote file system browsing, management, and file upload capabilities
-- **SSH Terminal Access**: Full terminal emulation using embedded SwiftTerm
+- **SSH Terminal Access**: xterm.js-based terminal emulation via WKWebView
 - **Automated Testing**: Configurable server health checks with background execution
 - **Widget Support**: iOS widgets for quick server status overview
 - **Push Notifications**: Backend-powered alerts for critical server events
@@ -26,7 +26,7 @@ ContainEye is a comprehensive server monitoring solution consisting of:
 - **Blackbird SQLite** for local data persistence with reactive UI updates
 - **Citadel/CSSH** for SSH and SFTP operations
 - **KeychainAccess** for secure credential storage with iCloud sync
-- **SwiftTerm** (embedded local package) for terminal emulation
+- **xterm.js + WKWebView** for terminal emulation with OSC shell integration
 - **TelemetryDeck** for analytics
 
 **Backend API:**
@@ -100,10 +100,9 @@ docker compose up -d
 - `Server/`: Server monitoring views and detail screens
 - `Tests/`: Server testing interface and configuration
 - `SFTP/`: File management and transfer views
-- `TerminalTab/`: SSH terminal interface with snippet management
+- `TerminalTab/`: xterm-based SSH terminal workspace (multi-tab/pane) with snippet management
 - `AppIntents/`: Siri shortcuts and app intents implementation
 - `Assets.xcassets/`: App icons and image assets
-- `SwiftTerm/`: Embedded terminal library (local Swift package)
 
 ### Backend API (`containeye-backend/`)
 - `Sources/App/`: Vapor application source code
@@ -123,7 +122,7 @@ docker compose up -d
 ### SSH Connection Management
 - `SSHClientActor`: Singleton actor managing SSH connection pools
 - Automatic connection lifecycle management with proper cleanup
-- Citadel for main SSH operations, SwiftSH for terminal emulation
+- Citadel for command/SFTP operations, SwiftSH for interactive shell streaming
 - **SwiftSH**: Built from source for full simulator support (replaced binary framework)
 - Comprehensive error handling for network and authentication failures
 

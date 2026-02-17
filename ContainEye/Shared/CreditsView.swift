@@ -44,10 +44,18 @@ struct CreditsView: View {
             color: .purple
         ),
         Dependency(
-            name: "SwiftTerm",
-            description: "Terminal emulator library",
+            name: "SwiftSH",
+            description: "Interactive SSH shell streaming",
             author: "Miguel de Icaza",
-            url: "https://github.com/migueldeicaza/SwiftTerm",
+            url: "https://github.com/migueldeicaza/SwiftSH",
+            icon: "terminal.fill",
+            color: .indigo
+        ),
+        Dependency(
+            name: "xterm.js",
+            description: "Web terminal emulator",
+            author: "xterm.js contributors",
+            url: "https://github.com/xtermjs/xterm.js",
             icon: "terminal.fill",
             color: .indigo
         )

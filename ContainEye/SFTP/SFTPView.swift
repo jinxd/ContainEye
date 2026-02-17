@@ -93,6 +93,7 @@ struct SFTPView: View {
     @State private var uploadProgress: Double = 0
     @State private var showingPathInput = false
     @State private var pathInput = ""
+    @State private var terminalManager = TerminalNavigationManager.shared
     
     private let tempDirectory: URL = {
         FileManager.default.temporaryDirectory.appendingPathComponent("ContainEye")
@@ -108,8 +109,9 @@ struct SFTPView: View {
     }
 
     var body: some View {
-        if let credential {
-            VStack{
+        Group {
+            if let credential {
+                VStack{
                 if let openedFile {
                     PowerfulTextEditorView(
                         text: $fileContent,
@@ -456,90 +458,165 @@ struct SFTPView: View {
                 }
             }
             .trackView("sftp/connected")
-            .alert("Navigate to Path", isPresented: $showingPathInput) {
-                TextField("Enter path", text: $pathInput)
-                Button("Cancel", role: .cancel) { }
-                Button("Go") {
-                    Task {
-                        await navigateToPath(pathInput)
-                    }
-                }
-            } message: {
-                Text("Enter the full path you want to navigate to")
-            }
-        } else {
-            let keychain = keychain()
-            let credentials = keychain.allKeys().compactMap({keychain.getCredential(for: $0)})
-            if credentials.isEmpty {
-                ContentUnavailableView("You don't have any servers yet.", systemImage: "server.rack")
-                    .trackView("sftp/no-servers")
             } else {
-                VStack {
+                let keychain = keychain()
+                let credentials = keychain.allKeys().compactMap({keychain.getCredential(for: $0)})
+                if credentials.isEmpty {
+                    ContentUnavailableView("You don't have any servers yet.", systemImage: "server.rack")
+                        .trackView("sftp/no-servers")
+                } else {
                     VStack {
-                        Image(systemName: "externaldrive.connected.to.line.below")
-                            .font(.system(size: 60))
-                            .foregroundStyle(.blue)
-                            .symbolEffect(.pulse)
-                        
-                        Text("Connect to Server")
-                            .font(.largeTitle)
-                            .fontWeight(.bold)
-                            .foregroundStyle(.primary)
-                        
-                        Text("Select a server to browse files and manage content")
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding()
-                    
-                    LazyVGrid(columns: [
-                        GridItem(.flexible()),
-                        GridItem(.flexible())
-                    ]) {
-                        ForEach(credentials, id: \.key) { credential in
-                            Button {
-                                self.credential = credential
-                            } label: {
-                                VStack {
-                                    if let server = servers.results.first(where: { $0.credentialKey == credential.key }) {
-                                        OSIconView(server: server, size: 32)
-                                    } else {
-                                        Image(systemName: "server.rack")
-                                            .font(.title)
-                                            .foregroundStyle(.blue)
-                                    }
-                                    
-                                    Text(credential.label)
-                                        .font(.headline)
-                                        .foregroundStyle(.primary)
-                                        .lineLimit(2)
-                                        .multilineTextAlignment(.center)
-                                    
-                                    Text(credential.host)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(.blue.opacity(0.05))
-                                        .stroke(.blue.opacity(0.2), lineWidth: 1)
-                                )
-                            }
-                            .buttonStyle(.plain)
+                        VStack {
+                            Image(systemName: "externaldrive.connected.to.line.below")
+                                .font(.system(size: 60))
+                                .foregroundStyle(.blue)
+                                .symbolEffect(.pulse)
+                            
+                            Text("Connect to Server")
+                                .font(.largeTitle)
+                                .fontWeight(.bold)
+                                .foregroundStyle(.primary)
+                            
+                            Text("Select a server to browse files and manage content")
+                                .font(.body)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
                         }
+                        .padding()
+                        
+                        LazyVGrid(columns: [
+                            GridItem(.flexible()),
+                            GridItem(.flexible())
+                        ]) {
+                            ForEach(credentials, id: \.key) { credential in
+                                Button {
+                                    self.credential = credential
+                                } label: {
+                                    VStack {
+                                        if let server = servers.results.first(where: { $0.credentialKey == credential.key }) {
+                                            OSIconView(server: server, size: 32)
+                                        } else {
+                                            Image(systemName: "server.rack")
+                                                .font(.title)
+                                                .foregroundStyle(.blue)
+                                        }
+                                        
+                                        Text(credential.label)
+                                            .font(.headline)
+                                            .foregroundStyle(.primary)
+                                            .lineLimit(2)
+                                            .multilineTextAlignment(.center)
+                                        
+                                        Text(credential.host)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .fill(.blue.opacity(0.05))
+                                            .stroke(.blue.opacity(0.2), lineWidth: 1)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal)
+                        
+                        Spacer()
                     }
-                    .padding(.horizontal)
-                    
-                    Spacer()
+                    .trackView("sftp/select-server")
                 }
-                .trackView("sftp/select-server")
+            }
+        }
+        .alert("Navigate to Path", isPresented: $showingPathInput) {
+            TextField("Enter path", text: $pathInput)
+            Button("Cancel", role: .cancel) { }
+            Button("Go") {
+                Task {
+                    await navigateToPath(pathInput)
+                }
+            }
+        } message: {
+            Text("Enter the full path you want to navigate to")
+        }
+        .onAppear {
+            processPendingSFTPEditorRequests()
+        }
+        .onChange(of: terminalManager.sftpEditorOpenRequests.count) { _, _ in
+            processPendingSFTPEditorRequests()
+        }
+    }
+
+    private func processPendingSFTPEditorRequests() {
+        let requests = terminalManager.dequeueAllSFTPEditorRequests()
+        guard !requests.isEmpty else {
+            return
+        }
+
+        Task {
+            for request in requests {
+                await openSFTPEditorRequest(request)
             }
         }
     }
+
+    private func openSFTPEditorRequest(_ request: SFTPEditorOpenRequest) async {
+        guard let targetCredential = keychain().getCredential(for: request.credentialKey) else {
+            return
+        }
+
+        do {
+            credential = targetCredential
+            try await goHome()
+
+            let resolvedPath = try await resolvePathForEditorRequest(request, credential: targetCredential)
+            let directory = (resolvedPath as NSString).deletingLastPathComponent
+            if !directory.isEmpty {
+                currentDirectory = directory
+                try await updateDirectories(appending: "")
+            }
+            try await openFile(path: resolvedPath, mode: .asText)
+        } catch {
+            ConfirmatorManager.shared.showError(error, title: "Failed to Open File")
+        }
+    }
+
+    private func resolvePathForEditorRequest(_ request: SFTPEditorOpenRequest, credential: Credential) async throws -> String {
+        let rawPath = request.path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawPath.isEmpty else {
+            return request.path
+        }
+
+        let candidatePath: String
+        if rawPath.hasPrefix("/") {
+            candidatePath = rawPath
+        } else if rawPath == "~" {
+            candidatePath = "/\(credential.username)"
+        } else if rawPath.hasPrefix("~/") {
+            candidatePath = "/\(credential.username)/\(rawPath.dropFirst(2))"
+        } else if let cwd = request.cwd, cwd.hasPrefix("/") {
+            candidatePath = joinPath(cwd, rawPath)
+        } else {
+            candidatePath = rawPath
+        }
+
+        if let sftp, let resolved = try? await sftp.getRealPath(atPath: candidatePath) {
+            return resolved
+        }
+
+        return candidatePath
+    }
+
+    private func joinPath(_ base: String, _ part: String) -> String {
+        if base.hasSuffix("/") {
+            return base + part
+        }
+        return base + "/" + part
+    }
+
     func goHome() async throws {
         guard let credential else { return }
         try? await sftp?.close()

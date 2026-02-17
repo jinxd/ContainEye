@@ -1,725 +1,1944 @@
-//
-//  TerminalView.swift
-//  ContainEye
-//
-//  Created by Hannes Nagel on 3/13/25.
-//
-
-import SwiftUI
-import SwiftTerm
 import Blackbird
+import Observation
+import SwiftUI
+import UIKit
+
+// MARK: - UI Scaling
+
+@inlinable
+func UIFloat(_ value: CGFloat) -> CGFloat {
+#if os(macOS)
+    return value * 0.92
+#else
+    return value
+#endif
+}
+
+@inlinable
+func UIFloat(_ value: Double) -> CGFloat {
+    UIFloat(CGFloat(value))
+}
+
+@inlinable
+func UIFloat(_ value: Int) -> CGFloat {
+    UIFloat(CGFloat(value))
+}
+
+// MARK: - SwiftUI Host
 
 struct RemoteTerminalView: View {
-    @BlackbirdLiveModels({try await Server.read(from: $0, matching: .all)}) var servers
-    @State private var credential: Credential?
-    @State private var history = [String]()
-    @AppStorage("useVolumeButtons") private var useVolumeButtons = false
-    @State private var terminalManager = TerminalNavigationManager.shared
-
-    @State var view: SSHTerminalView?
-
-    @State private var messageText = String?.none
-    @State private var showingSettings = false
-    @State private var terminalTheme: TerminalTheme = .dark
-    @AppStorage("terminalFontSize") private var fontSize: Double = 12.0
-    
-    // Completion state
-    @State private var completionSuggestions = [String]()
-    @State private var isLoadingCompletion = false
-
     var body: some View {
-        VStack(spacing: 0){
-            if let credential {
-                if let view{
-                    view
-                        .toolbarVisibility(.hidden, for: .tabBar)
-                        .overlay(alignment: .topTrailing){
-                            VStack(alignment: .trailing) {
-                                HStack{
-                                    Button {
-                                        useVolumeButtons.toggle()
-                                        self.view?.useVolumeButtons = useVolumeButtons
-                                        messageText = useVolumeButtons ? "Volume buttons now control terminal arrow keys" : "Volume buttons no longer control terminal"
-                                    } label: {
-                                        Image(systemName: useVolumeButtons ? "plusminus.circle.fill" : "plusminus.circle")
-                                            .font(.title)
-                                    }
-                                    Button{
-                                        view.cleanup()
-                                        self.view = nil
-                                        self.credential = nil
-                                    } label: {
-                                        Image(systemName: "xmark")
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                    .buttonBorderShape(.circle)
-                                    .controlSize(.large)
-                                }
-                                if let messageText {
-                                    Text(messageText)
-                                        .task{
-                                            try? await Task.sleep(for: .seconds(2))
-                                            self.messageText = nil
-                                        }
-                                        .padding(2)
-                                        .background(in: .capsule)
-                                }
-                            }
-                        }
-                        .onDisappear{
-                            view.setCurrentInputLine("history -a\n")
-                            view.cleanup()
-                            self.view = nil
-                        }
-                        .trackView("terminal/connected")
-
-
-                    // Real-time completion suggestions without polling
-                    CompletionView(
-                        terminalView: view,
-                        history: history,
-                        completionSuggestions: completionSuggestions,
-                        isLoadingCompletion: isLoadingCompletion,
-                        credential: credential,
-                        loadCompletionSuggestions: loadCompletionSuggestions
-                    )
-                } else {
-                    Text("loading...")
-                        .task{
-                            do {
-                                let command = #"(cat ~/.bash_history 2>/dev/null; [ -f ~/.bash_history ] && echo ""; cat ~/.zsh_history 2>/dev/null) | tail -n 200"#
-                                let historyString = try await SSHClientActor.shared.execute(command, on: credential)
-                                print(historyString)
-                                self.history = Array(Set(historyString.components(separatedBy: "\n").reversed())).filter({$0.trimmingCharacters(in: .whitespaces).count > 1})
-                                    .filter({$0 != command})
-                            } catch {
-                                ConfirmatorManager.shared.showError(error, title: "Terminal Connection Failed")
-                            }
-                            let terminalView = SSHTerminalView(
-                                credential: credential.toSwiftTermCredential(),
-                                useVolumeButtons: useVolumeButtons
-                            )
-                            
-                            // Set up directory tracking callback
-                            terminalView.setDirectoryChangeCallback { command, swiftTermCred in
-                                do {
-                                    // Convert SwiftTerm.Credential back to ContainEye.Credential
-                                    let containEyeCred = swiftTermCred.toContainEyeCredential()
-                                    return try await SSHClientActor.shared.execute(command, on: containEyeCred)
-                                } catch {
-                                    return nil
-                                }
-                            }
-                            
-                            view = terminalView
-                        }
-                        .trackView("terminal/connecting")
-                }
-            } else {
-                let keychain = keychain()
-                let credentials = keychain.allKeys().compactMap({keychain.getCredential(for: $0)})
-                
-                if credentials.isEmpty {
-                    ContentUnavailableView("You don't have any servers yet.", systemImage: "terminal")
-                        .trackView("terminal/no-servers")
-                } else {
-                    VStack {
-                        VStack {
-                            Image(systemName: "terminal.fill")
-                                .font(.system(size: 60))
-                                .foregroundStyle(.green)
-                                .symbolEffect(.pulse)
-                            
-                            Text("Connect to Terminal")
-                                .font(.largeTitle)
-                                .fontWeight(.bold)
-                                .foregroundStyle(.primary)
-                            
-                            Text("Select a server to open an SSH terminal session")
-                                .font(.body)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                        }
-                        .padding()
-                        
-                        LazyVGrid(columns: [
-                            GridItem(.flexible()),
-                            GridItem(.flexible())
-                        ]) {
-                            ForEach(credentials, id: \.key) { credential in
-                                Button {
-                                    self.credential = credential
-                                } label: {
-                                    VStack {
-                                        if let server = servers.results.first(where: { $0.credentialKey == credential.key }) {
-                                            OSIconView(server: server, size: 32)
-                                        } else {
-                                            Image(systemName: "terminal")
-                                                .font(.title)
-                                                .foregroundStyle(.green)
-                                        }
-                                        
-                                        Text(credential.label)
-                                            .font(.headline)
-                                            .foregroundStyle(.primary)
-                                            .lineLimit(2)
-                                            .multilineTextAlignment(.center)
-                                        
-                                        Text(credential.host)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 16)
-                                            .fill(.green.opacity(0.05))
-                                            .stroke(.green.opacity(0.2), lineWidth: 1)
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.horizontal)
-                        
-                        Spacer()
-                    }
-                    .trackView("terminal/select-server")
-                }
-            }
-        }
-        .preferredColorScheme(view == nil ? .none : .dark)
-        .onChange(of: credential) { oldValue, newValue in
-            if let oldView = view, oldValue != newValue {
-                oldView.cleanup()
-                view = nil
-            }
-        }
-        .onAppear {
-            // Check for pending credential from navigation
-            if let pendingCredential = terminalManager.pendingCredential {
-                credential = pendingCredential
-                terminalManager.pendingCredential = nil
-                
-                // Show confirmation message
-                if terminalManager.showingDeeplinkConfirmation {
-                    messageText = "Connected to \(pendingCredential.label)"
-                    terminalManager.showingDeeplinkConfirmation = false
-                }
-            }
-        }
-    }
-    func shortestStartingWith(_ prefix: String, in array: [String], limit: Int) -> [String] {
-        return array
-            .filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix(prefix) }
-            .sorted { $0.count < $1.count }
-            .prefix(limit)
-            .map { $0 }
-    }
-    
-    private func getSmartCompletions(for input: String) -> [String] {
-        let trimmedInput = input.trimmingCharacters(in: .whitespaces)
-        guard !trimmedInput.isEmpty else { return [] }
-        
-        let parts = trimmedInput.split(separator: " ")
-        guard let command = parts.first else { return [] }
-        
-        // Smart completion based on command
-        switch String(command) {
-        case "cd":
-            return getDirectoryCompletions(for: trimmedInput)
-        case "mv", "cp", "rm", "cat", "less", "more", "nano", "vim", "emacs":
-            return getFileCompletions(for: trimmedInput)
-        case "ls":
-            return getDirectoryCompletions(for: trimmedInput)
-        default:
-            return getHistoryCompletions(for: trimmedInput)
-        }
-    }
-    
-    private func getDirectoryCompletions(for input: String) -> [String] {
-        // Combine completion suggestions with history
-        let historyMatches = shortestStartingWith(input, in: history, limit: 2)
-        let completionMatches = Array(completionSuggestions.prefix(3))
-        
-        var combined = Set<String>()
-        combined.formUnion(historyMatches)
-        combined.formUnion(completionMatches)
-        
-        return Array(combined).sorted()
-    }
-    
-    private func getFileCompletions(for input: String) -> [String] {
-        // Similar to directory completions but for files
-        let historyMatches = shortestStartingWith(input, in: history, limit: 2)
-        let completionMatches = Array(completionSuggestions.prefix(3))
-        
-        var combined = Set<String>()
-        combined.formUnion(historyMatches)
-        combined.formUnion(completionMatches)
-        
-        return Array(combined).sorted()
-    }
-    
-    private func getHistoryCompletions(for input: String) -> [String] {
-        return shortestStartingWith(input, in: history, limit: 3)
-    }
-    
-    private func loadCompletionSuggestions(for input: String) async {
-        guard let credential = credential, 
-              let terminalView = view,
-              !isLoadingCompletion else { return }
-        
-        isLoadingCompletion = true
-        defer { isLoadingCompletion = false }
-        
-        do {
-            let parts = input.split(separator: " ")
-            guard let command = parts.first else { return }
-            
-            // Get current directory from terminal for context-aware completions
-            let currentDir = terminalView.currentDirectory
-            var completionCommand = ""
-            
-            switch String(command) {
-            case "cd":
-                let path = parts.count > 1 ? String(parts[1]) : ""
-                let (searchDir, prefix) = resolveCompletionPath(path: path, currentDir: currentDir)
-                print("  CD Path Resolution: '\(path)' -> searchDir: '\(searchDir)', prefix: '\(prefix)'")
-                if prefix.isEmpty {
-                    completionCommand = "ls -1d \"\(searchDir)\"/*/ 2>/dev/null | xargs -n1 basename | head -15"
-                } else {
-                    completionCommand = "ls -1d \"\(searchDir)\"/\(prefix)*/ 2>/dev/null | xargs -n1 basename | head -15"
-                }
-                
-            case "mv", "cp", "rm", "cat", "less", "more", "nano", "vim", "emacs", "tail", "head":
-                let path = parts.count > 1 ? String(parts.last!) : ""
-                let (searchDir, prefix) = resolveCompletionPath(path: path, currentDir: currentDir)
-                print("  File Path Resolution: '\(path)' -> searchDir: '\(searchDir)', prefix: '\(prefix)'")
-                if prefix.isEmpty {
-                    completionCommand = "ls -1a \"\(searchDir)\" 2>/dev/null | grep -v '^\\.$' | grep -v '^\\.\\.$' | head -15"
-                } else {
-                    completionCommand = "ls -1a \"\(searchDir)\" 2>/dev/null | grep '^\\(\(prefix)\\)' | head -15"
-                }
-                
-            case "ls":
-                let path = parts.count > 1 ? String(parts.last!) : ""
-                let (searchDir, prefix) = resolveCompletionPath(path: path, currentDir: currentDir)
-                print("  LS Path Resolution: '\(path)' -> searchDir: '\(searchDir)', prefix: '\(prefix)'")
-                if prefix.isEmpty {
-                    completionCommand = "ls -1a \"\(searchDir)\" 2>/dev/null | grep -v '^\\.$' | grep -v '^\\.\\.$' | head -15"
-                } else {
-                    completionCommand = "ls -1a \"\(searchDir)\" 2>/dev/null | grep '^\\(\(prefix)\\)' | head -15"
-                }
-                
-            case "grep", "find":
-                // For search commands, suggest recently used files
-                completionCommand = "ls -1 \"\(currentDir)\" 2>/dev/null | head -10"
-                
-            case "chmod", "chown":
-                // For permission commands, show files and directories
-                let path = parts.count > 1 ? String(parts.last!) : ""
-                let (searchDir, prefix) = resolveCompletionPath(path: path, currentDir: currentDir)
-                print("  Permission Path Resolution: '\(path)' -> searchDir: '\(searchDir)', prefix: '\(prefix)'")
-                if prefix.isEmpty {
-                    completionCommand = "ls -1a \"\(searchDir)\" 2>/dev/null | grep -v '^\\.$' | grep -v '^\\.\\.$' | head -10"
-                } else {
-                    completionCommand = "ls -1a \"\(searchDir)\" 2>/dev/null | grep '^\\(prefix)' | head -10"
-                }
-                
-            default:
-                // For unknown commands, show files in current directory
-                completionCommand = "ls -1 \"\(currentDir)\" 2>/dev/null | head -5"
-            }
-            
-            print("🔍 COMPLETION DEBUG:")
-            print("  Input: '\(input)'")
-            print("  Command: '\(command)'")
-            print("  Current Dir: '\(currentDir)'")
-            print("  Completion Command: '\(completionCommand)'")
-            
-            let result = try await SSHClientActor.shared.execute(completionCommand, on: credential)
-            print("  Raw Result: '\(result)'")
-            
-            let suggestions = result.components(separatedBy: "\n")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty && $0 != "." && $0 != ".." }
-                .map { suggestion in
-                    // Reconstruct full command with suggestion
-                    let reconstructed = reconstructCommand(originalInput: input, suggestion: suggestion, command: String(command))
-                    print("  Suggestion: '\(suggestion)' -> '\(reconstructed)'")
-                    return reconstructed
-                }
-            
-            print("  Final Suggestions: \(suggestions)")
-            
-            await MainActor.run {
-                self.completionSuggestions = suggestions
-            }
-        } catch {
-            // Fallback: try simple directory listing
-            do {
-                let result = try await SSHClientActor.shared.execute("ls -1a 2>/dev/null | head -10", on: credential)
-                let fallbackSuggestions = result.components(separatedBy: "\n")
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                    .filter { !$0.isEmpty && $0 != "." && $0 != ".." }
-                    .map { "\(input) \($0)" }
-                
-                await MainActor.run {
-                    self.completionSuggestions = fallbackSuggestions
-                }
-            } catch {
-                print("Completion error: \(error)")
-            }
-        }
-    }
-    
-    /// Resolve the completion path and extract the search directory and filename prefix
-    private func resolveCompletionPath(path: String, currentDir: String) -> (searchDir: String, prefix: String) {
-        if path.isEmpty {
-            // No path specified, search in current directory
-            return (currentDir, "")
-        }
-        
-        if path.hasPrefix("/") {
-            // Absolute path
-            if path.hasSuffix("/") {
-                // Path ends with /, search in that directory
-                return (path, "")
-            } else if path.contains("/") {
-                // Path contains /, extract directory and prefix
-                let components = path.split(separator: "/")
-                let dirComponents = components.dropLast()
-                let prefix = String(components.last ?? "")
-                let searchDir = "/" + dirComponents.joined(separator: "/")
-                return (searchDir.isEmpty ? "/" : searchDir, prefix)
-            } else {
-                // Single item in root
-                return ("/", path)
-            }
-        } else {
-            // Relative path
-            if path.hasSuffix("/") {
-                // Relative path ends with /, search in that subdirectory
-                let fullPath = currentDir.hasSuffix("/") ? currentDir + path : currentDir + "/" + path
-                return (fullPath, "")
-            } else if path.contains("/") {
-                // Relative path with /, extract directory and prefix
-                let components = path.split(separator: "/")
-                let dirComponents = components.dropLast()
-                let prefix = String(components.last ?? "")
-                let subPath = dirComponents.joined(separator: "/")
-                let fullPath = currentDir.hasSuffix("/") ? currentDir + subPath : currentDir + "/" + subPath
-                return (fullPath, prefix)
-            } else {
-                // Simple filename prefix in current directory
-                return (currentDir, path)
-            }
-        }
-    }
-    
-    /// Reconstruct the command with the completion suggestion
-    private func reconstructCommand(originalInput: String, suggestion: String, command: String) -> String {
-        let parts = originalInput.split(separator: " ")
-        
-        if parts.count == 1 {
-            // Just the command, add suggestion
-            return "\(command) \(suggestion)"
-        } else {
-            // Replace the last part with the suggestion
-            let commandWithArgs = parts.dropLast().joined(separator: " ")
-            let lastPart = String(parts.last ?? "")
-            
-            if lastPart.contains("/") {
-                // Path completion - replace filename part
-                let pathComponents = lastPart.split(separator: "/")
-                if pathComponents.count > 1 {
-                    let pathBase = pathComponents.dropLast().joined(separator: "/")
-                    return "\(commandWithArgs) \(pathBase)/\(suggestion)"
-                }
-            }
-            
-            return "\(commandWithArgs) \(suggestion)"
-        }
+        TerminalWorkspaceControllerHost()
+            .ignoresSafeArea(.container, edges: .bottom)
+            .trackView("terminal/workspace")
     }
 }
 
-enum TerminalTheme: String, CaseIterable {
-    case dark = "Dark"
-    case light = "Light"
-    case green = "Matrix"
-    case blue = "Ocean"
-    
-    var backgroundColor: SwiftUI.Color {
-        switch self {
-        case .dark: return .black
-        case .light: return .white
-        case .green: return SwiftUI.Color.black
-        case .blue: return SwiftUI.Color.blue.opacity(0.1)
-        }
+private struct TerminalWorkspaceControllerHost: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> TerminalWorkspaceViewController {
+        TerminalWorkspaceViewController()
     }
-    
-    var foregroundColor: SwiftUI.Color {
-        switch self {
-        case .dark: return .white
-        case .light: return .black
-        case .green: return .green
-        case .blue: return .blue
-        }
+
+    func updateUIViewController(_ uiViewController: TerminalWorkspaceViewController, context: Context) {
+        uiViewController.refreshUI()
     }
 }
 
-struct CompletionView: View {
-    let terminalView: SSHTerminalView
-    let history: [String]
-    let completionSuggestions: [String]
-    let isLoadingCompletion: Bool
-    let credential: Credential
-    let loadCompletionSuggestions: (String) async -> Void
-    
-    @State private var currentInput = ""
-    @State private var suggestions: [String] = []
-    
-    var body: some View {
-        HStack {
-            ForEach(suggestions.isEmpty ? ["None"] : suggestions, id: \.self) { suggestion in
-                Button {
-                    terminalView.setCurrentInputLine(suggestion)
-                } label: {
-                    Text(suggestion)
-                        .frame(minWidth: 100)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.1)
-                        .font(.headline)
-                }
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.capsule)
-                .tint(suggestion == currentInput ? Color.blue : Color.black)
-                .italic(suggestion == "None")
-                .disabled(suggestion == "None")
+// MARK: - Shared UI Constants
+
+private enum TerminalUIMetrics {
+    static let pageInset = UIFloat(8)
+    static let topBarHeight = UIFloat(36)
+    static let topBarButtonSize = UIFloat(32)
+    static let topBarGap = UIFloat(8)
+    static let topBarBottomSpacing = UIFloat(8)
+    static let paneGap = UIFloat(8)
+    static let paneInnerInset = UIFloat(6)
+    static let paneCornerRadius = UIFloat(14)
+    static let terminalCornerRadius = UIFloat(12)
+    static let paneHeaderHeight = UIFloat(28)
+    static let suggestionHeight = UIFloat(34)
+    static let keyboardBarHeight = UIFloat(40)
+    static let keyboardBarBottomInset = UIFloat(4)
+    static let keyboardChipHorizontal = UIFloat(10)
+    static let keyboardChipVertical = UIFloat(6)
+    static let messageHorizontalInset = UIFloat(12)
+    static let messageVerticalInset = UIFloat(8)
+    static let messageTopSpacing = UIFloat(6)
+    static let serverCellHeight = UIFloat(60)
+    static let snippetCellHeight = UIFloat(72)
+    static let sectionTopInset = UIFloat(8)
+    static let sectionBottomInset = UIFloat(8)
+    static let sectionSideInset = UIFloat(2)
+}
+
+private enum TerminalUIColors {
+    static let workspaceBackground = UIColor.systemBackground
+    static let paneMaterial = UIColor.secondarySystemBackground
+    static let paneStroke = UIColor.separator
+    static let focusedPaneStroke = UIColor.tintColor
+    static let terminalBackground = UIColor.black
+    static let secondaryText = UIColor.secondaryLabel
+    static let keyboardKeyFill = UIColor.tertiarySystemFill
+    static let keyboardKeyActiveFill = UIColor.tintColor
+    static let hintBackground = UIColor.black.withAlphaComponent(0.9)
+}
+
+private enum TerminalSplitAxis {
+    case horizontal
+    case vertical
+}
+
+// MARK: - CGRect Helpers
+
+private extension CGRect {
+    func split(at distance: CGFloat, from edge: CGRectEdge) -> (slice: CGRect, remainder: CGRect) {
+        divided(atDistance: distance, from: edge)
+    }
+}
+
+private func splitRect(_ rect: CGRect, count: Int, spacing: CGFloat, axis: TerminalSplitAxis) -> [CGRect] {
+    guard count > 0 else { return [] }
+
+    let totalSpacing = spacing * CGFloat(max(0, count - 1))
+    let availableLength: CGFloat
+    switch axis {
+    case .horizontal:
+        availableLength = max(UIFloat(0), rect.width - totalSpacing)
+    case .vertical:
+        availableLength = max(UIFloat(0), rect.height - totalSpacing)
+    }
+
+    var remaining = rect
+    var result: [CGRect] = []
+    let base = availableLength / CGFloat(count)
+
+    for index in 0..<count {
+        let isLast = index == count - 1
+        let distance: CGFloat
+
+        if isLast {
+            switch axis {
+            case .horizontal:
+                distance = remaining.width
+            case .vertical:
+                distance = remaining.height
             }
+        } else {
+            distance = base
         }
-        .padding(.horizontal)
-        .font(.title)
-        .minimumScaleFactor(0.3)
-        .onReceive(Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()) { _ in
-            // Check for input changes more frequently but efficiently
-            let newInput = terminalView.currentInputLine.trimmingCharacters(in: .whitespaces)
-            if newInput != currentInput {
-                currentInput = newInput
-                updateSuggestions()
+
+        let split = remaining.split(at: distance, from: axis == .horizontal ? .minXEdge : .minYEdge)
+        result.append(split.slice)
+
+        if isLast {
+            remaining = split.remainder
+            continue
+        }
+
+        if spacing > 0 {
+            let spacerSplit = split.remainder.split(at: spacing, from: axis == .horizontal ? .minXEdge : .minYEdge)
+            remaining = spacerSplit.remainder
+        } else {
+            remaining = split.remainder
+        }
+    }
+
+    return result
+}
+
+// MARK: - Workspace View Controller
+
+@MainActor
+final class TerminalWorkspaceViewController: UIViewController {
+    private let workspace = TerminalWorkspaceStore.shared
+    private let terminalManager = TerminalNavigationManager.shared
+    private let hardwareInput = TerminalHardwareInputController()
+
+    private let topBarView = UIView()
+    private let addPaneButton = UIButton(type: .system)
+    private let titleMenuButton = UIButton(type: .system)
+    private let snippetButton = UIButton(type: .system)
+    private let volumeButton = UIButton(type: .system)
+    private let paneContainerView = UIView()
+    private let keyboardBarView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
+    private let keyboardScrollView = UIScrollView()
+    private let messageLabel = UILabel()
+
+    private var paneControllers: [UUID: TerminalPaneViewController] = [:]
+
+    private var keyboardVisible = false
+    private var activeControllerIDForKeyboard: UUID?
+    private var messageHideTask: Task<Void, Never>?
+
+    private var useVolumeButtons = UserDefaults.standard.bool(forKey: "useVolumeButtons") {
+        didSet {
+            UserDefaults.standard.set(useVolumeButtons, forKey: "useVolumeButtons")
+            updateVolumeButtonAppearance()
+            configureVolumeButtons(enabled: useVolumeButtons)
+        }
+    }
+
+    private var keyboardButtons: [UIButton] = []
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        configureBaseUI()
+        configureKeyboardBar()
+        installObservers()
+
+        workspace.restoreWorkspace()
+        refreshUI()
+        processPendingRequests()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        refreshNavigationChrome()
+        processPendingRequests()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        hardwareInput.stop()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        layoutWorkspaceViews()
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        refreshUI()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    // MARK: Public Refresh
+
+    func refreshUI() {
+        syncPaneControllers()
+        refreshNavigationChrome()
+        updateKeyboardBarVisibility()
+        view.setNeedsLayout()
+    }
+
+    // MARK: Setup
+
+    private func configureBaseUI() {
+        view.backgroundColor = TerminalUIColors.workspaceBackground
+
+        topBarView.backgroundColor = .clear
+        view.addSubview(topBarView)
+
+        addPaneButton.setImage(UIImage(systemName: "plus"), for: .normal)
+        addPaneButton.tintColor = UIColor.label
+        addPaneButton.addTarget(self, action: #selector(didTapAddPane), for: .touchUpInside)
+        addPaneButton.accessibilityLabel = "Add terminal tab"
+        topBarView.addSubview(addPaneButton)
+
+        var titleConfig = UIButton.Configuration.plain()
+        titleConfig.baseForegroundColor = UIColor.label
+        titleConfig.image = UIImage(systemName: "chevron.down")
+        titleConfig.imagePlacement = .trailing
+        titleConfig.imagePadding = UIFloat(6)
+        titleConfig.contentInsets = .zero
+        titleMenuButton.configuration = titleConfig
+        titleMenuButton.showsMenuAsPrimaryAction = true
+        topBarView.addSubview(titleMenuButton)
+
+        snippetButton.setImage(UIImage(systemName: "ellipsis.curlybraces"), for: .normal)
+        snippetButton.tintColor = UIColor.label
+        snippetButton.addTarget(self, action: #selector(didTapSnippets), for: .touchUpInside)
+        snippetButton.accessibilityLabel = "Insert snippet"
+        topBarView.addSubview(snippetButton)
+
+        volumeButton.tintColor = UIColor.label
+        volumeButton.addTarget(self, action: #selector(didTapVolumeControl), for: .touchUpInside)
+        volumeButton.accessibilityLabel = "Volume buttons control arrows"
+        topBarView.addSubview(volumeButton)
+
+        paneContainerView.backgroundColor = .clear
+        view.addSubview(paneContainerView)
+
+        keyboardBarView.clipsToBounds = true
+        keyboardBarView.layer.cornerRadius = UIFloat(12)
+        keyboardBarView.layer.cornerCurve = .continuous
+        keyboardBarView.isHidden = true
+        view.addSubview(keyboardBarView)
+
+        keyboardScrollView.showsHorizontalScrollIndicator = false
+        keyboardScrollView.backgroundColor = .clear
+        keyboardBarView.contentView.addSubview(keyboardScrollView)
+
+        messageLabel.backgroundColor = UIColor.secondarySystemBackground.withAlphaComponent(0.92)
+        messageLabel.textColor = UIColor.label
+        messageLabel.textAlignment = .center
+        messageLabel.font = UIFont.systemFont(ofSize: UIFloat(12), weight: .semibold)
+        messageLabel.layer.cornerRadius = UIFloat(16)
+        messageLabel.layer.cornerCurve = .continuous
+        messageLabel.clipsToBounds = true
+        messageLabel.isHidden = true
+        view.addSubview(messageLabel)
+    }
+
+    private func configureKeyboardBar() {
+        keyboardButtons = TerminalKeyboardControl.allCases.map { control in
+            let button = UIButton(type: .system)
+            button.setTitle(control.title, for: .normal)
+            button.titleLabel?.font = UIFont.systemFont(ofSize: UIFloat(12), weight: .semibold)
+            button.layer.cornerRadius = UIFloat(14)
+            button.layer.cornerCurve = .continuous
+            let insets = NSDirectionalEdgeInsets(
+                top: TerminalUIMetrics.keyboardChipVertical,
+                leading: TerminalUIMetrics.keyboardChipHorizontal,
+                bottom: TerminalUIMetrics.keyboardChipVertical,
+                trailing: TerminalUIMetrics.keyboardChipHorizontal
+            )
+            if #available(iOS 15.0, *) {
+                var config = UIButton.Configuration.plain()
+                config.contentInsets = insets
+                button.configuration = config
+            } else {
+                button.contentEdgeInsets = UIEdgeInsets(
+                    top: insets.top,
+                    left: insets.leading,
+                    bottom: insets.bottom,
+                    right: insets.trailing
+                )
+            }
+            button.backgroundColor = TerminalUIColors.keyboardKeyFill
+            button.tintColor = UIColor.label
+            button.setTitleColor(UIColor.label, for: .normal)
+            button.tag = control.rawValue
+            button.addTarget(self, action: #selector(didTapKeyboardControl(_:)), for: .touchUpInside)
+            keyboardScrollView.addSubview(button)
+            return button
+        }
+    }
+
+    private func installObservers() {
+        startWorkspaceObservation()
+        startKeyboardControllerObservation()
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keyboardWillShowOrChange(_:)),
+            name: UIResponder.keyboardWillShowNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keyboardWillShowOrChange(_:)),
+            name: UIResponder.keyboardWillChangeFrameNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keyboardWillHide(_:)),
+            name: UIResponder.keyboardWillHideNotification,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleOpenRequestNotification),
+            name: .terminalOpenRequestsDidChange,
+            object: nil
+        )
+    }
+
+    // MARK: Observation
+
+    private func startWorkspaceObservation() {
+        withObservationTracking({ [weak self] in
+            guard let self else { return }
+            _ = self.workspace.panes
+            _ = self.workspace.focusedPaneID
+            _ = self.workspace.tabs
+        }, onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.startWorkspaceObservation()
+                self?.refreshUI()
+            }
+        })
+    }
+
+    private func startKeyboardControllerObservation() {
+        withObservationTracking({ [weak self] in
+            guard let self else { return }
+            _ = self.workspace.focusedPaneID
+            _ = self.workspace.activeControllerInFocusedPane()?.id
+            _ = self.workspace.activeControllerInFocusedPane()?.controlModifierArmed
+        }, onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.startKeyboardControllerObservation()
+                self?.updateKeyboardButtonsState()
+                self?.updateKeyboardBarVisibility()
+            }
+        })
+    }
+
+    // MARK: Navigation UI
+
+    private func refreshNavigationChrome() {
+        if var config = titleMenuButton.configuration {
+            config.title = titleTextForFocusedPane()
+            titleMenuButton.configuration = config
+        } else {
+            titleMenuButton.setTitle(titleTextForFocusedPane(), for: .normal)
+        }
+        titleMenuButton.menu = makeTitleMenu()
+
+        updateVolumeButtonAppearance()
+    }
+
+    private func titleTextForFocusedPane() -> String {
+        guard let focusedID = workspace.focusedPaneID,
+              let index = workspace.panes.firstIndex(where: { $0.id == focusedID })
+        else {
+            return "Terminal"
+        }
+
+        if let active = workspace.activeTab(in: focusedID) {
+            return "Tab \(index + 1) · \(active.title)"
+        }
+
+        return "Tab \(index + 1)"
+    }
+
+    private func makeTitleMenu() -> UIMenu {
+        var actions: [UIMenuElement] = [
+            UIAction(title: "New Tab", image: UIImage(systemName: "plus")) { [weak self] _ in
+                self?.workspace.focusOrCreateEmptyPane()
+            }
+        ]
+
+        if !workspace.panes.isEmpty {
+            actions.append(UIMenu(title: "", options: .displayInline, children: paneSwitchActions()))
+        }
+
+        return UIMenu(children: actions)
+    }
+
+    private func paneSwitchActions() -> [UIAction] {
+        let selectedPaneID = workspace.focusedPaneID ?? workspace.panes.first?.id
+
+        return workspace.panes.enumerated().map { index, pane in
+            let isSelected = pane.id == selectedPaneID
+            let title = "Tab \(index + 1)"
+            return UIAction(
+                title: title,
+                state: isSelected ? .on : .off
+            ) { [weak self] _ in
+                self?.workspace.focusPane(paneID: pane.id)
             }
         }
     }
-    
-    private func updateSuggestions() {
-        if currentInput.isEmpty {
-            suggestions = []
+
+    private func updateVolumeButtonAppearance() {
+        volumeButton.setImage(UIImage(systemName: useVolumeButtons ? "plusminus.circle.fill" : "plusminus.circle"), for: .normal)
+    }
+
+    // MARK: Layout
+
+    private func layoutWorkspaceViews() {
+        let insets = view.safeAreaInsets
+        var layoutRect = view.bounds.inset(by: UIEdgeInsets(
+            top: insets.top + TerminalUIMetrics.pageInset,
+            left: TerminalUIMetrics.pageInset,
+            bottom: insets.bottom + TerminalUIMetrics.pageInset,
+            right: TerminalUIMetrics.pageInset
+        ))
+
+        let topBarSplit = layoutRect.split(
+            at: TerminalUIMetrics.topBarHeight + TerminalUIMetrics.topBarBottomSpacing,
+            from: .minYEdge
+        )
+        topBarView.frame = topBarSplit.slice.split(at: TerminalUIMetrics.topBarHeight, from: .minYEdge).slice
+        layoutTopBar(in: topBarView.bounds)
+        layoutRect = topBarSplit.remainder
+
+        if !messageLabel.isHidden {
+            let messageHeight = UIFloat(32)
+            let split = layoutRect.split(at: messageHeight + TerminalUIMetrics.messageTopSpacing, from: .minYEdge)
+            let available = split.slice
+            messageLabel.frame = available.inset(by: UIEdgeInsets(
+                top: TerminalUIMetrics.messageTopSpacing,
+                left: TerminalUIMetrics.messageHorizontalInset,
+                bottom: 0,
+                right: TerminalUIMetrics.messageHorizontalInset
+            ))
+            layoutRect = split.remainder
+        } else {
+            messageLabel.frame = .zero
+        }
+
+        if shouldShowKeyboardBar {
+            let barHeight = TerminalUIMetrics.keyboardBarHeight + TerminalUIMetrics.keyboardBarBottomInset
+            let split = layoutRect.split(at: barHeight, from: .maxYEdge)
+            keyboardBarView.frame = split.slice
+            keyboardScrollView.frame = keyboardBarView.bounds.inset(by: UIEdgeInsets(
+                top: UIFloat(4),
+                left: UIFloat(6),
+                bottom: UIFloat(4),
+                right: UIFloat(6)
+            ))
+            layoutKeyboardButtons()
+            layoutRect = split.remainder
+        } else {
+            keyboardBarView.frame = .zero
+        }
+
+        paneContainerView.frame = layoutRect
+        layoutPaneControllers(in: paneContainerView.bounds)
+    }
+
+    private func layoutTopBar(in bounds: CGRect) {
+        var rect = bounds
+
+        let leadingSplit = rect.split(at: TerminalUIMetrics.topBarButtonSize, from: .minXEdge)
+        addPaneButton.frame = leadingSplit.slice
+        rect = leadingSplit.remainder
+
+        let leadingGapSplit = rect.split(at: TerminalUIMetrics.topBarGap, from: .minXEdge)
+        rect = leadingGapSplit.remainder
+
+        let trailingPackWidth = (TerminalUIMetrics.topBarButtonSize * UIFloat(2)) + TerminalUIMetrics.topBarGap
+        let trailingSplit = rect.split(at: trailingPackWidth, from: .maxXEdge)
+        rect = trailingSplit.remainder
+
+        var trailingRect = trailingSplit.slice
+        let snippetSplit = trailingRect.split(at: TerminalUIMetrics.topBarButtonSize, from: .minXEdge)
+        snippetButton.frame = snippetSplit.slice
+        trailingRect = snippetSplit.remainder
+
+        let trailingGapSplit = trailingRect.split(at: TerminalUIMetrics.topBarGap, from: .minXEdge)
+        trailingRect = trailingGapSplit.remainder
+
+        let volumeSplit = trailingRect.split(at: TerminalUIMetrics.topBarButtonSize, from: .minXEdge)
+        volumeButton.frame = volumeSplit.slice
+
+        titleMenuButton.frame = rect
+    }
+
+    private func layoutPaneControllers(in bounds: CGRect) {
+        let visiblePaneIDs = workspace.visiblePaneIDs(isRegularWidth: isRegularLayout)
+        let visibleControllers: [TerminalPaneViewController] = visiblePaneIDs.compactMap { paneControllers[$0] }
+
+        guard !visibleControllers.isEmpty else { return }
+
+        if isRegularLayout {
+            let rowCount = Int(ceil(Double(visibleControllers.count) / 2.0))
+            let rowRects = splitRect(bounds, count: rowCount, spacing: TerminalUIMetrics.paneGap, axis: .vertical)
+
+            var index = 0
+            for row in 0..<rowCount {
+                let remaining = visibleControllers.count - index
+                let columns = min(2, remaining)
+                let columnRects = splitRect(rowRects[row], count: columns, spacing: TerminalUIMetrics.paneGap, axis: .horizontal)
+
+                for columnRect in columnRects {
+                    guard index < visibleControllers.count else { continue }
+                    visibleControllers[index].view.frame = columnRect
+                    index += 1
+                }
+            }
             return
         }
-        
-        // Get smart completions based on current directory context
-        let smartSuggestions = getSmartCompletions(for: currentInput)
-        
-        if !smartSuggestions.isEmpty {
-            suggestions = Array(smartSuggestions.prefix(3))
+
+        if let first = visibleControllers.first {
+            first.view.frame = bounds
+        }
+    }
+
+    private func layoutKeyboardButtons() {
+        var cursorX = UIFloat(0)
+        let height = keyboardScrollView.bounds.height
+
+        for button in keyboardButtons {
+            let fit = button.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: height))
+            let width = max(UIFloat(36), fit.width)
+            button.frame = CGRect(origin: CGPoint(x: cursorX, y: UIFloat(0)), size: CGSize(width: width, height: height))
+            cursorX += width + UIFloat(6)
+        }
+
+        let contentWidth = max(keyboardScrollView.bounds.width, cursorX)
+        keyboardScrollView.contentSize = CGSize(width: contentWidth, height: height)
+    }
+
+    private var isRegularLayout: Bool {
+        traitCollection.horizontalSizeClass == .regular
+    }
+
+    // MARK: Pane Sync
+
+    private func syncPaneControllers() {
+        let visiblePaneIDs = Set(workspace.visiblePaneIDs(isRegularWidth: isRegularLayout))
+
+        let idsToRemove = Set(paneControllers.keys).subtracting(visiblePaneIDs)
+        for paneID in idsToRemove {
+            guard let controller = paneControllers[paneID] else { continue }
+            controller.willMove(toParent: nil)
+            controller.view.removeFromSuperview()
+            controller.removeFromParent()
+            paneControllers[paneID] = nil
+        }
+
+        let orderedVisibleIDs = workspace.visiblePaneIDs(isRegularWidth: isRegularLayout)
+        for paneID in orderedVisibleIDs {
+            let controller: TerminalPaneViewController
+
+            if let existing = paneControllers[paneID] {
+                controller = existing
+            } else {
+                let created = TerminalPaneViewController(paneID: paneID, workspace: workspace)
+                created.delegate = self
+                addChild(created)
+                paneContainerView.addSubview(created.view)
+                created.didMove(toParent: self)
+                paneControllers[paneID] = created
+                controller = created
+            }
+
+            controller.refreshFromWorkspace()
+        }
+
+        for paneID in orderedVisibleIDs {
+            if let paneView = paneControllers[paneID]?.view {
+                paneContainerView.bringSubviewToFront(paneView)
+            }
+        }
+    }
+
+    // MARK: Message
+
+    private func showMessage(_ text: String) {
+        messageHideTask?.cancel()
+        messageLabel.text = text
+        messageLabel.isHidden = false
+        messageLabel.alpha = 1
+        view.setNeedsLayout()
+
+        messageHideTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            await MainActor.run {
+                guard let self else { return }
+                UIView.animate(withDuration: 0.2, animations: {
+                    self.messageLabel.alpha = 0
+                }, completion: { _ in
+                    self.messageLabel.alpha = 1
+                    self.messageLabel.isHidden = true
+                    self.view.setNeedsLayout()
+                })
+            }
+        }
+    }
+
+    // MARK: Keyboard Bar
+
+    private var shouldShowKeyboardBar: Bool {
+        keyboardVisible && workspace.activeControllerInFocusedPane() != nil
+    }
+
+    private func updateKeyboardBarVisibility() {
+        keyboardBarView.isHidden = !shouldShowKeyboardBar
+        updateKeyboardButtonsState()
+        view.setNeedsLayout()
+    }
+
+    private func updateKeyboardButtonsState() {
+        guard let controller = workspace.activeControllerInFocusedPane() else {
+            for button in keyboardButtons {
+                button.backgroundColor = TerminalUIColors.keyboardKeyFill
+                button.setTitleColor(UIColor.label, for: .normal)
+            }
+            return
+        }
+
+        activeControllerIDForKeyboard = controller.id
+
+        for button in keyboardButtons {
+            guard let control = TerminalKeyboardControl(rawValue: button.tag) else { continue }
+            let isActive = control == .control && controller.controlModifierArmed
+            button.backgroundColor = isActive ? TerminalUIColors.keyboardKeyActiveFill : TerminalUIColors.keyboardKeyFill
+            button.setTitleColor(isActive ? UIColor.white : UIColor.label, for: .normal)
+        }
+    }
+
+    private func configureVolumeButtons(enabled: Bool) {
+        if !enabled {
+            hardwareInput.stop()
+            return
+        }
+
+        hardwareInput.start(
+            onVolumeDown: { [weak self] in
+                self?.workspace.activeControllerInFocusedPane()?.sendArrowDown()
+            },
+            onVolumeUp: { [weak self] in
+                self?.workspace.activeControllerInFocusedPane()?.sendArrowUp()
+            }
+        )
+    }
+
+    // MARK: Terminal Requests
+
+    private func processPendingRequests() {
+        let requests = terminalManager.dequeueAllRequests()
+        guard !requests.isEmpty else { return }
+
+        for request in requests {
+            workspace.openTab(credentialKey: request.credentialKey, inFocusedPane: true)
+            showMessage("Connected to \(request.label)")
+        }
+
+        terminalManager.showingDeeplinkConfirmation = false
+    }
+
+    // MARK: Actions
+
+    @objc
+    private func didTapAddPane() {
+        workspace.focusOrCreateEmptyPane()
+    }
+
+    @objc
+    private func didTapSnippets() {
+        let picker = TerminalSnippetPickerViewController(database: SharedDatabase.db) { [weak self] snippet in
+            self?.workspace.activeControllerInFocusedPane()?.applySuggestion(snippet.command)
+        }
+
+        let navigation = UINavigationController(rootViewController: picker)
+        navigation.modalPresentationStyle = .pageSheet
+        if let sheet = navigation.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+        }
+        present(navigation, animated: true)
+    }
+
+    @objc
+    private func didTapVolumeControl() {
+        useVolumeButtons.toggle()
+    }
+
+    @objc
+    private func didTapKeyboardControl(_ sender: UIButton) {
+        guard let control = TerminalKeyboardControl(rawValue: sender.tag),
+              let controller = workspace.activeControllerInFocusedPane()
+        else {
+            return
+        }
+
+        switch control {
+        case .control:
+            controller.toggleControlModifier()
+        case .escape:
+            controller.sendEscape()
+        case .tab:
+            controller.sendTabKey()
+        case .backspace:
+            controller.sendBackspace()
+        case .enter:
+            controller.sendEnter()
+        case .left:
+            controller.sendArrowLeft()
+        case .right:
+            controller.sendArrowRight()
+        case .up:
+            controller.sendArrowUp()
+        case .down:
+            controller.sendArrowDown()
+        }
+
+        controller.focus()
+        updateKeyboardButtonsState()
+    }
+
+    @objc
+    private func keyboardWillShowOrChange(_ notification: Notification) {
+        guard let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else {
+            keyboardVisible = true
+            updateKeyboardBarVisibility()
+            return
+        }
+
+        let fallbackScreenHeight = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?
+            .screen
+            .bounds
+            .height ?? UIFloat(0)
+        let screenHeight = view.window?.windowScene?.screen.bounds.height ?? fallbackScreenHeight
+        keyboardVisible = frame.minY < screenHeight
+        updateKeyboardBarVisibility()
+    }
+
+    @objc
+    private func keyboardWillHide(_ notification: Notification) {
+        keyboardVisible = false
+        updateKeyboardBarVisibility()
+    }
+
+    @objc
+    private func handleOpenRequestNotification() {
+        processPendingRequests()
+    }
+}
+
+// MARK: - Workspace Delegate
+
+extension TerminalWorkspaceViewController: TerminalPaneViewControllerDelegate {
+    func terminalPane(_ pane: TerminalPaneViewController, didRequestMessage message: String) {
+        showMessage(message)
+    }
+}
+
+// MARK: - Keyboard Controls
+
+private enum TerminalKeyboardControl: Int, CaseIterable {
+    case control
+    case escape
+    case tab
+    case backspace
+    case enter
+    case left
+    case right
+    case up
+    case down
+
+    var title: String {
+        switch self {
+        case .control:
+            return "Ctrl"
+        case .escape:
+            return "Esc"
+        case .tab:
+            return "Tab"
+        case .backspace:
+            return "⌫"
+        case .enter:
+            return "↩"
+        case .left:
+            return "←"
+        case .right:
+            return "→"
+        case .up:
+            return "↑"
+        case .down:
+            return "↓"
+        }
+    }
+}
+
+// MARK: - Pane View Controller
+
+@MainActor
+protocol TerminalPaneViewControllerDelegate: AnyObject {
+    func terminalPane(_ pane: TerminalPaneViewController, didRequestMessage message: String)
+}
+
+@MainActor
+final class TerminalPaneViewController: UIViewController {
+    weak var delegate: TerminalPaneViewControllerDelegate?
+
+    private let paneID: UUID
+    private let workspace: TerminalWorkspaceStore
+
+    private let panelView = UIView()
+    private let headerView = UIView()
+    private let contentView = UIView()
+    private let suggestionsContainerView = UIView()
+
+    private let tabTitleLabel = UILabel()
+    private let activeTitleLabel = UILabel()
+    private let cwdLabel = UILabel()
+    private let warningImageView = UIImageView()
+    private let closeButton = UIButton(type: .system)
+
+    private var suggestionButtons: [UIButton] = []
+    private var activeHostView: XTermWebHostView?
+    private var serverPickerController: TerminalServerPickerViewController?
+    private var observedControllerID: UUID?
+    private var lastPresentedPromptID: UUID?
+
+    init(paneID: UUID, workspace: TerminalWorkspaceStore) {
+        self.paneID = paneID
+        self.workspace = workspace
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        configurePaneUI()
+        refreshFromWorkspace()
+
+        let tap = UITapGestureRecognizer(target: self, action: #selector(didTapPane))
+        tap.cancelsTouchesInView = false
+        tap.delaysTouchesBegan = false
+        tap.delaysTouchesEnded = false
+        view.addGestureRecognizer(tap)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        layoutPaneViews()
+    }
+
+    // MARK: Setup
+
+    private func configurePaneUI() {
+        view.backgroundColor = .clear
+
+        panelView.backgroundColor = TerminalUIColors.paneMaterial
+        panelView.layer.cornerRadius = TerminalUIMetrics.paneCornerRadius
+        panelView.layer.cornerCurve = .continuous
+        panelView.layer.borderWidth = UIFloat(1)
+        panelView.layer.borderColor = TerminalUIColors.paneStroke.cgColor
+        view.addSubview(panelView)
+
+        headerView.backgroundColor = .clear
+        panelView.addSubview(headerView)
+
+        contentView.backgroundColor = .clear
+        panelView.addSubview(contentView)
+
+        suggestionsContainerView.backgroundColor = .clear
+        panelView.addSubview(suggestionsContainerView)
+
+        tabTitleLabel.font = UIFont.systemFont(ofSize: UIFloat(12), weight: .semibold)
+        tabTitleLabel.textColor = TerminalUIColors.secondaryText
+        headerView.addSubview(tabTitleLabel)
+
+        activeTitleLabel.font = UIFont.systemFont(ofSize: UIFloat(12), weight: .regular)
+        activeTitleLabel.textColor = TerminalUIColors.secondaryText
+        activeTitleLabel.lineBreakMode = .byTruncatingTail
+        headerView.addSubview(activeTitleLabel)
+
+        cwdLabel.font = UIFont.systemFont(ofSize: UIFloat(11), weight: .regular)
+        cwdLabel.textColor = TerminalUIColors.secondaryText
+        cwdLabel.lineBreakMode = .byTruncatingMiddle
+        headerView.addSubview(cwdLabel)
+
+        warningImageView.image = UIImage(systemName: "exclamationmark.triangle.fill")
+        warningImageView.tintColor = UIColor.systemYellow
+        warningImageView.contentMode = .scaleAspectFit
+        warningImageView.isHidden = true
+        headerView.addSubview(warningImageView)
+
+        closeButton.setImage(UIImage(systemName: "xmark.circle"), for: .normal)
+        closeButton.tintColor = UIColor.secondaryLabel
+        closeButton.addTarget(self, action: #selector(didTapClose), for: .touchUpInside)
+        headerView.addSubview(closeButton)
+    }
+
+    // MARK: Refresh
+
+    func refreshFromWorkspace() {
+        let focused = workspace.focusedPaneID == paneID
+        panelView.layer.borderColor = (focused ? TerminalUIColors.focusedPaneStroke : TerminalUIColors.paneStroke).cgColor
+
+        let tabNumber = (workspace.panes.firstIndex(where: { $0.id == paneID }) ?? 0) + 1
+        tabTitleLabel.text = "Tab \(tabNumber)"
+
+        guard let activeTab = workspace.activeTab(in: paneID),
+              let controller = workspace.controller(for: activeTab.id)
+        else {
+            observedControllerID = nil
+            activeTitleLabel.text = "Choose a server"
+            cwdLabel.text = ""
+            warningImageView.isHidden = true
+            closeButton.isHidden = true
+            showServerPicker()
+            setSuggestionButtons([])
+            view.setNeedsLayout()
+            return
+        }
+
+        closeButton.isHidden = false
+        activeTitleLabel.text = activeTab.title
+        cwdLabel.text = controller.cwd
+        warningImageView.isHidden = controller.shellIntegrationStatus != .warning
+
+        showTerminalHost(for: controller)
+        setSuggestionButtons(Array(controller.suggestions.prefix(3)))
+        observeControllerIfNeeded(controller)
+        presentPendingPromptIfNeeded(controller)
+
+        view.setNeedsLayout()
+    }
+
+    // MARK: Observation
+
+    private func observeControllerIfNeeded(_ controller: XTermSessionController) {
+        guard observedControllerID != controller.id else { return }
+        observedControllerID = controller.id
+
+        withObservationTracking({ [weak self] in
+            guard let self else { return }
+            _ = controller.cwd
+            _ = controller.shellIntegrationStatus
+            _ = controller.suggestions
+            _ = controller.pendingSFTPEditPrompt
+            _ = self.workspace.focusedPaneID
+        }, onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if self.workspace.controller(for: controller.id) != nil {
+                    self.observeControllerIfNeeded(controller)
+                }
+                self.refreshFromWorkspace()
+            }
+        })
+    }
+
+    // MARK: Layout
+
+    private func layoutPaneViews() {
+        panelView.frame = view.bounds.inset(by: UIEdgeInsets(
+            top: TerminalUIMetrics.paneInnerInset,
+            left: TerminalUIMetrics.paneInnerInset,
+            bottom: TerminalUIMetrics.paneInnerInset,
+            right: TerminalUIMetrics.paneInnerInset
+        ))
+
+        var inner = panelView.bounds.inset(by: UIEdgeInsets(
+            top: UIFloat(8),
+            left: UIFloat(8),
+            bottom: UIFloat(8),
+            right: UIFloat(8)
+        ))
+
+        let headerSplit = inner.split(at: TerminalUIMetrics.paneHeaderHeight, from: .minYEdge)
+        headerView.frame = headerSplit.slice
+        inner = headerSplit.remainder
+
+        let hasSuggestions = !suggestionButtons.isEmpty
+        if hasSuggestions {
+            let suggestionSplit = inner.split(at: TerminalUIMetrics.suggestionHeight, from: .maxYEdge)
+            suggestionsContainerView.frame = suggestionSplit.slice
+            contentView.frame = suggestionSplit.remainder
         } else {
-            // Fallback to history-based completions
-            let historyMatches = shortestStartingWith(currentInput, in: history, limit: 3)
-            suggestions = historyMatches
+            suggestionsContainerView.frame = .zero
+            contentView.frame = inner
         }
-        
-        // Load additional completions asynchronously if needed
-        if !isLoadingCompletion {
+
+        layoutHeaderViews(in: headerView.bounds)
+        layoutSuggestions(in: suggestionsContainerView.bounds)
+        activeHostView?.frame = contentView.bounds
+        serverPickerController?.view.frame = contentView.bounds
+    }
+
+    private func layoutHeaderViews(in bounds: CGRect) {
+        var headerRect = bounds
+
+        let trailingWidth = UIFloat(28)
+        let closeSplit = headerRect.split(at: trailingWidth, from: .maxXEdge)
+        closeButton.frame = closeSplit.slice
+        headerRect = closeSplit.remainder
+
+        let warningSplit = headerRect.split(at: UIFloat(22), from: .maxXEdge)
+        warningImageView.frame = warningSplit.slice.insetBy(dx: UIFloat(3), dy: UIFloat(5))
+        headerRect = warningSplit.remainder
+
+        let tabSplit = headerRect.split(at: UIFloat(56), from: .minXEdge)
+        tabTitleLabel.frame = tabSplit.slice
+
+        var middle = tabSplit.remainder
+        let cwdSplit = middle.split(at: UIFloat(90), from: .maxXEdge)
+        cwdLabel.frame = cwdSplit.slice
+        middle = cwdSplit.remainder
+
+        activeTitleLabel.frame = middle
+    }
+
+    private func layoutSuggestions(in bounds: CGRect) {
+        guard !suggestionButtons.isEmpty else { return }
+
+        let suggestionRects = splitRect(
+            bounds,
+            count: suggestionButtons.count,
+            spacing: UIFloat(6),
+            axis: .horizontal
+        )
+
+        for (index, button) in suggestionButtons.enumerated() {
+            button.frame = suggestionRects[index]
+        }
+    }
+
+    // MARK: Content Switching
+
+    private func showServerPicker() {
+        activeHostView?.removeFromSuperview()
+        activeHostView = nil
+
+        if let picker = serverPickerController {
+            picker.reloadCredentials()
+            return
+        }
+
+        let picker = TerminalServerPickerViewController()
+        picker.onCredentialSelected = { [weak self] credential in
+            guard let self else { return }
+            self.workspace.focusPane(paneID: self.paneID)
+            self.workspace.openTab(credentialKey: credential.key, inFocusedPane: true)
+        }
+        addChild(picker)
+        contentView.addSubview(picker.view)
+        picker.didMove(toParent: self)
+        serverPickerController = picker
+    }
+
+    private func showTerminalHost(for controller: XTermSessionController) {
+        if let picker = serverPickerController {
+            picker.willMove(toParent: nil)
+            picker.view.removeFromSuperview()
+            picker.removeFromParent()
+            serverPickerController = nil
+        }
+
+        let host = controller.makeOrReuseHostView()
+        host.backgroundColor = TerminalUIColors.terminalBackground
+        host.layer.cornerRadius = TerminalUIMetrics.terminalCornerRadius
+        host.layer.cornerCurve = .continuous
+        host.clipsToBounds = true
+
+        if host.superview !== contentView {
+            activeHostView?.removeFromSuperview()
+            contentView.addSubview(host)
+            activeHostView = host
+        } else {
+            activeHostView = host
+        }
+    }
+
+    private func setSuggestionButtons(_ suggestions: [CommandSuggestion]) {
+        for button in suggestionButtons {
+            button.removeFromSuperview()
+        }
+        suggestionButtons.removeAll(keepingCapacity: false)
+
+        for suggestion in suggestions {
+            let button = UIButton(type: .system)
+            button.setTitle(suggestion.text, for: .normal)
+            button.titleLabel?.font = UIFont.systemFont(ofSize: UIFloat(12), weight: .medium)
+            button.titleLabel?.lineBreakMode = .byTruncatingTail
+            button.contentHorizontalAlignment = .leading
+            if #available(iOS 15.0, *) {
+                var config = UIButton.Configuration.plain()
+                config.contentInsets = NSDirectionalEdgeInsets(
+                    top: UIFloat(6),
+                    leading: UIFloat(8),
+                    bottom: UIFloat(6),
+                    trailing: UIFloat(8)
+                )
+                button.configuration = config
+            } else {
+                button.contentEdgeInsets = UIEdgeInsets(
+                    top: UIFloat(6),
+                    left: UIFloat(8),
+                    bottom: UIFloat(6),
+                    right: UIFloat(8)
+                )
+            }
+            button.layer.cornerRadius = UIFloat(12)
+            button.layer.cornerCurve = .continuous
+            button.setTitleColor(.white, for: .normal)
+            button.backgroundColor = suggestionColor(for: suggestion.source)
+            button.accessibilityLabel = suggestion.text
+            button.addAction(UIAction(handler: { [weak self] _ in
+                guard let self else { return }
+                guard let active = self.workspace.activeTab(in: self.paneID),
+                      let controller = self.workspace.controller(for: active.id)
+                else {
+                    return
+                }
+                controller.applySuggestion(suggestion.text)
+                controller.focus()
+            }), for: .touchUpInside)
+            suggestionsContainerView.addSubview(button)
+            suggestionButtons.append(button)
+        }
+    }
+
+    private func suggestionColor(for source: CommandSuggestion.Source) -> UIColor {
+        switch source {
+        case .documentTree:
+            return .systemBlue
+        case .history:
+            return .systemGray
+        case .snippet:
+            return .systemGreen
+        case .live:
+            return .systemOrange
+        }
+    }
+
+    // MARK: Prompt Handling
+
+    private func presentPendingPromptIfNeeded(_ controller: XTermSessionController) {
+        guard let prompt = controller.pendingSFTPEditPrompt else {
+            lastPresentedPromptID = nil
+            return
+        }
+
+        guard prompt.id != lastPresentedPromptID else { return }
+        lastPresentedPromptID = prompt.id
+
+        let alert = UIAlertController(
+            title: "Open in SFTP editor?",
+            message: "Detected \(prompt.command) for \(prompt.path). Open in SFTP editor instead?",
+            preferredStyle: .alert
+        )
+
+        alert.addAction(UIAlertAction(title: "Open in SFTP Editor", style: .default, handler: { _ in
+            controller.openPendingFileInSFTP()
+            self.delegate?.terminalPane(self, didRequestMessage: "Opening file in SFTP editor")
+        }))
+
+        alert.addAction(UIAlertAction(title: "Never show again", style: .destructive, handler: { _ in
+            controller.dismissPendingSFTPEditPrompt(neverShowAgain: true)
+        }))
+
+        alert.addAction(UIAlertAction(title: "Continue in Terminal", style: .cancel, handler: { _ in
+            controller.continuePendingSFTPEditInTerminal()
+        }))
+
+        present(alert, animated: true)
+    }
+
+    // MARK: Actions
+
+    @objc
+    private func didTapPane() {
+        workspace.focusPane(paneID: paneID)
+
+        if let active = workspace.activeTab(in: paneID),
+           let controller = workspace.controller(for: active.id) {
+            controller.focus()
+        }
+    }
+
+    @objc
+    private func didTapClose() {
+        guard let active = workspace.activeTab(in: paneID) else { return }
+        workspace.closeTab(tabID: active.id)
+    }
+}
+
+// MARK: - Server Picker
+
+@MainActor
+final class TerminalServerPickerViewController: UIViewController {
+    var onCredentialSelected: ((Credential) -> Void)?
+
+    private enum Section: Int, CaseIterable {
+        case main
+    }
+
+    private struct Item: Hashable {
+        let key: String
+        let label: String
+        let host: String
+    }
+
+    private let collectionView: UICollectionView
+    private lazy var dataSource = makeDataSource()
+    private let emptyStateLabel = UILabel()
+
+    private var items: [Item] = []
+
+    init() {
+        let layout = TerminalServerPickerViewController.makeLayout()
+        collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        configureUI()
+        reloadCredentials()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        collectionView.frame = view.bounds
+        emptyStateLabel.frame = view.bounds.inset(by: UIEdgeInsets(
+            top: UIFloat(10),
+            left: UIFloat(14),
+            bottom: UIFloat(10),
+            right: UIFloat(14)
+        ))
+    }
+
+    // MARK: Setup
+
+    private func configureUI() {
+        view.backgroundColor = .clear
+
+        collectionView.backgroundColor = .clear
+        collectionView.alwaysBounceVertical = true
+        collectionView.register(TerminalServerCell.self, forCellWithReuseIdentifier: TerminalServerCell.reuseID)
+        collectionView.delegate = self
+        view.addSubview(collectionView)
+
+        emptyStateLabel.text = "No servers available"
+        emptyStateLabel.textAlignment = .center
+        emptyStateLabel.font = UIFont.systemFont(ofSize: UIFloat(14), weight: .medium)
+        emptyStateLabel.textColor = UIColor.secondaryLabel
+        emptyStateLabel.numberOfLines = 2
+        emptyStateLabel.isHidden = true
+        view.addSubview(emptyStateLabel)
+    }
+
+    // MARK: Data
+
+    func reloadCredentials() {
+        let credentials = keychain()
+            .allKeys()
+            .compactMap { keychain().getCredential(for: $0) }
+            .sorted { lhs, rhs in
+                lhs.label.localizedCaseInsensitiveCompare(rhs.label) == .orderedAscending
+            }
+
+        items = credentials.map { credential in
+            Item(key: credential.key, label: credential.label, host: credential.host)
+        }
+
+        var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
+        snapshot.appendSections([.main])
+        snapshot.appendItems(items, toSection: .main)
+        dataSource.apply(snapshot, animatingDifferences: true)
+
+        emptyStateLabel.isHidden = !items.isEmpty
+    }
+
+    private func makeDataSource() -> UICollectionViewDiffableDataSource<Section, Item> {
+        UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
+            guard let cell = collectionView.dequeueReusableCell(
+                withReuseIdentifier: TerminalServerCell.reuseID,
+                for: indexPath
+            ) as? TerminalServerCell else {
+                return UICollectionViewCell()
+            }
+
+            cell.apply(label: item.label, host: item.host)
+            return cell
+        }
+    }
+
+    private static func makeLayout() -> UICollectionViewCompositionalLayout {
+        UICollectionViewCompositionalLayout { _, _ -> NSCollectionLayoutSection? in
+            let itemSize = NSCollectionLayoutSize(
+                widthDimension: .fractionalWidth(1),
+                heightDimension: .absolute(TerminalUIMetrics.serverCellHeight)
+            )
+            let item = NSCollectionLayoutItem(layoutSize: itemSize)
+
+            let groupSize = NSCollectionLayoutSize(
+                widthDimension: .fractionalWidth(1),
+                heightDimension: .absolute(TerminalUIMetrics.serverCellHeight)
+            )
+            let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
+
+            let section = NSCollectionLayoutSection(group: group)
+            section.interGroupSpacing = UIFloat(8)
+            section.contentInsets = NSDirectionalEdgeInsets(
+                top: TerminalUIMetrics.sectionTopInset,
+                leading: TerminalUIMetrics.sectionSideInset,
+                bottom: TerminalUIMetrics.sectionBottomInset,
+                trailing: TerminalUIMetrics.sectionSideInset
+            )
+            return section
+        }
+    }
+}
+
+extension TerminalServerPickerViewController: UICollectionViewDelegate {
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        guard indexPath.item < items.count else { return }
+        let item = items[indexPath.item]
+        guard let credential = keychain().getCredential(for: item.key) else { return }
+        onCredentialSelected?(credential)
+    }
+}
+
+// MARK: - Snippet Picker
+
+@MainActor
+final class TerminalSnippetPickerViewController: UIViewController {
+    private enum Section: Int, CaseIterable {
+        case main
+    }
+
+    private let database: Blackbird.Database
+    private let onSelectSnippet: (Snippet) -> Void
+
+    private let collectionView: UICollectionView
+    private lazy var dataSource = makeDataSource()
+
+    private var snippets: [Snippet] = []
+
+    init(database: Blackbird.Database, onSelectSnippet: @escaping (Snippet) -> Void) {
+        self.database = database
+        self.onSelectSnippet = onSelectSnippet
+
+        let layout = TerminalSnippetPickerViewController.makeLayout()
+        collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        configureUI()
+        loadSnippets()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        loadSnippets()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        collectionView.frame = view.bounds
+    }
+
+    // MARK: Setup
+
+    private func configureUI() {
+        view.backgroundColor = UIColor.systemBackground
+
+        navigationItem.title = "Insert Snippet"
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            title: "Done",
+            style: .prominent,
+            target: self,
+            action: #selector(didTapDone)
+        )
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            title: "Manage",
+            style: .plain,
+            target: self,
+            action: #selector(didTapManage)
+        )
+
+        collectionView.backgroundColor = .clear
+        collectionView.delegate = self
+        collectionView.register(TerminalSnippetCell.self, forCellWithReuseIdentifier: TerminalSnippetCell.reuseID)
+        view.addSubview(collectionView)
+    }
+
+    // MARK: Data
+
+    private func loadSnippets() {
+        Task {
+            let rows = (try? await Snippet.read(
+                from: database,
+                matching: .all,
+                orderBy: .descending(\.$lastUse),
+                limit: 200
+            )) ?? []
+
+            await MainActor.run {
+                self.snippets = rows
+                var snapshot = NSDiffableDataSourceSnapshot<Section, String>()
+                snapshot.appendSections([.main])
+                snapshot.appendItems(rows.map(\.id), toSection: .main)
+                self.dataSource.apply(snapshot, animatingDifferences: true)
+            }
+        }
+    }
+
+    private func makeDataSource() -> UICollectionViewDiffableDataSource<Section, String> {
+        UICollectionViewDiffableDataSource<Section, String>(collectionView: collectionView) { [weak self] collectionView, indexPath, itemID in
+            guard let self,
+                  let snippet = self.snippets.first(where: { $0.id == itemID }),
+                  let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: TerminalSnippetCell.reuseID,
+                    for: indexPath
+                  ) as? TerminalSnippetCell
+            else {
+                return UICollectionViewCell()
+            }
+
+            cell.apply(command: snippet.command, comment: snippet.comment)
+            return cell
+        }
+    }
+
+    private static func makeLayout() -> UICollectionViewCompositionalLayout {
+        UICollectionViewCompositionalLayout { _, _ -> NSCollectionLayoutSection? in
+            let itemSize = NSCollectionLayoutSize(
+                widthDimension: .fractionalWidth(1),
+                heightDimension: .absolute(TerminalUIMetrics.snippetCellHeight)
+            )
+            let item = NSCollectionLayoutItem(layoutSize: itemSize)
+
+            let groupSize = NSCollectionLayoutSize(
+                widthDimension: .fractionalWidth(1),
+                heightDimension: .absolute(TerminalUIMetrics.snippetCellHeight)
+            )
+            let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
+
+            let section = NSCollectionLayoutSection(group: group)
+            section.interGroupSpacing = UIFloat(8)
+            section.contentInsets = NSDirectionalEdgeInsets(
+                top: TerminalUIMetrics.sectionTopInset,
+                leading: UIFloat(8),
+                bottom: TerminalUIMetrics.sectionBottomInset,
+                trailing: UIFloat(8)
+            )
+            return section
+        }
+    }
+
+    // MARK: Actions
+
+    @objc
+    private func didTapDone() {
+        dismiss(animated: true)
+    }
+
+    @objc
+    private func didTapManage() {
+        let manage = TerminalManageSnippetsViewController(database: database)
+        navigationController?.pushViewController(manage, animated: true)
+    }
+}
+
+extension TerminalSnippetPickerViewController: UICollectionViewDelegate {
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        guard indexPath.item < snippets.count else { return }
+
+        let snippet = snippets[indexPath.item]
+        onSelectSnippet(snippet)
+
+        Task {
+            var updated = snippet
+            updated.lastUse = .now
+            try? await updated.write(to: database)
+        }
+
+        dismiss(animated: true)
+    }
+}
+
+// MARK: - Snippet Manager
+
+@MainActor
+final class TerminalManageSnippetsViewController: UIViewController {
+    private enum Section: Int, CaseIterable {
+        case main
+    }
+
+    private let database: Blackbird.Database
+    private let collectionView: UICollectionView
+    private lazy var dataSource = makeDataSource()
+
+    private var snippets: [Snippet] = []
+    private let relativeFormatter = RelativeDateTimeFormatter()
+
+    init(database: Blackbird.Database) {
+        self.database = database
+        let layout = TerminalManageSnippetsViewController.makeLayout()
+        collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        configureUI()
+        loadSnippets()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        collectionView.frame = view.bounds
+    }
+
+    // MARK: Setup
+
+    private func configureUI() {
+        view.backgroundColor = UIColor.systemBackground
+
+        navigationItem.title = "Snippets"
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "plus"),
+            style: .plain,
+            target: self,
+            action: #selector(didTapAdd)
+        )
+
+        collectionView.backgroundColor = .clear
+        collectionView.delegate = self
+        collectionView.register(TerminalSnippetManageCell.self, forCellWithReuseIdentifier: TerminalSnippetManageCell.reuseID)
+        view.addSubview(collectionView)
+    }
+
+    // MARK: Data
+
+    private func loadSnippets() {
+        Task {
+            let rows = (try? await Snippet.read(
+                from: database,
+                matching: .all,
+                orderBy: .descending(\.$lastUse),
+                limit: 400
+            )) ?? []
+
+            await MainActor.run {
+                self.snippets = rows
+                var snapshot = NSDiffableDataSourceSnapshot<Section, String>()
+                snapshot.appendSections([.main])
+                snapshot.appendItems(rows.map(\.id), toSection: .main)
+                self.dataSource.apply(snapshot, animatingDifferences: true)
+            }
+        }
+    }
+
+    private func makeDataSource() -> UICollectionViewDiffableDataSource<Section, String> {
+        UICollectionViewDiffableDataSource<Section, String>(collectionView: collectionView) { [weak self] collectionView, indexPath, itemID in
+            guard let self,
+                  let snippet = self.snippets.first(where: { $0.id == itemID }),
+                  let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: TerminalSnippetManageCell.reuseID,
+                    for: indexPath
+                  ) as? TerminalSnippetManageCell
+            else {
+                return UICollectionViewCell()
+            }
+
+            let relative = self.relativeFormatter.localizedString(for: snippet.lastUse, relativeTo: Date())
+            cell.apply(command: snippet.command, comment: snippet.comment, relativeTime: relative)
+            cell.onDelete = { [weak self] in
+                self?.deleteSnippet(snippet)
+            }
+            return cell
+        }
+    }
+
+    private static func makeLayout() -> UICollectionViewCompositionalLayout {
+        UICollectionViewCompositionalLayout { _, _ -> NSCollectionLayoutSection? in
+            let itemSize = NSCollectionLayoutSize(
+                widthDimension: .fractionalWidth(1),
+                heightDimension: .absolute(UIFloat(84))
+            )
+            let item = NSCollectionLayoutItem(layoutSize: itemSize)
+
+            let groupSize = NSCollectionLayoutSize(
+                widthDimension: .fractionalWidth(1),
+                heightDimension: .absolute(UIFloat(84))
+            )
+            let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
+
+            let section = NSCollectionLayoutSection(group: group)
+            section.interGroupSpacing = UIFloat(8)
+            section.contentInsets = NSDirectionalEdgeInsets(
+                top: TerminalUIMetrics.sectionTopInset,
+                leading: UIFloat(8),
+                bottom: TerminalUIMetrics.sectionBottomInset,
+                trailing: UIFloat(8)
+            )
+            return section
+        }
+    }
+
+    private func deleteSnippet(_ snippet: Snippet) {
+        Task {
+            try? await snippet.delete(from: database)
+            await MainActor.run {
+                self.loadSnippets()
+            }
+        }
+    }
+
+    // MARK: Actions
+
+    @objc
+    private func didTapAdd() {
+        presentEditor(for: nil)
+    }
+
+    private func presentEditor(for snippet: Snippet?) {
+        let alert = UIAlertController(
+            title: snippet == nil ? "New Snippet" : "Edit Snippet",
+            message: nil,
+            preferredStyle: .alert
+        )
+
+        alert.addTextField { textField in
+            textField.placeholder = "Command"
+            textField.text = snippet?.command
+        }
+
+        alert.addTextField { textField in
+            textField.placeholder = "Comment"
+            textField.text = snippet?.comment
+        }
+
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Save", style: .default, handler: { _ in
+            let command = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let comment = alert.textFields?.last?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
             Task {
-                await loadCompletionSuggestions(currentInput)
-            }
-        }
-    }
-    
-    private func getSmartCompletions(for input: String) -> [String] {
-        let trimmedInput = input.trimmingCharacters(in: .whitespaces)
-        guard !trimmedInput.isEmpty else { return [] }
-        
-        let parts = trimmedInput.split(separator: " ")
-        guard let command = parts.first else { return [] }
-        
-        // Smart completion based on command and current directory
-        switch String(command) {
-        case "cd":
-            return getDirectoryCompletions(for: trimmedInput)
-        case "mv", "cp", "rm", "cat", "less", "more", "nano", "vim", "emacs":
-            return getFileCompletions(for: trimmedInput)
-        case "ls":
-            return getDirectoryCompletions(for: trimmedInput)
-        default:
-            return getHistoryCompletions(for: trimmedInput)
-        }
-    }
-    
-    private func getDirectoryCompletions(for input: String) -> [String] {
-        // Combine completion suggestions with history
-        let historyMatches = shortestStartingWith(input, in: history, limit: 2)
-        let completionMatches = Array(completionSuggestions.prefix(3))
-        
-        var combined = Set<String>()
-        combined.formUnion(historyMatches)
-        combined.formUnion(completionMatches)
-        
-        return Array(combined).sorted()
-    }
-    
-    private func getFileCompletions(for input: String) -> [String] {
-        // Similar to directory completions but for files
-        let historyMatches = shortestStartingWith(input, in: history, limit: 2)
-        let completionMatches = Array(completionSuggestions.prefix(3))
-        
-        var combined = Set<String>()
-        combined.formUnion(historyMatches)
-        combined.formUnion(completionMatches)
-        
-        return Array(combined).sorted()
-    }
-    
-    private func getHistoryCompletions(for input: String) -> [String] {
-        return shortestStartingWith(input, in: history, limit: 3)
-    }
-    
-    private func shortestStartingWith(_ prefix: String, in array: [String], limit: Int) -> [String] {
-        return array
-            .filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix(prefix) }
-            .sorted { $0.count < $1.count }
-            .prefix(limit)
-            .map { $0 }
-    }
-}
+                var target = snippet ?? Snippet(command: command, comment: comment, lastUse: .now)
+                target.command = command
+                target.comment = comment
+                if snippet == nil {
+                    target.lastUse = .now
+                }
 
-struct TerminalSettingsView: View {
-    @Binding var useVolumeButtons: Bool
-    @Binding var terminalTheme: TerminalTheme
-    @Binding var fontSize: Double
-    var view: SSHTerminalView?
-    @Environment(\.dismiss) private var dismiss
-    
-    var body: some View {
-        NavigationView {
-            Form {
-                Section("Appearance") {
-                    Picker("Theme", selection: $terminalTheme) {
-                        ForEach(TerminalTheme.allCases, id: \.self) { theme in
-                            Text(theme.rawValue).tag(theme)
-                        }
-                    }
-                    
-                    VStack(alignment: .leading) {
-                        Text("Font Size: \(Int(fontSize))")
-                        Slider(value: $fontSize, in: 8...24, step: 1) {
-                            Text("Font Size")
-                        }
-                    }
-                }
-                
-                Section("Controls") {
-                    Toggle("Volume Button Control", isOn: $useVolumeButtons)
-                    
-                    Text("When enabled, volume buttons control terminal arrow keys")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                Section("About") {
-                    HStack {
-                        Text("Terminal Engine")
-                        Spacer()
-                        Text("SwiftTerm")
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    HStack {
-                        Text("Completion")
-                        Spacer()
-                        Text("Smart Context-Aware")
-                            .foregroundColor(.secondary)
-                    }
+                try? await target.write(to: self.database)
+                await MainActor.run {
+                    self.loadSnippets()
                 }
             }
-            .navigationTitle("Terminal Settings")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
-        }
+        }))
+
+        present(alert, animated: true)
     }
 }
 
-#Preview {
-    NavigationStack{
-        RemoteTerminalView()
+extension TerminalManageSnippetsViewController: UICollectionViewDelegate {
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        guard indexPath.item < snippets.count else { return }
+        presentEditor(for: snippets[indexPath.item])
     }
 }
 
-// MARK: - Credential Conversion Extensions
+// MARK: - Collection Cells
 
-extension SwiftTerm.AuthenticationMethod {
-    func toContainEyeAuthMethod() -> ContainEye.AuthenticationMethod {
-        switch self {
-        case .password:
-            return .password
-        case .privateKey:
-            return .privateKey
-        case .privateKeyWithPassphrase:
-            return .privateKeyWithPassphrase
-        }
+final class TerminalServerCell: UICollectionViewCell {
+    static let reuseID = "TerminalServerCell"
+
+    private let backgroundCard = UIView()
+    private let titleLabel = UILabel()
+    private let hostLabel = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        configureUI()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+
+        backgroundCard.frame = contentView.bounds
+
+        var inner = backgroundCard.bounds.inset(by: UIEdgeInsets(
+            top: UIFloat(8),
+            left: UIFloat(10),
+            bottom: UIFloat(8),
+            right: UIFloat(10)
+        ))
+
+        let titleSplit = inner.split(at: UIFloat(22), from: .minYEdge)
+        titleLabel.frame = titleSplit.slice
+        inner = titleSplit.remainder
+        hostLabel.frame = inner
+    }
+
+    private func configureUI() {
+        contentView.backgroundColor = .clear
+
+        backgroundCard.backgroundColor = UIColor.tertiarySystemFill
+        backgroundCard.layer.cornerRadius = UIFloat(12)
+        backgroundCard.layer.cornerCurve = .continuous
+        contentView.addSubview(backgroundCard)
+
+        titleLabel.font = UIFont.systemFont(ofSize: UIFloat(14), weight: .semibold)
+        titleLabel.textColor = UIColor.label
+        backgroundCard.addSubview(titleLabel)
+
+        hostLabel.font = UIFont.systemFont(ofSize: UIFloat(12), weight: .regular)
+        hostLabel.textColor = UIColor.secondaryLabel
+        backgroundCard.addSubview(hostLabel)
+    }
+
+    func apply(label: String, host: String) {
+        titleLabel.text = label
+        hostLabel.text = host
     }
 }
 
-extension ContainEye.AuthenticationMethod {
-    func toSwiftTermAuthMethod() -> SwiftTerm.AuthenticationMethod {
-        switch self {
-        case .password:
-            return .password
-        case .privateKey:
-            return .privateKey
-        case .privateKeyWithPassphrase:
-            return .privateKeyWithPassphrase
-        }
+final class TerminalSnippetCell: UICollectionViewCell {
+    static let reuseID = "TerminalSnippetCell"
+
+    private let backgroundCard = UIView()
+    private let commandLabel = UILabel()
+    private let commentLabel = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        configureUI()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+
+        backgroundCard.frame = contentView.bounds
+
+        var inner = backgroundCard.bounds.inset(by: UIEdgeInsets(
+            top: UIFloat(8),
+            left: UIFloat(10),
+            bottom: UIFloat(8),
+            right: UIFloat(10)
+        ))
+
+        let commandSplit = inner.split(at: UIFloat(24), from: .minYEdge)
+        commandLabel.frame = commandSplit.slice
+        inner = commandSplit.remainder
+        commentLabel.frame = inner
+    }
+
+    private func configureUI() {
+        contentView.backgroundColor = .clear
+
+        backgroundCard.backgroundColor = UIColor.tertiarySystemFill
+        backgroundCard.layer.cornerRadius = UIFloat(12)
+        backgroundCard.layer.cornerCurve = .continuous
+        contentView.addSubview(backgroundCard)
+
+        commandLabel.font = UIFont.monospacedSystemFont(ofSize: UIFloat(13), weight: .regular)
+        commandLabel.textColor = UIColor.label
+        commandLabel.lineBreakMode = .byTruncatingTail
+        backgroundCard.addSubview(commandLabel)
+
+        commentLabel.font = UIFont.systemFont(ofSize: UIFloat(12), weight: .regular)
+        commentLabel.textColor = UIColor.secondaryLabel
+        commentLabel.numberOfLines = 2
+        commentLabel.lineBreakMode = .byTruncatingTail
+        backgroundCard.addSubview(commentLabel)
+    }
+
+    func apply(command: String, comment: String) {
+        commandLabel.text = command
+        commentLabel.text = comment
     }
 }
 
-extension SwiftTerm.Credential {
-    func toContainEyeCredential() -> ContainEye.Credential {
-        return ContainEye.Credential(
-            key: self.key,
-            label: self.label,
-            host: self.host,
-            port: self.port,
-            username: self.username,
-            password: self.password,
-            authMethod: self.effectiveAuthMethod.toContainEyeAuthMethod(),
-            privateKey: self.privateKey,
-            passphrase: self.passphrase
-        )
+final class TerminalSnippetManageCell: UICollectionViewCell {
+    static let reuseID = "TerminalSnippetManageCell"
+
+    var onDelete: (() -> Void)?
+
+    private let backgroundCard = UIView()
+    private let commandLabel = UILabel()
+    private let commentLabel = UILabel()
+    private let relativeLabel = UILabel()
+    private let deleteButton = UIButton(type: .system)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        configureUI()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+
+        backgroundCard.frame = contentView.bounds
+
+        var inner = backgroundCard.bounds.inset(by: UIEdgeInsets(
+            top: UIFloat(8),
+            left: UIFloat(10),
+            bottom: UIFloat(8),
+            right: UIFloat(10)
+        ))
+
+        let trailingSplit = inner.split(at: UIFloat(36), from: .maxXEdge)
+        deleteButton.frame = trailingSplit.slice
+        inner = trailingSplit.remainder
+
+        let topSplit = inner.split(at: UIFloat(24), from: .minYEdge)
+        commandLabel.frame = topSplit.slice
+        inner = topSplit.remainder
+
+        let bottomSplit = inner.split(at: UIFloat(20), from: .maxYEdge)
+        relativeLabel.frame = bottomSplit.slice
+        commentLabel.frame = bottomSplit.remainder
+    }
+
+    private func configureUI() {
+        contentView.backgroundColor = .clear
+
+        backgroundCard.backgroundColor = UIColor.tertiarySystemFill
+        backgroundCard.layer.cornerRadius = UIFloat(12)
+        backgroundCard.layer.cornerCurve = .continuous
+        contentView.addSubview(backgroundCard)
+
+        commandLabel.font = UIFont.monospacedSystemFont(ofSize: UIFloat(13), weight: .regular)
+        commandLabel.textColor = UIColor.label
+        backgroundCard.addSubview(commandLabel)
+
+        commentLabel.font = UIFont.systemFont(ofSize: UIFloat(12), weight: .regular)
+        commentLabel.textColor = UIColor.secondaryLabel
+        commentLabel.numberOfLines = 2
+        backgroundCard.addSubview(commentLabel)
+
+        relativeLabel.font = UIFont.systemFont(ofSize: UIFloat(11), weight: .regular)
+        relativeLabel.textColor = UIColor.tertiaryLabel
+        backgroundCard.addSubview(relativeLabel)
+
+        deleteButton.setImage(UIImage(systemName: "trash"), for: .normal)
+        deleteButton.tintColor = UIColor.systemRed
+        deleteButton.addTarget(self, action: #selector(didTapDelete), for: .touchUpInside)
+        backgroundCard.addSubview(deleteButton)
+    }
+
+    func apply(command: String, comment: String, relativeTime: String) {
+        commandLabel.text = command
+        commentLabel.text = comment
+        relativeLabel.text = relativeTime
+    }
+
+    @objc
+    private func didTapDelete() {
+        onDelete?()
     }
 }
-
-extension ContainEye.Credential {
-    func toSwiftTermCredential() -> SwiftTerm.Credential {
-        return SwiftTerm.Credential(
-            key: self.key,
-            label: self.label,
-            host: self.host,
-            port: self.port,
-            username: self.username,
-            password: self.password,
-            authMethod: self.effectiveAuthMethod.toSwiftTermAuthMethod(),
-            privateKey: self.privateKey,
-            passphrase: self.passphrase
-        )
-    }
-}
-

@@ -78,20 +78,22 @@ struct ContentView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .toolbar{
-                if screen == .serverList{
-                    Button{
-                        UserDefaults.standard.set(ContentView.Screen.setup.rawValue, forKey: "screen")
-                        UserDefaults.standard.set(1, forKey: "setupScreen")
-                    } label: {
-                        Image(systemName: "plus")
+            .toolbar {
+                if screen == .serverList {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            UserDefaults.standard.set(ContentView.Screen.setup.rawValue, forKey: "screen")
+                            UserDefaults.standard.set(1, forKey: "setupScreen")
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        .accessibilityLabel("Add a server")
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.circle)
                     }
-                    .accessibilityLabel("Add a server")
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.circle)
                 }
             }
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+            .toolbarBackgroundVisibility(screen == .terminal ? .visible : .hidden, for: .navigationBar)
 #if !os(macOS)
             .navigationBarTitleDisplayMode(.inline)
 #endif
@@ -209,5 +211,3 @@ struct ContentView: View {
 #Preview {
     ContentView()
 }
-
-
