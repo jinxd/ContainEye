@@ -329,9 +329,20 @@ struct AgenticView: View {
 
             let memory = AgenticMemoryStore.read()
             AgenticDebugLogger.log("loop=\(loopGuard) chat=\(chatID.uuidString) history_count=\(workingHistory.count)")
-            let llmResponse = try await AgenticLLMClient.generate(
+            let streamingMessageID = UUID()
+            await store.appendMessage(
+                AgenticMessage(id: streamingMessageID, role: .assistant, content: "Thinking..."),
+                to: chatID
+            )
+
+            let llmResponse = try await AgenticLLMClient.generateStreaming(
                 systemPrompt: AgenticLLMClient.systemPrompt(memory: memory),
-                history: workingHistory
+                history: workingHistory,
+                onProgress: { [chatID, streamingMessageID] accumulated in
+                    let preview = AgenticStreamingPreviewParser.preview(from: accumulated)
+                    guard !preview.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                    await store.updateMessage(chatID: chatID, messageID: streamingMessageID, newContent: preview)
+                }
             )
             latestLLMRawResponses.append(llmResponse.rawText)
             AgenticDebugLogger.log("http_status=\(llmResponse.statusCode ?? -1)")
@@ -359,7 +370,11 @@ struct AgenticView: View {
                     }
                 }
                 let callToExecute = toolCall
-                await store.appendMessage(AgenticMessage(role: .assistant, content: "Using tool: \(callToExecute.tool)"), to: chatID)
+                await store.updateMessage(
+                    chatID: chatID,
+                    messageID: streamingMessageID,
+                    newContent: "Using tool: \(callToExecute.tool)"
+                )
                 let result = await executor.execute(call: callToExecute)
                 await store.appendMessage(AgenticMessage(role: .tool, content: result.userFacingSummary), to: chatID)
                 await store.appendMessage(
@@ -377,7 +392,7 @@ struct AgenticView: View {
 
             if let final = AgenticFinalResponse.parse(from: cleaned) {
                 AgenticDebugLogger.log("parse=final")
-                await store.appendMessage(AgenticMessage(role: .assistant, content: final.content), to: chatID)
+                await store.updateMessage(chatID: chatID, messageID: streamingMessageID, newContent: final.content)
                 workingHistory.append(["role": "model", "content": final.content])
                 let normalized = final.content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 if normalized == "something went wrong." || normalized == "something went wrong" {
@@ -389,7 +404,7 @@ struct AgenticView: View {
                 }
             } else {
                 AgenticDebugLogger.log("parse=unstructured_final")
-                await store.appendMessage(AgenticMessage(role: .assistant, content: cleaned), to: chatID)
+                await store.updateMessage(chatID: chatID, messageID: streamingMessageID, newContent: cleaned)
                 workingHistory.append(["role": "model", "content": cleaned])
             }
             return
@@ -770,6 +785,19 @@ final class AgenticChatStore {
         save()
     }
 
+    func updateMessage(chatID: UUID, messageID: UUID, newContent: String) async {
+        guard let chatIndex = chats.firstIndex(where: { $0.id == chatID }) else { return }
+        var chat = chats[chatIndex]
+        guard let messageIndex = chat.messages.firstIndex(where: { $0.id == messageID }) else { return }
+
+        chat.messages[messageIndex].content = newContent
+        chat.updatedAt = .now
+        chats[chatIndex] = chat
+        chats.sort { $0.updatedAt > $1.updatedAt }
+        selectedChatID = chatID
+        save()
+    }
+
     func llmHistory(for chatID: UUID) -> [[String: String]] {
         guard let chat = chats.first(where: { $0.id == chatID }) else { return [] }
         return chat.messages.compactMap { message in
@@ -882,13 +910,18 @@ Allowed tools:
 - update_memory {"content":"<memory note>", "mode":"append|replace"}
 
 Rules:
+- Start each request by forming a short internal execution plan and then follow it.
 - Use tools when facts are needed.
+- Prefer solving autonomously with available tools before asking the user anything.
+- Only ask the user a question when required information cannot be discovered via tools.
 - `run_command` approvals are handled by the app; never ask the user for approval in chat text.
 - `list_documents` reads the local indexed remote-path cache for the given server/path, not a live remote listing.
 - For any request to modify server metadata (host/label/username/port/auth), use `update_server`.
 - Prefer asking clarifying questions in a final response when information is missing.
-- When asking clarifying questions, prefer short multiple-choice suggestions so the user can reply with one tap/word (mobile-first UX).
-- Offer 2-5 concrete options when possible, and include a recommended default option.
+- You do not need to suggest options unless you are asking a question.
+- When you do ask a question, prefer short multiple-choice options so the user can reply with one tap/word (mobile-first UX).
+- For those questions, offer 2-5 concrete options when possible, and include a recommended default option.
+- Proactively call `update_memory` when you learn durable user preferences, constraints, or stable environment facts that will help future replies.
 - Never fabricate command output.
 - Keep final responses concise and actionable.
 
@@ -907,6 +940,48 @@ User memory:
         let rawText = String(data: data, encoding: .utf8) ?? ""
         let statusCode = (response as? HTTPURLResponse)?.statusCode
         return .init(rawText: rawText, statusCode: statusCode)
+    }
+
+    static func generateStreaming(
+        systemPrompt: String,
+        history: [[String: String]],
+        onProgress: @escaping @Sendable (String) async -> Void
+    ) async throws -> AgenticLLMResponse {
+        let conversation = [["role": "system", "content": systemPrompt]] + history
+        var request = URLRequest(url: URL(string: "https://containeye.hannesnagel.com/text-generation/stream")!)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/x-ndjson", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONSerialization.data(withJSONObject: conversation)
+
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        let statusCode = (response as? HTTPURLResponse)?.statusCode
+        var accumulated = ""
+
+        for try await rawLine in bytes.lines {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+            guard let data = line.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let type = (json["type"] as? String)?.lowercased() else { continue }
+
+            switch type {
+            case "delta":
+                let delta = json["delta"] as? String ?? ""
+                guard !delta.isEmpty else { continue }
+                accumulated += delta
+                await onProgress(accumulated)
+            case "error":
+                let reason = json["reason"] as? String ?? "Streaming request failed."
+                throw NSError(domain: "AgenticLLMClient", code: statusCode ?? 500, userInfo: [NSLocalizedDescriptionKey: reason])
+            case "done":
+                break
+            default:
+                continue
+            }
+        }
+
+        return .init(rawText: accumulated, statusCode: statusCode)
     }
 }
 
@@ -973,6 +1048,64 @@ struct AgenticFinalResponse {
             return .init(content: reason)
         }
         return nil
+    }
+}
+
+enum AgenticStreamingPreviewParser {
+    static func preview(from raw: String) -> String {
+        let cleaned = LLM.cleanLLMOutputPreservingMarkdown(raw)
+        if let toolCall = AgenticToolCall.parse(from: cleaned) {
+            return "Using tool: \(toolCall.tool)"
+        }
+        if let final = AgenticFinalResponse.parse(from: cleaned) {
+            return final.content
+        }
+        if let partial = extractPartialFinalContent(from: cleaned) {
+            return partial
+        }
+        return cleaned
+    }
+
+    private static func extractPartialFinalContent(from text: String) -> String? {
+        guard text.range(of: #""type"\s*:\s*"(final|response|question)""#, options: .regularExpression) != nil else {
+            return nil
+        }
+        guard let contentMatch = text.range(of: #""content"\s*:\s*""#, options: .regularExpression) else {
+            return nil
+        }
+
+        var cursor = contentMatch.upperBound
+        var output = ""
+        var isEscaping = false
+
+        while cursor < text.endIndex {
+            let ch = text[cursor]
+            cursor = text.index(after: cursor)
+
+            if isEscaping {
+                switch ch {
+                case "n": output.append("\n")
+                case "t": output.append("\t")
+                case "r": output.append("\r")
+                case "\"": output.append("\"")
+                case "\\": output.append("\\")
+                default: output.append(ch)
+                }
+                isEscaping = false
+                continue
+            }
+
+            if ch == "\\" {
+                isEscaping = true
+                continue
+            }
+            if ch == "\"" {
+                break
+            }
+            output.append(ch)
+        }
+
+        return output.isEmpty ? nil : output
     }
 }
 
