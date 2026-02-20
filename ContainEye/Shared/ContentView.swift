@@ -19,7 +19,7 @@ struct ContentView: View {
     @Namespace var namespace
 
     enum Screen: String, CaseIterable, Identifiable {
-        case serverList, testList, more, setup, terminal, sftp
+        case serverList, testList, agentic = "more", setup, terminal, sftp
 
         var localizedTitle: String {
             switch self {
@@ -27,8 +27,8 @@ struct ContentView: View {
                 "Servers"
             case .testList:
                 "Tests"
-            case .more:
-                "more"
+            case .agentic:
+                "agentic"
             case .setup:
                 "setup"
             case .terminal:
@@ -66,8 +66,8 @@ struct ContentView: View {
                         Tab("Tests", systemImage: "testtube.2", value: .testList){
                             ServerTestView()
                         }
-                        Tab("More", systemImage: "ellipsis", value: .more){
-                            MoreView()
+                        Tab("Agentic", systemImage: "lasso.badge.sparkles", value: .agentic, role: .search){
+                            AgenticView()
                         }
                     }
                 }
