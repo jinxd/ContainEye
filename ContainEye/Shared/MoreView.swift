@@ -215,7 +215,7 @@ struct AgenticView: View {
             Text(label(for: message.role))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            Text(message.content)
+            Text(.init(message.content))
                 .textSelection(.enabled)
                 .font(message.role == .tool ? .system(.footnote, design: .monospaced) : .body)
                 .padding(10)
