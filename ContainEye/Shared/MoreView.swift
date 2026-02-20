@@ -350,43 +350,51 @@ struct AgenticView: View {
             let cleaned = LLM.cleanLLMOutputPreservingMarkdown(llmResponse.rawText)
             AgenticDebugLogger.log("cleaned_response=\n\(cleaned)")
 
-            if let toolCall = AgenticToolCall.parse(from: cleaned) {
-                AgenticDebugLogger.log("parse=tool_call tool=\(toolCall.tool) args=\(toolCall.arguments)")
-                if toolCall.tool == "run_command" {
-                    let command = (toolCall.arguments["command"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    if commandRequiresApproval(command) {
-                        let serverLabel = ((toolCall.arguments["server"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? "default server"
-                        await MainActor.run {
-                            pendingCommandApproval = AgenticPendingCommandApproval(
-                                chatID: chatID,
-                                serverLabel: serverLabel,
-                                command: command,
-                                call: toolCall,
-                                history: workingHistory
-                            )
-                            showCommandApprovalAlert = true
+            if let toolCalls = AgenticToolCall.parseAll(from: cleaned), !toolCalls.isEmpty {
+                AgenticDebugLogger.log("parse=tool_calls count=\(toolCalls.count)")
+                for (index, callToExecute) in toolCalls.enumerated() {
+                    AgenticDebugLogger.log("tool[\(index)] tool=\(callToExecute.tool) args=\(callToExecute.arguments)")
+                    if callToExecute.tool == "run_command" {
+                        let command = (callToExecute.arguments["command"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        if commandRequiresApproval(command) {
+                            let serverLabel = ((callToExecute.arguments["server"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? "default server"
+                            await MainActor.run {
+                                pendingCommandApproval = AgenticPendingCommandApproval(
+                                    chatID: chatID,
+                                    serverLabel: serverLabel,
+                                    command: command,
+                                    call: callToExecute,
+                                    history: workingHistory
+                                )
+                                showCommandApprovalAlert = true
+                            }
+                            return
                         }
-                        return
                     }
+
+                    if index == 0 {
+                        await store.updateMessage(
+                            chatID: chatID,
+                            messageID: streamingMessageID,
+                            newContent: "Using tool: \(callToExecute.tool)"
+                        )
+                    } else {
+                        await store.appendMessage(AgenticMessage(role: .assistant, content: "Using tool: \(callToExecute.tool)"), to: chatID)
+                    }
+
+                    let result = await executor.execute(call: callToExecute)
+                    await store.appendMessage(AgenticMessage(role: .tool, content: result.userFacingSummary), to: chatID)
+                    await store.appendMessage(
+                        AgenticMessage(
+                            role: .system,
+                            content: result.toolResultEnvelope(tool: callToExecute.tool)
+                        ),
+                        to: chatID
+                    )
+                    workingHistory.append(["role": "model", "content": "Using tool: \(callToExecute.tool)"])
+                    workingHistory.append(["role": "user", "content": result.userFacingSummary])
+                    workingHistory.append(["role": "user", "content": result.toolResultEnvelope(tool: callToExecute.tool)])
                 }
-                let callToExecute = toolCall
-                await store.updateMessage(
-                    chatID: chatID,
-                    messageID: streamingMessageID,
-                    newContent: "Using tool: \(callToExecute.tool)"
-                )
-                let result = await executor.execute(call: callToExecute)
-                await store.appendMessage(AgenticMessage(role: .tool, content: result.userFacingSummary), to: chatID)
-                await store.appendMessage(
-                    AgenticMessage(
-                        role: .system,
-                        content: result.toolResultEnvelope(tool: callToExecute.tool)
-                    ),
-                    to: chatID
-                )
-                workingHistory.append(["role": "model", "content": "Using tool: \(callToExecute.tool)"])
-                workingHistory.append(["role": "user", "content": result.userFacingSummary])
-                workingHistory.append(["role": "user", "content": result.toolResultEnvelope(tool: callToExecute.tool)])
                 continue
             }
 
@@ -891,6 +899,11 @@ Always return either:
   "tool":"<tool_name>",
   "arguments": { ... }
 }
+You may also return an array of tool call objects when multiple independent steps are needed:
+[
+  {"type":"tool","tool":"<tool_name>","arguments":{...}},
+  {"type":"tool","tool":"<tool_name>","arguments":{...}}
+]
 2) A final response JSON object:
 {
   "type":"final",
@@ -995,13 +1008,35 @@ struct AgenticToolCall {
     var arguments: [String: Any]
 
     static func parse(from raw: String) -> AgenticToolCall? {
+        parseAll(from: raw)?.first
+    }
+
+    static func parseAll(from raw: String) -> [AgenticToolCall]? {
         let cleaned = LLM.cleanLLMOutput(raw)
         guard let data = cleaned.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = json["type"] as? String,
+              let json = try? JSONSerialization.jsonObject(with: data) else {
+            return nil
+        }
+
+        if let object = json as? [String: Any] {
+            guard let call = parseSingleTool(from: object) ?? parseLegacyExecute(from: object) else {
+                return nil
+            }
+            return [call]
+        }
+
+        if let objects = json as? [[String: Any]] {
+            let calls = objects.compactMap { parseSingleTool(from: $0) ?? parseLegacyExecute(from: $0) }
+            return calls.isEmpty ? nil : calls
+        }
+
+        return nil
+    }
+
+    private static func parseSingleTool(from json: [String: Any]) -> AgenticToolCall? {
+        guard let type = json["type"] as? String,
               type.lowercased() == "tool",
               let tool = json["tool"] as? String else {
-            if let legacy = parseLegacyExecute(from: cleaned) { return legacy }
             return nil
         }
 
@@ -1009,13 +1044,8 @@ struct AgenticToolCall {
         return .init(tool: tool, arguments: arguments)
     }
 
-    private static func parseLegacyExecute(from cleaned: String) -> AgenticToolCall? {
-        guard let data = cleaned.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = json["type"] as? String else {
-            return nil
-        }
-
+    private static func parseLegacyExecute(from json: [String: Any]) -> AgenticToolCall? {
+        guard let type = json["type"] as? String else { return nil }
         if type == "execute", let command = json["content"] as? String {
             return .init(tool: "run_command", arguments: ["command": command])
         }
@@ -1054,7 +1084,10 @@ struct AgenticFinalResponse {
 enum AgenticStreamingPreviewParser {
     static func preview(from raw: String) -> String {
         let cleaned = LLM.cleanLLMOutputPreservingMarkdown(raw)
-        if let toolCall = AgenticToolCall.parse(from: cleaned) {
+        if let toolCalls = AgenticToolCall.parseAll(from: cleaned), let toolCall = toolCalls.first {
+            if toolCalls.count > 1 {
+                return "Using tools: \(toolCalls.map(\.tool).joined(separator: ", "))"
+            }
             return "Using tool: \(toolCall.tool)"
         }
         if let final = AgenticFinalResponse.parse(from: cleaned) {
