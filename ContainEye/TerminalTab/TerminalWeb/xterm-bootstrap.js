@@ -112,10 +112,16 @@
       emitSelectionChanged(terminal);
     }
 
-    function endSelection() {
+    function endSelection(event) {
+      const hadLongPressSelection = state.selecting;
       clearTimer();
       state.selecting = false;
       state.anchor = null;
+      if (hadLongPressSelection && event) {
+        event.preventDefault();
+        event.stopPropagation();
+        emitSelectionChanged(terminal);
+      }
     }
 
     element.addEventListener("touchstart", function (event) {
@@ -175,8 +181,8 @@
       applySelection(state.anchor, current);
     }, { passive: false });
 
-    element.addEventListener("touchend", endSelection, { passive: true });
-    element.addEventListener("touchcancel", endSelection, { passive: true });
+    element.addEventListener("touchend", endSelection, { passive: false });
+    element.addEventListener("touchcancel", endSelection, { passive: false });
   }
 
   function tokenizeShellLine(line) {

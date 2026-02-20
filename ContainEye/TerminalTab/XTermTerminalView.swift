@@ -246,6 +246,10 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
             return hasActiveSelection || didPresentSelectionMenu
         }
 
+        if action == #selector(paste(_:)) {
+            return !(UIPasteboard.general.string ?? "").isEmpty
+        }
+
         if action == #selector(selectAll(_:)) {
             return true
         }
@@ -274,6 +278,14 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
 
     override func selectAll(_ sender: Any?) {
         selectAll()
+    }
+
+    override func paste(_ sender: Any?) {
+        guard let text = UIPasteboard.general.string, !text.isEmpty else {
+            return
+        }
+        controller?.sendInput(text)
+        controller?.focus()
     }
 
     private func updateSelectionMenu(with event: XTermBridgeEvent) {
@@ -311,7 +323,6 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
             return
         }
 
-        becomeFirstResponder()
         didPresentSelectionMenu = true
         let config = UIEditMenuConfiguration(identifier: nil, sourcePoint: point)
         editMenuInteraction.presentEditMenu(with: config)
@@ -367,21 +378,31 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
         menuFor configuration: UIEditMenuConfiguration,
         suggestedActions: [UIMenuElement]
     ) -> UIMenu? {
-        var actions = suggestedActions
-        var insertionIndex = 0
-        if (hasActiveSelection || didPresentSelectionMenu), !containsCopyAction(in: suggestedActions) {
+        var actions: [UIMenuElement] = []
+        if hasActiveSelection || didPresentSelectionMenu {
             let copyAction = UIAction(title: "Copy") { [weak self] _ in
                 self?.copy(nil)
             }
-            actions.insert(copyAction, at: insertionIndex)
-            insertionIndex += 1
+            actions.append(copyAction)
         }
+
+        if !(UIPasteboard.general.string ?? "").isEmpty {
+            let pasteAction = UIAction(title: "Paste") { [weak self] _ in
+                self?.paste(nil)
+            }
+            actions.append(pasteAction)
+        }
+
+        let selectAllAction = UIAction(title: "Select All") { [weak self] _ in
+            self?.selectAll(nil)
+        }
+        actions.append(selectAllAction)
 
         if hasActiveSelection || didPresentSelectionMenu {
             let askAIAction = UIAction(title: "Ask AI", image: UIImage(systemName: "sparkles")) { [weak self] _ in
                 self?.askAIAboutSelection()
             }
-            actions.insert(askAIAction, at: insertionIndex)
+            actions.append(askAIAction)
         }
 
         return UIMenu(children: actions)
@@ -395,19 +416,6 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
             return lastSelectionText
         }
         return nil
-    }
-
-    @available(iOS 16.0, *)
-    private func containsCopyAction(in elements: [UIMenuElement]) -> Bool {
-        for element in elements {
-            if let command = element as? UICommand, command.action == #selector(copy(_:)) {
-                return true
-            }
-            if let menu = element as? UIMenu, containsCopyAction(in: menu.children) {
-                return true
-            }
-        }
-        return false
     }
 
     private func askAIAboutSelection() {
