@@ -34,7 +34,7 @@ struct ServerSelectionView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Cancel") {
+                    Button(role: .cancel) {
                         dismiss()
                     }
                 }
@@ -145,7 +145,7 @@ struct ServerSelectionView: View {
             }
             .disabled(selectedServer == nil || isAdding)
             
-            Button("Cancel") {
+            Button(role: .cancel) {
                 dismiss()
             }
             .foregroundStyle(.secondary)

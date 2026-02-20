@@ -86,7 +86,7 @@ struct SnippetSummaryView: View {
                     .font(.caption)
                 }
                 Spacer()
-                (Text(snippet.lastUse, style: .relative) + Text(" ago"))
+                Text("\(snippet.lastUse, style: .relative) ago")
                     .font(.caption)
             }
         }

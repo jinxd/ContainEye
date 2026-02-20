@@ -28,19 +28,24 @@ func UIFloat(_ value: Int) -> CGFloat {
 
 struct RemoteTerminalView: View {
     var body: some View {
-        TerminalWorkspaceControllerHost()
+        TerminalWorkspaceNavigationHost()
             .ignoresSafeArea(.container, edges: .bottom)
             .trackView("terminal/workspace")
     }
 }
 
-private struct TerminalWorkspaceControllerHost: UIViewControllerRepresentable {
-    func makeUIViewController(context: Context) -> TerminalWorkspaceViewController {
-        TerminalWorkspaceViewController()
+private struct TerminalWorkspaceNavigationHost: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> UINavigationController {
+        let root = TerminalWorkspaceViewController()
+        let navigation = UINavigationController(rootViewController: root)
+        navigation.navigationBar.prefersLargeTitles = false
+        return navigation
     }
 
-    func updateUIViewController(_ uiViewController: TerminalWorkspaceViewController, context: Context) {
-        uiViewController.refreshUI()
+    func updateUIViewController(_ uiViewController: UINavigationController, context: Context) {
+        if let root = uiViewController.viewControllers.first as? TerminalWorkspaceViewController {
+            root.refreshUI()
+        }
     }
 }
 
@@ -48,10 +53,6 @@ private struct TerminalWorkspaceControllerHost: UIViewControllerRepresentable {
 
 private enum TerminalUIMetrics {
     static let pageInset = UIFloat(8)
-    static let topBarHeight = UIFloat(36)
-    static let topBarButtonSize = UIFloat(32)
-    static let topBarGap = UIFloat(8)
-    static let topBarBottomSpacing = UIFloat(8)
     static let paneGap = UIFloat(8)
     static let paneInnerInset = UIFloat(6)
     static let paneCornerRadius = UIFloat(14)
@@ -155,14 +156,11 @@ final class TerminalWorkspaceViewController: UIViewController {
     private let terminalManager = TerminalNavigationManager.shared
     private let hardwareInput = TerminalHardwareInputController()
 
-    private let topBarView = UIView()
-    private let addPaneButton = UIButton(type: .system)
-    private let titleMenuButton = UIButton(type: .system)
-    private let snippetButton = UIButton(type: .system)
-    private let volumeButton = UIButton(type: .system)
+    private let navigationTitleMenuButton = UIButton(type: .system)
     private let paneContainerView = UIView()
     private let keyboardBarView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
-    private let keyboardScrollView = UIScrollView()
+    private let keyboardControlsContainer = UIView()
+    private let keyboardStackView = UIStackView()
     private let messageLabel = UILabel()
 
     private var paneControllers: [UUID: TerminalPaneViewController] = [:]
@@ -170,7 +168,24 @@ final class TerminalWorkspaceViewController: UIViewController {
     private var keyboardVisible = false
     private var activeControllerIDForKeyboard: UUID?
     private var messageHideTask: Task<Void, Never>?
-
+    private lazy var addBarButtonItem = UIBarButtonItem(
+        image: UIImage(systemName: "plus"),
+        style: .plain,
+        target: self,
+        action: #selector(didTapAddPane)
+    )
+    private lazy var snippetBarButtonItem = UIBarButtonItem(
+        image: UIImage(systemName: "ellipsis.curlybraces"),
+        style: .plain,
+        target: self,
+        action: #selector(didTapSnippets)
+    )
+    private lazy var volumeBarButtonItem = UIBarButtonItem(
+        image: UIImage(systemName: "plusminus.circle"),
+        style: .plain,
+        target: self,
+        action: #selector(didTapVolumeControl)
+    )
     private var useVolumeButtons = UserDefaults.standard.bool(forKey: "useVolumeButtons") {
         didSet {
             UserDefaults.standard.set(useVolumeButtons, forKey: "useVolumeButtons")
@@ -185,6 +200,7 @@ final class TerminalWorkspaceViewController: UIViewController {
         super.viewDidLoad()
 
         configureBaseUI()
+        configureNavigationItems()
         configureKeyboardBar()
         installObservers()
 
@@ -195,6 +211,7 @@ final class TerminalWorkspaceViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        navigationController?.setNavigationBarHidden(false, animated: false)
         refreshNavigationChrome()
         processPendingRequests()
     }
@@ -209,9 +226,11 @@ final class TerminalWorkspaceViewController: UIViewController {
         layoutWorkspaceViews()
     }
 
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        refreshUI()
+    override func viewWillTransition(to size: CGSize, with coordinator: any UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+            self?.refreshUI()
+        }
     }
 
     deinit {
@@ -232,36 +251,6 @@ final class TerminalWorkspaceViewController: UIViewController {
     private func configureBaseUI() {
         view.backgroundColor = TerminalUIColors.workspaceBackground
 
-        topBarView.backgroundColor = .clear
-        view.addSubview(topBarView)
-
-        addPaneButton.setImage(UIImage(systemName: "plus"), for: .normal)
-        addPaneButton.tintColor = UIColor.label
-        addPaneButton.addTarget(self, action: #selector(didTapAddPane), for: .touchUpInside)
-        addPaneButton.accessibilityLabel = "Add terminal tab"
-        topBarView.addSubview(addPaneButton)
-
-        var titleConfig = UIButton.Configuration.plain()
-        titleConfig.baseForegroundColor = UIColor.label
-        titleConfig.image = UIImage(systemName: "chevron.down")
-        titleConfig.imagePlacement = .trailing
-        titleConfig.imagePadding = UIFloat(6)
-        titleConfig.contentInsets = .zero
-        titleMenuButton.configuration = titleConfig
-        titleMenuButton.showsMenuAsPrimaryAction = true
-        topBarView.addSubview(titleMenuButton)
-
-        snippetButton.setImage(UIImage(systemName: "ellipsis.curlybraces"), for: .normal)
-        snippetButton.tintColor = UIColor.label
-        snippetButton.addTarget(self, action: #selector(didTapSnippets), for: .touchUpInside)
-        snippetButton.accessibilityLabel = "Insert snippet"
-        topBarView.addSubview(snippetButton)
-
-        volumeButton.tintColor = UIColor.label
-        volumeButton.addTarget(self, action: #selector(didTapVolumeControl), for: .touchUpInside)
-        volumeButton.accessibilityLabel = "Volume buttons control arrows"
-        topBarView.addSubview(volumeButton)
-
         paneContainerView.backgroundColor = .clear
         view.addSubview(paneContainerView)
 
@@ -271,9 +260,14 @@ final class TerminalWorkspaceViewController: UIViewController {
         keyboardBarView.isHidden = true
         view.addSubview(keyboardBarView)
 
-        keyboardScrollView.showsHorizontalScrollIndicator = false
-        keyboardScrollView.backgroundColor = .clear
-        keyboardBarView.contentView.addSubview(keyboardScrollView)
+        keyboardControlsContainer.backgroundColor = .clear
+        keyboardBarView.contentView.addSubview(keyboardControlsContainer)
+
+        keyboardStackView.axis = .horizontal
+        keyboardStackView.alignment = .fill
+        keyboardStackView.distribution = .fill
+        keyboardStackView.spacing = UIFloat(6)
+        keyboardControlsContainer.addSubview(keyboardStackView)
 
         messageLabel.backgroundColor = UIColor.secondarySystemBackground.withAlphaComponent(0.92)
         messageLabel.textColor = UIColor.label
@@ -286,11 +280,34 @@ final class TerminalWorkspaceViewController: UIViewController {
         view.addSubview(messageLabel)
     }
 
+    private func configureNavigationItems() {
+        navigationTitleMenuButton.showsMenuAsPrimaryAction = true
+        navigationTitleMenuButton.tintColor = UIColor.label
+        navigationTitleMenuButton.setTitleColor(UIColor.label, for: .normal)
+        if #available(iOS 15.0, *) {
+            var config = UIButton.Configuration.plain()
+            config.baseForegroundColor = UIColor.label
+            config.image = UIImage(systemName: "chevron.down")
+            config.imagePlacement = .trailing
+            config.imagePadding = UIFloat(6)
+            config.contentInsets = .zero
+            navigationTitleMenuButton.configuration = config
+        }
+
+        navigationItem.titleView = navigationTitleMenuButton
+        navigationItem.leftBarButtonItem = addBarButtonItem
+        navigationItem.rightBarButtonItems = [snippetBarButtonItem, volumeBarButtonItem]
+    }
+
     private func configureKeyboardBar() {
         keyboardButtons = TerminalKeyboardControl.allCases.map { control in
             let button = UIButton(type: .system)
             button.setTitle(control.title, for: .normal)
             button.titleLabel?.font = UIFont.systemFont(ofSize: UIFloat(12), weight: .semibold)
+            button.titleLabel?.numberOfLines = 1
+            button.titleLabel?.lineBreakMode = .byClipping
+            button.titleLabel?.adjustsFontSizeToFitWidth = true
+            button.titleLabel?.minimumScaleFactor = 0.8
             button.layer.cornerRadius = UIFloat(14)
             button.layer.cornerCurve = .continuous
             let insets = NSDirectionalEdgeInsets(
@@ -314,9 +331,11 @@ final class TerminalWorkspaceViewController: UIViewController {
             button.backgroundColor = TerminalUIColors.keyboardKeyFill
             button.tintColor = UIColor.label
             button.setTitleColor(UIColor.label, for: .normal)
+            button.setContentCompressionResistancePriority(.required, for: .horizontal)
+            button.setContentHuggingPriority(.required, for: .horizontal)
             button.tag = control.rawValue
             button.addTarget(self, action: #selector(didTapKeyboardControl(_:)), for: .touchUpInside)
-            keyboardScrollView.addSubview(button)
+            keyboardStackView.addArrangedSubview(button)
             return button
         }
     }
@@ -386,13 +405,16 @@ final class TerminalWorkspaceViewController: UIViewController {
     // MARK: Navigation UI
 
     private func refreshNavigationChrome() {
-        if var config = titleMenuButton.configuration {
-            config.title = titleTextForFocusedPane()
-            titleMenuButton.configuration = config
+        let title = titleTextForFocusedPane()
+        if var navigationConfig = navigationTitleMenuButton.configuration {
+            navigationConfig.title = title
+            navigationTitleMenuButton.configuration = navigationConfig
         } else {
-            titleMenuButton.setTitle(titleTextForFocusedPane(), for: .normal)
+            navigationTitleMenuButton.setTitle(title, for: .normal)
         }
-        titleMenuButton.menu = makeTitleMenu()
+
+        let titleMenu = makeTitleMenu()
+        navigationTitleMenuButton.menu = titleMenu
 
         updateVolumeButtonAppearance()
     }
@@ -441,7 +463,8 @@ final class TerminalWorkspaceViewController: UIViewController {
     }
 
     private func updateVolumeButtonAppearance() {
-        volumeButton.setImage(UIImage(systemName: useVolumeButtons ? "plusminus.circle.fill" : "plusminus.circle"), for: .normal)
+        let image = UIImage(systemName: useVolumeButtons ? "plusminus.circle.fill" : "plusminus.circle")
+        volumeBarButtonItem.image = image
     }
 
     // MARK: Layout
@@ -454,14 +477,6 @@ final class TerminalWorkspaceViewController: UIViewController {
             bottom: insets.bottom + TerminalUIMetrics.pageInset,
             right: TerminalUIMetrics.pageInset
         ))
-
-        let topBarSplit = layoutRect.split(
-            at: TerminalUIMetrics.topBarHeight + TerminalUIMetrics.topBarBottomSpacing,
-            from: .minYEdge
-        )
-        topBarView.frame = topBarSplit.slice.split(at: TerminalUIMetrics.topBarHeight, from: .minYEdge).slice
-        layoutTopBar(in: topBarView.bounds)
-        layoutRect = topBarSplit.remainder
 
         if !messageLabel.isHidden {
             let messageHeight = UIFloat(32)
@@ -482,48 +497,21 @@ final class TerminalWorkspaceViewController: UIViewController {
             let barHeight = TerminalUIMetrics.keyboardBarHeight + TerminalUIMetrics.keyboardBarBottomInset
             let split = layoutRect.split(at: barHeight, from: .maxYEdge)
             keyboardBarView.frame = split.slice
-            keyboardScrollView.frame = keyboardBarView.bounds.inset(by: UIEdgeInsets(
+            keyboardControlsContainer.frame = keyboardBarView.bounds.inset(by: UIEdgeInsets(
                 top: UIFloat(4),
                 left: UIFloat(6),
                 bottom: UIFloat(4),
                 right: UIFloat(6)
             ))
-            layoutKeyboardButtons()
+            keyboardStackView.frame = keyboardControlsContainer.bounds
             layoutRect = split.remainder
         } else {
             keyboardBarView.frame = .zero
+            keyboardControlsContainer.frame = .zero
         }
 
         paneContainerView.frame = layoutRect
         layoutPaneControllers(in: paneContainerView.bounds)
-    }
-
-    private func layoutTopBar(in bounds: CGRect) {
-        var rect = bounds
-
-        let leadingSplit = rect.split(at: TerminalUIMetrics.topBarButtonSize, from: .minXEdge)
-        addPaneButton.frame = leadingSplit.slice
-        rect = leadingSplit.remainder
-
-        let leadingGapSplit = rect.split(at: TerminalUIMetrics.topBarGap, from: .minXEdge)
-        rect = leadingGapSplit.remainder
-
-        let trailingPackWidth = (TerminalUIMetrics.topBarButtonSize * UIFloat(2)) + TerminalUIMetrics.topBarGap
-        let trailingSplit = rect.split(at: trailingPackWidth, from: .maxXEdge)
-        rect = trailingSplit.remainder
-
-        var trailingRect = trailingSplit.slice
-        let snippetSplit = trailingRect.split(at: TerminalUIMetrics.topBarButtonSize, from: .minXEdge)
-        snippetButton.frame = snippetSplit.slice
-        trailingRect = snippetSplit.remainder
-
-        let trailingGapSplit = trailingRect.split(at: TerminalUIMetrics.topBarGap, from: .minXEdge)
-        trailingRect = trailingGapSplit.remainder
-
-        let volumeSplit = trailingRect.split(at: TerminalUIMetrics.topBarButtonSize, from: .minXEdge)
-        volumeButton.frame = volumeSplit.slice
-
-        titleMenuButton.frame = rect
     }
 
     private func layoutPaneControllers(in bounds: CGRect) {
@@ -554,21 +542,6 @@ final class TerminalWorkspaceViewController: UIViewController {
         if let first = visibleControllers.first {
             first.view.frame = bounds
         }
-    }
-
-    private func layoutKeyboardButtons() {
-        var cursorX = UIFloat(0)
-        let height = keyboardScrollView.bounds.height
-
-        for button in keyboardButtons {
-            let fit = button.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: height))
-            let width = max(UIFloat(36), fit.width)
-            button.frame = CGRect(origin: CGPoint(x: cursorX, y: UIFloat(0)), size: CGSize(width: width, height: height))
-            cursorX += width + UIFloat(6)
-        }
-
-        let contentWidth = max(keyboardScrollView.bounds.width, cursorX)
-        keyboardScrollView.contentSize = CGSize(width: contentWidth, height: height)
     }
 
     private var isRegularLayout: Bool {
@@ -741,10 +714,6 @@ final class TerminalWorkspaceViewController: UIViewController {
             controller.sendEscape()
         case .tab:
             controller.sendTabKey()
-        case .backspace:
-            controller.sendBackspace()
-        case .enter:
-            controller.sendEnter()
         case .left:
             controller.sendArrowLeft()
         case .right:
@@ -804,8 +773,6 @@ private enum TerminalKeyboardControl: Int, CaseIterable {
     case control
     case escape
     case tab
-    case backspace
-    case enter
     case left
     case right
     case up
@@ -819,10 +786,6 @@ private enum TerminalKeyboardControl: Int, CaseIterable {
             return "Esc"
         case .tab:
             return "Tab"
-        case .backspace:
-            return "⌫"
-        case .enter:
-            return "↩"
         case .left:
             return "←"
         case .right:
@@ -843,7 +806,7 @@ protocol TerminalPaneViewControllerDelegate: AnyObject {
 }
 
 @MainActor
-final class TerminalPaneViewController: UIViewController {
+final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDelegate {
     weak var delegate: TerminalPaneViewControllerDelegate?
 
     private let paneID: UUID
@@ -884,6 +847,7 @@ final class TerminalPaneViewController: UIViewController {
         refreshFromWorkspace()
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(didTapPane))
+        tap.delegate = self
         tap.cancelsTouchesInView = false
         tap.delaysTouchesBegan = false
         tap.delaysTouchesEnded = false
@@ -1089,10 +1053,10 @@ final class TerminalPaneViewController: UIViewController {
         }
 
         let picker = TerminalServerPickerViewController()
-        picker.onCredentialSelected = { [weak self] credential in
+        picker.onCredentialSelected = { [weak self] credentialKey in
             guard let self else { return }
             self.workspace.focusPane(paneID: self.paneID)
-            self.workspace.openTab(credentialKey: credential.key, inFocusedPane: true)
+            self.workspace.openTab(credentialKey: credentialKey, inFocusedPane: true)
         }
         addChild(picker)
         contentView.addSubview(picker.view)
@@ -1235,13 +1199,24 @@ final class TerminalPaneViewController: UIViewController {
         guard let active = workspace.activeTab(in: paneID) else { return }
         workspace.closeTab(tabID: active.id)
     }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        var candidate = touch.view
+        while let current = candidate {
+            if current is UIControl || current is UICollectionView || current is UICollectionViewCell {
+                return false
+            }
+            candidate = current.superview
+        }
+        return true
+    }
 }
 
 // MARK: - Server Picker
 
 @MainActor
 final class TerminalServerPickerViewController: UIViewController {
-    var onCredentialSelected: ((Credential) -> Void)?
+    var onCredentialSelected: ((String) -> Void)?
 
     private enum Section: Int, CaseIterable {
         case main
@@ -1294,6 +1269,7 @@ final class TerminalServerPickerViewController: UIViewController {
 
         collectionView.backgroundColor = .clear
         collectionView.alwaysBounceVertical = true
+        collectionView.allowsSelection = true
         collectionView.register(TerminalServerCell.self, forCellWithReuseIdentifier: TerminalServerCell.reuseID)
         collectionView.delegate = self
         view.addSubview(collectionView)
@@ -1374,8 +1350,7 @@ extension TerminalServerPickerViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         guard indexPath.item < items.count else { return }
         let item = items[indexPath.item]
-        guard let credential = keychain().getCredential(for: item.key) else { return }
-        onCredentialSelected?(credential)
+        onCredentialSelected?(item.key)
     }
 }
 
@@ -1392,6 +1367,7 @@ final class TerminalSnippetPickerViewController: UIViewController {
 
     private let collectionView: UICollectionView
     private lazy var dataSource = makeDataSource()
+    private let emptyStateLabel = UILabel()
 
     private var snippets: [Snippet] = []
 
@@ -1425,6 +1401,12 @@ final class TerminalSnippetPickerViewController: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         collectionView.frame = view.bounds
+        emptyStateLabel.frame = view.bounds.inset(by: UIEdgeInsets(
+            top: UIFloat(40),
+            left: UIFloat(24),
+            bottom: UIFloat(40),
+            right: UIFloat(24)
+        ))
     }
 
     // MARK: Setup
@@ -1450,12 +1432,21 @@ final class TerminalSnippetPickerViewController: UIViewController {
         collectionView.delegate = self
         collectionView.register(TerminalSnippetCell.self, forCellWithReuseIdentifier: TerminalSnippetCell.reuseID)
         view.addSubview(collectionView)
+
+        emptyStateLabel.text = "No snippets yet.\nOpen Manage to add one or generate with AI."
+        emptyStateLabel.textAlignment = .center
+        emptyStateLabel.numberOfLines = 0
+        emptyStateLabel.textColor = UIColor.secondaryLabel
+        emptyStateLabel.font = UIFont.systemFont(ofSize: UIFloat(15), weight: .regular)
+        emptyStateLabel.isHidden = true
+        view.addSubview(emptyStateLabel)
     }
 
     // MARK: Data
 
     private func loadSnippets() {
         Task {
+            await Snippet.ensureDefaults(in: database)
             let rows = (try? await Snippet.read(
                 from: database,
                 matching: .all,
@@ -1469,6 +1460,7 @@ final class TerminalSnippetPickerViewController: UIViewController {
                 snapshot.appendSections([.main])
                 snapshot.appendItems(rows.map(\.id), toSection: .main)
                 self.dataSource.apply(snapshot, animatingDifferences: true)
+                self.emptyStateLabel.isHidden = !rows.isEmpty
             }
         }
     }
@@ -1558,6 +1550,12 @@ final class TerminalManageSnippetsViewController: UIViewController {
     private let database: Blackbird.Database
     private let collectionView: UICollectionView
     private lazy var dataSource = makeDataSource()
+    private let emptyStateContainer = UIStackView()
+    private let emptyStateTitleLabel = UILabel()
+    private let emptyStateSubtitleLabel = UILabel()
+    private let addSnippetButton = UIButton(type: .system)
+    private let addDefaultsButton = UIButton(type: .system)
+    private let askAIButton = UIButton(type: .system)
 
     private var snippets: [Snippet] = []
     private let relativeFormatter = RelativeDateTimeFormatter()
@@ -1584,6 +1582,12 @@ final class TerminalManageSnippetsViewController: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         collectionView.frame = view.bounds
+        emptyStateContainer.frame = view.bounds.inset(by: UIEdgeInsets(
+            top: UIFloat(40),
+            left: UIFloat(24),
+            bottom: UIFloat(40),
+            right: UIFloat(24)
+        ))
     }
 
     // MARK: Setup
@@ -1592,23 +1596,59 @@ final class TerminalManageSnippetsViewController: UIViewController {
         view.backgroundColor = UIColor.systemBackground
 
         navigationItem.title = "Snippets"
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            image: UIImage(systemName: "plus"),
-            style: .plain,
-            target: self,
-            action: #selector(didTapAdd)
-        )
+        navigationItem.rightBarButtonItems = [
+            UIBarButtonItem(
+                image: UIImage(systemName: "plus"),
+                style: .plain,
+                target: self,
+                action: #selector(didTapAdd)
+            ),
+            UIBarButtonItem(
+                image: UIImage(systemName: "sparkles"),
+                style: .plain,
+                target: self,
+                action: #selector(didTapAskAI)
+            )
+        ]
 
         collectionView.backgroundColor = .clear
         collectionView.delegate = self
         collectionView.register(TerminalSnippetManageCell.self, forCellWithReuseIdentifier: TerminalSnippetManageCell.reuseID)
         view.addSubview(collectionView)
+
+        emptyStateContainer.axis = .vertical
+        emptyStateContainer.alignment = .center
+        emptyStateContainer.distribution = .fill
+        emptyStateContainer.spacing = UIFloat(12)
+        emptyStateContainer.isHidden = true
+        view.addSubview(emptyStateContainer)
+
+        emptyStateTitleLabel.text = "No snippets yet"
+        emptyStateTitleLabel.font = UIFont.systemFont(ofSize: UIFloat(22), weight: .semibold)
+        emptyStateTitleLabel.textAlignment = .center
+        emptyStateTitleLabel.textColor = UIColor.label
+        emptyStateContainer.addArrangedSubview(emptyStateTitleLabel)
+
+        emptyStateSubtitleLabel.text = "Add your own snippet, insert defaults, or let AI draft one from a task."
+        emptyStateSubtitleLabel.font = UIFont.systemFont(ofSize: UIFloat(15), weight: .regular)
+        emptyStateSubtitleLabel.textAlignment = .center
+        emptyStateSubtitleLabel.textColor = UIColor.secondaryLabel
+        emptyStateSubtitleLabel.numberOfLines = 0
+        emptyStateContainer.addArrangedSubview(emptyStateSubtitleLabel)
+
+        configureEmptyStateButton(addSnippetButton, title: "Add Snippet", filled: true, action: #selector(didTapAdd))
+        configureEmptyStateButton(addDefaultsButton, title: "Insert Defaults", filled: false, action: #selector(didTapInsertDefaults))
+        configureEmptyStateButton(askAIButton, title: "Ask AI", filled: false, action: #selector(didTapAskAI))
+        emptyStateContainer.addArrangedSubview(addSnippetButton)
+        emptyStateContainer.addArrangedSubview(addDefaultsButton)
+        emptyStateContainer.addArrangedSubview(askAIButton)
     }
 
     // MARK: Data
 
     private func loadSnippets() {
         Task {
+            await Snippet.ensureDefaults(in: database)
             let rows = (try? await Snippet.read(
                 from: database,
                 matching: .all,
@@ -1622,8 +1662,41 @@ final class TerminalManageSnippetsViewController: UIViewController {
                 snapshot.appendSections([.main])
                 snapshot.appendItems(rows.map(\.id), toSection: .main)
                 self.dataSource.apply(snapshot, animatingDifferences: true)
+                self.emptyStateContainer.isHidden = !rows.isEmpty
             }
         }
+    }
+
+    private func configureEmptyStateButton(_ button: UIButton, title: String, filled: Bool, action: Selector) {
+        if #available(iOS 15.0, *) {
+            var config = filled ? UIButton.Configuration.filled() : UIButton.Configuration.gray()
+            config.title = title
+            config.baseForegroundColor = filled ? .white : .label
+            config.baseBackgroundColor = filled ? UIColor.tintColor : UIColor.tertiarySystemFill
+            config.cornerStyle = .medium
+            config.contentInsets = NSDirectionalEdgeInsets(
+                top: UIFloat(10),
+                leading: UIFloat(14),
+                bottom: UIFloat(10),
+                trailing: UIFloat(14)
+            )
+            button.configuration = config
+        } else {
+            button.setTitle(title, for: .normal)
+            button.titleLabel?.font = UIFont.systemFont(ofSize: UIFloat(15), weight: .semibold)
+            button.backgroundColor = filled ? UIColor.tintColor : UIColor.tertiarySystemFill
+            button.setTitleColor(filled ? .white : .label, for: .normal)
+            button.contentEdgeInsets = UIEdgeInsets(
+                top: UIFloat(10),
+                left: UIFloat(14),
+                bottom: UIFloat(10),
+                right: UIFloat(14)
+            )
+        }
+
+        button.layer.cornerRadius = UIFloat(10)
+        button.layer.cornerCurve = .continuous
+        button.addTarget(self, action: action, for: .touchUpInside)
     }
 
     private func makeDataSource() -> UICollectionViewDiffableDataSource<Section, String> {
@@ -1687,6 +1760,102 @@ final class TerminalManageSnippetsViewController: UIViewController {
     @objc
     private func didTapAdd() {
         presentEditor(for: nil)
+    }
+
+    @objc
+    private func didTapInsertDefaults() {
+        Task {
+            await Snippet.addDefaults(in: database)
+            await MainActor.run {
+                self.loadSnippets()
+            }
+        }
+    }
+
+    @objc
+    private func didTapAskAI() {
+        let alert = UIAlertController(
+            title: "Generate Snippet with AI",
+            message: "Describe what command you want. Example: \"Show Docker containers consuming the most memory\".",
+            preferredStyle: .alert
+        )
+        alert.addTextField { textField in
+            textField.placeholder = "Describe your goal"
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Generate", style: .default, handler: { [weak self] _ in
+            guard let self else { return }
+            let prompt = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !prompt.isEmpty else { return }
+            self.generateSnippetWithAI(from: prompt)
+        }))
+        present(alert, animated: true)
+    }
+
+    private func generateSnippetWithAI(from prompt: String) {
+        Task {
+            let output = await LLM.generate(
+                prompt: prompt,
+                systemPrompt: Self.snippetGenerationSystemPrompt
+            ).output
+
+            do {
+                let snippet = try Self.parseSnippetResponse(output)
+                try await snippet.write(to: database)
+                await MainActor.run {
+                    self.loadSnippets()
+                }
+            } catch {
+                await MainActor.run {
+                    self.showErrorAlert(message: "AI returned an invalid snippet. Please try a more specific prompt.")
+                }
+            }
+        }
+    }
+
+    private func showErrorAlert(message: String) {
+        let alert = UIAlertController(title: "Couldn’t Generate Snippet", message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+
+    private static let snippetGenerationSystemPrompt = #"""
+You generate reusable shell snippets for a terminal app.
+
+Always return only JSON in this exact format:
+{
+  "type": "response",
+  "content": {
+    "command": "shell command",
+    "comment": "short explanation"
+  }
+}
+
+Rules:
+- command must be a single command line.
+- Use placeholders like <container> when user-specific values are unknown.
+- comment must be concise (under 90 characters).
+- Do not include markdown fences.
+"""#
+
+    private static func parseSnippetResponse(_ raw: String) throws -> Snippet {
+        struct Response: Decodable {
+            struct Content: Decodable {
+                let command: String
+                let comment: String
+            }
+            let type: String
+            let content: Content
+        }
+
+        let cleaned = LLM.cleanLLMOutput(raw)
+        let response = try JSONDecoder().decode(Response.self, from: Data(cleaned.utf8))
+        guard response.type == "response" else { throw NSError(domain: "SnippetAI", code: 1) }
+        let command = response.content.command.trimmingCharacters(in: .whitespacesAndNewlines)
+        let comment = response.content.comment.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !command.isEmpty else { throw NSError(domain: "SnippetAI", code: 2) }
+
+        return Snippet(command: command, comment: comment, lastUse: .now)
     }
 
     private func presentEditor(for snippet: Snippet?) {

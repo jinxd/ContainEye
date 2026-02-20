@@ -103,7 +103,7 @@ struct EditServerView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
+                    Button(role: .cancel) {
                         dismiss()
                     }
                 }
@@ -128,7 +128,7 @@ struct EditServerView: View {
             }
         }
         .alert("Delete Server", isPresented: $showingDeleteConfirmation) {
-            Button("Cancel", role: .cancel) { }
+            Button(role: .cancel) { }
             Button("Delete", role: .destructive) {
                 deleteServer()
             }

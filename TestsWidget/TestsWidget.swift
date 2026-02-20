@@ -113,7 +113,8 @@ struct WidgetTestSummaryView: View {
 
             if let lastRun = test.lastRun {
                 VStack(alignment: .center) {
-                    (Text(lastRun, style: .relative) + Text(" ago")).font(.caption)
+                    Text("\(lastRun, style: .relative) ago")
+                        .font(.caption)
                         .multilineTextAlignment(.center)
                         .monospacedDigit()
                 }

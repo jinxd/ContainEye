@@ -7,7 +7,6 @@
 
 import AppIntents
 import UserNotifications
-import SwiftUI
 import WidgetKit
 
 struct TestServers: AppIntents.AppIntent {
@@ -27,7 +26,7 @@ struct TestServers: AppIntents.AppIntent {
 
     init(){}
 
-    func perform() async throws -> some IntentResult & ReturnsValue<[ServerTest.ServerTestAppEntitiy]> & ShowsSnippetView {
+    func perform() async throws -> some IntentResult & ReturnsValue<[ServerTest.ServerTestAppEntitiy]> & ProvidesDialog {
         Logger.initTelemetry()
         let db = SharedDatabase.db
         let tests = tests.map { $0.getServerTest() }
@@ -49,10 +48,14 @@ struct TestServers: AppIntents.AppIntent {
 
             WidgetCenter.shared.reloadAllTimelines()
 
-        let retryIntent = TestServers()
-        retryIntent.tests = finishedTests.map { $0.entity }
+        let failedCount = finishedTests.filter { $0.status == .failed }.count
+        let dialog: IntentDialog = if failedCount == 0 {
+            IntentDialog("Finished \(finishedTests.count) tests successfully.")
+        } else {
+            IntentDialog("Finished \(finishedTests.count) tests. \(failedCount) failed.")
+        }
 
-        return .result(value: retryIntent.tests, view: IntentReturnView(tests: finishedTests, retryIntent: finishedTests.contains(where: {$0.status != .success}) ? retryIntent : nil))
+        return .result(value: finishedTests.map(\.entity), dialog: dialog)
     }
     private func sendPushNotification(title: String, output: String) async {
         let content = UNMutableNotificationContent()

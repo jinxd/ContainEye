@@ -14,8 +14,6 @@
 		384638BB2D40310800AA796B /* KeychainAccess in Frameworks */ = {isa = PBXBuildFile; productRef = 384638BA2D40310800AA796B /* KeychainAccess */; };
 		384638BE2D40312100AA796B /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = 384638BD2D40312100AA796B /* Citadel */; };
 		389343C12D6474A00052277F /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 389097432D61F352001624D6 /* WidgetKit.framework */; };
-		389343C22D6474A00052277F /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 389097452D61F352001624D6 /* SwiftUI.framework */; };
-		389343CF2D6474A10052277F /* TestsWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 389343C02D6474A00052277F /* TestsWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		389343D82D6475360052277F /* ButtonKit in Frameworks */ = {isa = PBXBuildFile; productRef = 389343D72D6475360052277F /* ButtonKit */; };
 		389343E72D6476EF0052277F /* KeychainAccess in Frameworks */ = {isa = PBXBuildFile; productRef = 389343E62D6476EF0052277F /* KeychainAccess */; };
 		389343E92D6476EF0052277F /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = 389343E82D6476EF0052277F /* Citadel */; };
@@ -39,13 +37,6 @@
 			remoteGlobalIDString = 383319372D356EC0006CDAEA;
 			remoteInfo = ContainEye;
 		};
-		389343CD2D6474A10052277F /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 383319302D356EC0006CDAEA /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 389343BF2D6474A00052277F;
-			remoteInfo = TestsWidgetExtension;
-		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -59,17 +50,6 @@
 			name = "Embed ExtensionKit Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		389097572D61F353001624D6 /* Embed Foundation Extensions */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
-			files = (
-				389343CF2D6474A10052277F /* TestsWidgetExtension.appex in Embed Foundation Extensions */,
-			);
-			name = "Embed Foundation Extensions";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -77,7 +57,6 @@
 		383319492D356EC3006CDAEA /* ContainEyeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ContainEyeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		383319532D356EC3006CDAEA /* ContainEyeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ContainEyeUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		389097432D61F352001624D6 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
-		389097452D61F352001624D6 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		389343C02D6474A00052277F /* TestsWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TestsWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -92,7 +71,6 @@
 		389343D52D6474ED0052277F /* Exceptions for "ContainEye" folder in "TestsWidgetExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				AppIntents/IntentReturnView.swift,
 				AppIntents/TestServer.swift,
 				AppIntents/TestServers.swift,
 				Data/Container.swift,
@@ -107,7 +85,6 @@
 				Data/SharedDatabase.swift,
 				Data/SSHClientActor.swift,
 				Shared/Keychain.swift,
-				Shared/RoundedProgressRectangle.swift,
 				"Shared/SSHClient+execute.swift",
 			);
 			target = 389343BF2D6474A00052277F /* TestsWidgetExtension */;
@@ -188,7 +165,6 @@
 				389343E72D6476EF0052277F /* KeychainAccess in Frameworks */,
 				389343E92D6476EF0052277F /* Citadel in Frameworks */,
 				389343D82D6475360052277F /* ButtonKit in Frameworks */,
-				389343C22D6474A00052277F /* SwiftUI.framework in Frameworks */,
 				389343C12D6474A00052277F /* WidgetKit.framework in Frameworks */,
 				380482212DA15B2800193CF5 /* TelemetryDeck in Frameworks */,
 			);
@@ -201,7 +177,6 @@
 			isa = PBXGroup;
 			children = (
 				389097432D61F352001624D6 /* WidgetKit.framework */,
-				389097452D61F352001624D6 /* SwiftUI.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -240,12 +215,10 @@
 				383319352D356EC0006CDAEA /* Frameworks */,
 				383319362D356EC0006CDAEA /* Resources */,
 				381E17192D4D3E6D008BFDCD /* Embed ExtensionKit Extensions */,
-				389097572D61F353001624D6 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				389343CE2D6474A10052277F /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				3833193A2D356EC0006CDAEA /* ContainEye */,
@@ -467,11 +440,6 @@
 			target = 383319372D356EC0006CDAEA /* ContainEye */;
 			targetProxy = 383319542D356EC3006CDAEA /* PBXContainerItemProxy */;
 		};
-		389343CE2D6474A10052277F /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 389343BF2D6474A00052277F /* TestsWidgetExtension */;
-			targetProxy = 389343CD2D6474A10052277F /* PBXContainerItemProxy */;
-		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -607,8 +575,9 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ContainEye/Info.plist;
-				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
-				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = NO;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = NO;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=macosx*]" = NO;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
@@ -626,11 +595,12 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator xros xrsimulator";
-				SUPPORTS_MACCATALYST = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTS_MACCATALYST = YES;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 6.0;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				XROS_DEPLOYMENT_TARGET = 2.2;
 			};
@@ -650,8 +620,9 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ContainEye/Info.plist;
-				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
-				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = NO;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = NO;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=macosx*]" = NO;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
@@ -669,11 +640,12 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator xros xrsimulator";
-				SUPPORTS_MACCATALYST = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTS_MACCATALYST = YES;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 6.0;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				XROS_DEPLOYMENT_TARGET = 2.2;
 			};

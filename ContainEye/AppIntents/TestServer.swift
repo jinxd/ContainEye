@@ -6,7 +6,6 @@
 //
 
 import AppIntents
-import SwiftUI
 
 
 struct TestServer: AppIntents.AppIntent {
@@ -36,4 +35,3 @@ struct TestServer: AppIntents.AppIntent {
         return .result(value: nil, dialog: intentDialog)
     }
 }
-

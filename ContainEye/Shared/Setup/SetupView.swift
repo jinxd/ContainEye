@@ -33,7 +33,7 @@ struct SetupView: View {
         .animation(.spring(), value: setupScreen)
         .toolbar {
             if setupScreen > 0 {
-                Button("Cancel") {
+                Button(role: .cancel) {
                     UserDefaults.standard.set(setupScreen == 1 ? ContentView.Screen.serverList.rawValue : ContentView.Screen.testList.rawValue, forKey: "screen")
                 }
             }
@@ -44,7 +44,6 @@ struct SetupView: View {
 #Preview {
     SetupView()
 }
-
 
 
 

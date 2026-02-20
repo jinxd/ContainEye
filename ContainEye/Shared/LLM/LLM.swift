@@ -142,10 +142,29 @@ You should then execute a command to check how many there are currently running 
             .stringByReplacingMatches(in: input, options: [], range: NSRange(location: 0, length: input.utf16.count), withTemplate: "")
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? input
 
-        return cleanedThinkOutput
+        let cleaned = cleanedThinkOutput
             .replacingOccurrences(of: "```json", with: "")
             .replacingOccurrences(of: "``` json", with: "")
             .replacingOccurrences(of: "```", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Some models return a language label prefix like: "json { ... }".
+        let prefixPattern = #"^\s*json\s*(\{|\[)"#
+        if let regex = try? NSRegularExpression(pattern: prefixPattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: cleaned, options: [], range: NSRange(location: 0, length: cleaned.utf16.count)),
+           match.numberOfRanges > 1,
+           let bracketRange = Range(match.range(at: 1), in: cleaned) {
+            return String(cleaned[bracketRange.lowerBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return cleaned
+    }
+
+    static func cleanLLMOutputPreservingMarkdown(_ input: String) -> String {
+        let thinkPattern = #"<think>.*?</think>"#
+        return (try? NSRegularExpression(pattern: thinkPattern, options: .dotMatchesLineSeparators))?
+            .stringByReplacingMatches(in: input, options: [], range: NSRange(location: 0, length: input.utf16.count), withTemplate: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? input.trimmingCharacters(in: .whitespacesAndNewlines)
     }
     struct Output: Decodable {
         let type: String

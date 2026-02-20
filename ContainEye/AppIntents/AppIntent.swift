@@ -8,7 +8,6 @@
 import Blackbird
 import AppIntents
 import UserNotifications
-import SwiftUI
 
 struct AppIntent: AppShortcutsProvider {
 
@@ -49,6 +48,5 @@ struct AppIntent: AppShortcutsProvider {
         )
     }
 }
-
 
 

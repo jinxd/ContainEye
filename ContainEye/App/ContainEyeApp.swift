@@ -32,7 +32,7 @@ struct ContainEyeApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .confirmator()
+                .confirmable()
                 .environment(\.blackbirdDatabase, db)
 #if !os(macOS)
                 .onAppear{

@@ -66,7 +66,7 @@ enum LaunchTracker {
 
         // Request review using StoreKit
         if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-            SKStoreReviewController.requestReview(in: scene)
+            AppStore.requestReview(in: scene)
         }
     }
 

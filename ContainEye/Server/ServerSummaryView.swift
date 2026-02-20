@@ -41,9 +41,15 @@ struct ServerSummaryView: View {
                         .redacted(reason: server.totalDiskSpace == nil ? .placeholder : [])
                         .frame(maxWidth: .infinity)
 
-                    (Text("\(Image(systemName: "power")) ") + (server.uptime == nil ? Text("loading") : Text(server.uptime!, style: .relative)))
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity)
+                    Group {
+                        if let uptime = server.uptime {
+                            Text("\(Image(systemName: "power")) \(uptime, style: .relative)")
+                        } else {
+                            Text("\(Image(systemName: "power")) loading")
+                        }
+                    }
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity)
                 }
                 .lineLimit(1)
                 .padding(.vertical)

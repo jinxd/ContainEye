@@ -50,7 +50,7 @@ struct ServerDetailView: View {
                 }
             }
             .alert("Clear Cached Containers", isPresented: $showingClearContainersAlert) {
-                Button("Cancel", role: .cancel) { }
+                Button(role: .cancel) { }
                 Button("Clear", role: .destructive) {
                     Task {
                         try? await server.clearCachedContainers()

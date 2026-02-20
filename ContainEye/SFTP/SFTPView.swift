@@ -533,7 +533,7 @@ struct SFTPView: View {
         }
         .alert("Navigate to Path", isPresented: $showingPathInput) {
             TextField("Enter path", text: $pathInput)
-            Button("Cancel", role: .cancel) { }
+            Button(role: .cancel) { }
             Button("Go") {
                 Task {
                     await navigateToPath(pathInput)

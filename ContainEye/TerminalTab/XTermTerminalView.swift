@@ -4,23 +4,6 @@ import SwiftUI
 import UIKit
 import WebKit
 
-struct XTermTerminalView: UIViewRepresentable {
-    let controller: XTermSessionController
-
-    func makeUIView(context: Context) -> XTermWebHostView {
-        controller.makeOrReuseHostView()
-    }
-
-    func updateUIView(_ uiView: XTermWebHostView, context: Context) {
-        uiView.bind(controller: controller)
-    }
-
-    static func dismantleUIView(_ uiView: XTermWebHostView, coordinator: ()) {
-        // Keep the host alive while the session controller is alive so switching tabs
-        // does not reset the visible terminal state.
-    }
-}
-
 @MainActor
 final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditMenuInteractionDelegate {
     private let webView: WKWebView
@@ -199,10 +182,7 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
         assistant.trailingBarButtonGroups = []
 
         for subview in webView.scrollView.subviews {
-            guard let responder = subview as? UIResponder else {
-                continue
-            }
-            let item = responder.inputAssistantItem
+            let item = subview.inputAssistantItem
             item.leadingBarButtonGroups = []
             item.trailingBarButtonGroups = []
             installNoAccessoryViewClassIfNeeded(on: subview)
@@ -327,28 +307,18 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
     }
 
     private func presentSelectionMenu(at point: CGPoint) {
-        guard hasActiveSelection else {
+        guard hasActiveSelection, let editMenuInteraction else {
             return
         }
 
         becomeFirstResponder()
         didPresentSelectionMenu = true
-        if #available(iOS 16.0, *), let editMenuInteraction {
-            let config = UIEditMenuConfiguration(identifier: nil, sourcePoint: point)
-            editMenuInteraction.presentEditMenu(with: config)
-            return
-        }
-
-        let rect = CGRect(x: point.x, y: point.y, width: 2, height: 2)
-        UIMenuController.shared.showMenu(from: self, rect: rect)
+        let config = UIEditMenuConfiguration(identifier: nil, sourcePoint: point)
+        editMenuInteraction.presentEditMenu(with: config)
     }
 
     private func dismissSelectionMenu() {
-        if #available(iOS 16.0, *), let editMenuInteraction {
-            editMenuInteraction.dismissMenu()
-        } else {
-            UIMenuController.shared.hideMenu()
-        }
+        editMenuInteraction?.dismissMenu()
     }
 
     private func showSelectionHint(_ text: String) {
@@ -398,12 +368,22 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
         suggestedActions: [UIMenuElement]
     ) -> UIMenu? {
         var actions = suggestedActions
+        var insertionIndex = 0
         if (hasActiveSelection || didPresentSelectionMenu), !containsCopyAction(in: suggestedActions) {
             let copyAction = UIAction(title: "Copy") { [weak self] _ in
                 self?.copy(nil)
             }
-            actions.insert(copyAction, at: 0)
+            actions.insert(copyAction, at: insertionIndex)
+            insertionIndex += 1
         }
+
+        if hasActiveSelection || didPresentSelectionMenu {
+            let askAIAction = UIAction(title: "Ask AI", image: UIImage(systemName: "sparkles")) { [weak self] _ in
+                self?.askAIAboutSelection()
+            }
+            actions.insert(askAIAction, at: insertionIndex)
+        }
+
         return UIMenu(children: actions)
     }
 
@@ -429,6 +409,38 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
         }
         return false
     }
+
+    private func askAIAboutSelection() {
+        guard let selection = effectiveSelectionText?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !selection.isEmpty else {
+            return
+        }
+
+        let sheet = UIHostingController(
+            rootView: TerminalSelectionAIView(selectedText: String(selection.prefix(8000)))
+        )
+        sheet.modalPresentationStyle = .pageSheet
+        if let presentation = sheet.sheetPresentationController {
+            presentation.detents = [.medium(), .large()]
+        }
+
+        findTopViewController()?.present(sheet, animated: true)
+    }
+
+    private func findTopViewController() -> UIViewController? {
+        var responder: UIResponder? = self
+        while let next = responder?.next {
+            if let viewController = next as? UIViewController {
+                var top = viewController
+                while let presented = top.presentedViewController {
+                    top = presented
+                }
+                return top
+            }
+            responder = next
+        }
+        return nil
+    }
 }
 
 final class XTermBridgeScriptHandler: NSObject, WKScriptMessageHandler {
@@ -443,4 +455,183 @@ final class XTermBridgeScriptHandler: NSObject, WKScriptMessageHandler {
 
 private extension UIView {
     @objc var noInputAccessoryView: UIView? { nil }
+}
+
+private struct TerminalSelectionAIView: View {
+    struct AIResponse: Decodable {
+        struct Snippet: Decodable, Identifiable {
+            let title: String?
+            let language: String
+            let code: String
+            var id: String { "\(title ?? "")|\(language)|\(code)" }
+        }
+
+        let summary: [String]
+        let whatItMeans: [String]
+        let nextSteps: [String]
+        let codeSnippets: [Snippet]
+    }
+
+    let selectedText: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var response: AIResponse?
+    @State private var fallbackText: String?
+    @State private var errorMessage: String?
+    @State private var isLoading = true
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: UIFloat(14)) {
+                    Group {
+                        Text("Selected Text")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(selectedText)
+                            .font(.system(.subheadline, design: .monospaced))
+                            .textSelection(.enabled)
+                            .padding(UIFloat(12))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: UIFloat(10)))
+                    }
+
+                    if isLoading {
+                        HStack(spacing: UIFloat(10)) {
+                            ProgressView()
+                            Text("Asking AI...")
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.top, UIFloat(8))
+                    } else if let response {
+                        bulletsSection("Summary", items: response.summary)
+                        bulletsSection("What It Means", items: response.whatItMeans)
+                        bulletsSection("What To Do Next", items: response.nextSteps)
+
+                        if !response.codeSnippets.isEmpty {
+                            Text("Code Snippets")
+                                .font(.headline)
+                                .padding(.top, UIFloat(8))
+
+                            ForEach(response.codeSnippets) { snippet in
+                                VStack(alignment: .leading, spacing: UIFloat(8)) {
+                                    HStack {
+                                        Text(snippet.title?.isEmpty == false ? snippet.title! : snippet.language.uppercased())
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Spacer()
+                                        Button("Copy") {
+                                            UIPasteboard.general.string = snippet.code
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.small)
+                                    }
+
+                                    ScrollView(.horizontal) {
+                                        Text(snippet.code)
+                                            .font(.system(.subheadline, design: .monospaced))
+                                            .textSelection(.enabled)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                    .padding(UIFloat(10))
+                                    .background(.quaternary, in: RoundedRectangle(cornerRadius: UIFloat(10)))
+                                }
+                            }
+                        }
+                    } else if let fallbackText {
+                        Text("AI Explanation")
+                            .font(.headline)
+                        Text(fallbackText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+                .padding(UIFloat(16))
+            }
+            .navigationTitle("Ask AI")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(role: .cancel) {
+                        dismiss()
+                    }
+                }
+            }
+            .task {
+                await generateExplanation()
+            }
+        }
+    }
+
+    private func generateExplanation() async {
+        let prompt = """
+Explain the selected terminal text and respond ONLY with JSON.
+Use this exact schema:
+{
+  "summary": ["..."],
+  "whatItMeans": ["..."],
+  "nextSteps": ["..."],
+  "codeSnippets": [
+    {
+      "title": "Optional short title",
+      "language": "bash",
+      "code": "command here"
+    }
+  ]
+}
+
+Rules:
+- Do not include markdown fences.
+- Do not include extra keys.
+- Keep each bullet concise.
+- Include at least one snippet in codeSnippets when a command is useful.
+
+Selected text:
+```
+\(selectedText)
+```
+"""
+
+        let output = await LLM.generate(
+            prompt: prompt,
+            systemPrompt: "You are a terminal assistant. Return valid JSON only and exactly follow the requested schema."
+        ).output
+
+        let cleaned = LLM.cleanLLMOutput(output).trimmingCharacters(in: .whitespacesAndNewlines)
+        await MainActor.run {
+            if cleaned.isEmpty {
+                errorMessage = "AI returned an empty response."
+            } else {
+                let decoder = JSONDecoder()
+                decoder.keyDecodingStrategy = .convertFromSnakeCase
+                if let data = cleaned.data(using: .utf8),
+                   let decoded = try? decoder.decode(AIResponse.self, from: data) {
+                    response = decoded
+                } else {
+                    fallbackText = cleaned
+                    errorMessage = "AI response did not match the expected JSON format."
+                }
+            }
+            isLoading = false
+        }
+    }
+
+    @ViewBuilder
+    private func bulletsSection(_ title: String, items: [String]) -> some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: UIFloat(6)) {
+                Text(title)
+                    .font(.headline)
+                ForEach(items, id: \.self) { item in
+                    Text("• \(item)")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
 }

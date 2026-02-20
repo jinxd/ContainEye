@@ -33,7 +33,7 @@ struct FileSummaryView: View {
                 Spacer()
                 if !file.isDirectory {
                     VStack(alignment: .trailing){
-                        Text((file.file.attributes.size ?? 0)/1024, format: .number) + Text("KB")
+                        Text("\(((file.file.attributes.size ?? 0) / 1024), format: .number) KB")
                         Text(file.file.attributes.accessModificationTime?.modificationTime ?? .now, format: .dateTime)
                     }
                     .font(.caption)

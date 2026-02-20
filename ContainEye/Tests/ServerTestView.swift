@@ -137,7 +137,7 @@ struct ServerTestView: View {
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .navigationBarLeading) {
-                            Button("Cancel") {
+                            Button(role: .cancel) {
                                 showingAddTest = false
                             }
                         }

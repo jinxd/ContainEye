@@ -163,7 +163,7 @@ struct TestSummaryView: View {
                 Button("Delete Test", systemImage: "trash", role: .destructive) {
                     deleteTest()
                 }
-            } else if let test {
+            } else if test != nil {
                 Button("Add to Active Tests", systemImage: "plus") {
                     addToActiveTests()
                 }

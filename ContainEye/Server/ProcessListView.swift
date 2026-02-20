@@ -155,7 +155,7 @@ struct ProcessListView: View {
                 .navigationTitle("Processes")
                 .navigationBarTitleDisplayMode(.inline)
                 .alert("Kill Process", isPresented: $showingKillConfirmation) {
-                    Button("Cancel", role: .cancel) { }
+                    Button(role: .cancel) { }
                     Button("Kill", role: .destructive) {
                         if let processToKill {
                             Task {

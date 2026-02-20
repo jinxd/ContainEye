@@ -93,6 +93,7 @@ struct ContentView: View {
                     }
                 }
             }
+            .toolbar(screen == .terminal ? .hidden : .automatic, for: .navigationBar)
             .toolbarBackgroundVisibility(screen == .terminal ? .visible : .hidden, for: .navigationBar)
 #if !os(macOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -155,7 +156,6 @@ struct ContentView: View {
                 }
             }
         }
-        .confirmator()
         .environment(\.namespace, namespace)
         .task{
             if !servers.didLoad {try? await Task.sleep(for: .seconds(1))}

@@ -1,5 +1,4 @@
 import Foundation
-import SwiftUI
 
 extension Notification.Name {
     static let terminalOpenRequestsDidChange = Notification.Name("terminal.openRequestsDidChange")

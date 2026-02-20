@@ -5,7 +5,7 @@
 //  Created by Hannes Nagel on 1/29/25.
 //
 
-import SwiftUI
+import Foundation
 @preconcurrency import Citadel
 import NIO
 

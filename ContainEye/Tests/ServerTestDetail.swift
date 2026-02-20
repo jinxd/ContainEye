@@ -87,7 +87,7 @@ struct ServerTestDetail: View {
                     .confirmator()
             }
             .alert("Delete Test", isPresented: $showingDeleteConfirmation) {
-                Button("Cancel", role: .cancel) { }
+                Button(role: .cancel) { }
                 Button("Delete", role: .destructive) {
                     deleteTest(test: test)
                 }
@@ -514,7 +514,7 @@ struct AIAssistantView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
+                    Button(role: .cancel) {
                         dismiss()
                     }
                 }

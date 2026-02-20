@@ -94,6 +94,10 @@ extension View {
     public func confirmator() -> some View {
         overlay(Confirmator())
     }
+
+    public func confirmable() -> some View {
+        confirmator()
+    }
 }
 
 private struct Confirmator: View {
@@ -124,9 +128,9 @@ private struct Confirmator: View {
                     
                     // Main dialog content
                     VStack(spacing: 0) {
-                        if let question = confirmator.question {
+                        if confirmator.question != nil {
                             questionDialog
-                        } else if let command = confirmator.command {
+                        } else if confirmator.command != nil {
                             commandDialog
                         } else if confirmator.errorMessage != nil {
                             errorDialog
@@ -214,7 +218,7 @@ private struct Confirmator: View {
             
             // Actions
             HStack(spacing: 12) {
-                Button("Cancel") {
+                Button(role: .cancel) {
                     cancelDialog()
                 }
                 .buttonStyle(ModernSecondaryButtonStyle())
@@ -354,7 +358,7 @@ private struct Confirmator: View {
             
             // Actions
             HStack(spacing: 12) {
-                Button("Cancel") {
+                Button(role: .cancel) {
                     cancelDialog()
                 }
                 .buttonStyle(ModernSecondaryButtonStyle())

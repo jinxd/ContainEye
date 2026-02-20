@@ -75,14 +75,13 @@ enum Logger {
     }
 }
 
-
 extension View {
     func trackView(_ name: String) -> some View {
         self
-            .onAppear{
+            .onAppear {
                 Logger.startDurationSignal(name)
             }
-            .onDisappear{
+            .onDisappear {
                 Logger.endDurationSignal(name)
             }
             .trackNavigation(path: name)

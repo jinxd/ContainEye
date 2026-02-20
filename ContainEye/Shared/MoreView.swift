@@ -159,7 +159,7 @@ struct MoreView: View {
                     CardRow(icon: "star.bubble", title: "Force Review Prompt", subtitle: "Test review request UI") {
                         Button {
                             Task {
-                                await LaunchTracker.requestReview()
+                                LaunchTracker.requestReview()
                             }
                         } label: {
                             EmptyView()

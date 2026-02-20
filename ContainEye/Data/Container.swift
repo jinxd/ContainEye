@@ -5,7 +5,7 @@
 //  Created by Hannes Nagel on 1/13/25.
 //
 
-import SwiftUI
+import Foundation
 import Blackbird
 
 struct Container: BlackbirdModel, Identifiable, Equatable, Hashable {

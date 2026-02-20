@@ -41,24 +41,32 @@ struct ConfigureDisabledTestView: View {
                 HStack {
                     TextField("Describe how to change the test...", text: $aiPrompt, axis: .vertical)
                     AsyncButton {
-                        let aiPrompt = "\(test.title)\n\(test.notes ?? "")\n```\(test.command)```\nShould produce currently:\n```\(test.expectedOutput)```\nPlease help me adapt this test as described here:\n\(aiPrompt)"
-
-                        let llmOutput = await LLM.cleanLLMOutput(
-                            LLM.generate(
+                        do {
+                            let aiPrompt = "\(test.title)\n\(test.notes ?? "")\n```\(test.command)```\nShould produce currently:\n```\(test.expectedOutput)```\nPlease help me adapt this test as described here:\n\(aiPrompt)"
+                            let dirtyOutput = await LLM.generate(
                                 prompt: aiPrompt,
                                 systemPrompt: LLM.addTestSystemPrompt
-                            ).output
-                        )
-                        guard let data = llmOutput.data(using: .utf8) else {
-                            return
+                            )
+                            let llmOutput = LLM.cleanLLMOutput(dirtyOutput.output)
+
+                            guard let data = llmOutput.data(using: .utf8) else {
+                                throw NSError(
+                                    domain: "AITestGeneration",
+                                    code: 1,
+                                    userInfo: [NSLocalizedDescriptionKey: "AI returned an invalid response."]
+                                )
+                            }
+
+                            let output = try JSONDecoder().decode(LLM.Output.self, from: data)
+                            var test = test
+                            test.command = output.content.command
+                            test.title = output.content.title
+                            test.expectedOutput = output.content.expectedOutput
+                            try await test.write(to: db!)
+                            self.aiPrompt.removeAll()
+                        } catch {
+                            ConfirmatorManager.reportError(error, title: "AI Test Update Failed")
                         }
-                        let output = try JSONDecoder().decode(LLM.Output.self, from: data)
-                        var test = test
-                        test.command = output.content.command
-                        test.title = output.content.title
-                        test.expectedOutput = output.content.expectedOutput
-                        try await test.write(to: db!)
-                        self.aiPrompt.removeAll()
                     } label: {
                         Image(systemName: "arrow.up.circle.fill")
                     }
@@ -101,7 +109,7 @@ struct ConfigureDisabledTestView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(credentialKey == "-")
-                        Button("Cancel") {
+                        Button(role: .cancel) {
                             isShowingServerPicker = false
                         }
                         .buttonStyle(.bordered)
