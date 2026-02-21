@@ -50,6 +50,7 @@ struct ServersView: View {
                                                 for container in try await server.containers {
                                                     try await container.delete(from: db!)
                                                 }
+                                                await Snippet.deleteForServer(credentialKey: server.credentialKey, in: db!)
                                                 try await server.delete(from: db!)
                                                 try keychain().remove(server.credentialKey)
                                             }

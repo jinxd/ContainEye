@@ -16,6 +16,7 @@ import AppKit
 struct AgenticView: View {
     @Environment(\.blackbirdDatabase) private var db
     @State private var store = AgenticChatStore()
+    @State private var bridge = AgenticContextBridge.shared
     @State private var input = ""
     @State private var isSending = false
     @State private var expandedToolBundles: Set<UUID> = []
@@ -27,6 +28,11 @@ struct AgenticView: View {
     @State private var editDraft = ""
     @State private var pendingCommandApproval: AgenticPendingCommandApproval?
     @State private var showCommandApprovalAlert = false
+    @State private var undoInFlightMessageIDs: Set<UUID> = []
+    @State private var presentedMutationPreview: AgenticPresentedMutationPreview?
+    @State private var savedSnippetMessageIDs: Set<UUID> = []
+    @State private var draftContextByChatID: [UUID: String] = [:]
+    @State private var presentedComposerContext: AgenticPresentedComposerContext?
     @FocusState private var isComposerFocused: Bool
 
     var body: some View {
@@ -80,6 +86,12 @@ struct AgenticView: View {
                 }
             }
         }
+        .sheet(item: $presentedMutationPreview) { presented in
+            mutationPreviewSheet(presented)
+        }
+        .sheet(item: $presentedComposerContext) { presented in
+            composerContextSheet(presented)
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -92,10 +104,17 @@ struct AgenticView: View {
         }
         .task {
             await store.configure(database: db)
+            await applyPendingContextIfNeeded()
             isComposerFocused = true
         }
-        .onChange(of: store.selectedChatID) {
+        .onChange(of: store.selectedChatID) { oldValue, newValue in
+            if let previous = oldValue, previous != newValue {
+                store.cleanupContextOnlyChatIfNeeded(previous, nextSelectedChatID: newValue)
+            }
             isComposerFocused = true
+        }
+        .onChange(of: bridge.pendingContext?.id) {
+            Task { await applyPendingContextIfNeeded() }
         }
     }
 
@@ -215,9 +234,7 @@ struct AgenticView: View {
             Text(label(for: message.role))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            Text(.init(message.content))
-                .textSelection(.enabled)
-                .font(message.role == .tool ? .system(.footnote, design: .monospaced) : .body)
+            renderedMessageContent(message)
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
                 .background(backgroundColor(for: message.role), in: RoundedRectangle(cornerRadius: 12))
@@ -246,43 +263,116 @@ struct AgenticView: View {
         }
     }
 
-    private var composer: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField("Ask the agent to run commands, read/write files, create tests, or manage servers…", text: $input, axis: .vertical)
-                .focused($isComposerFocused)
-                .lineLimit(1...6)
-                .disabled(isSending || selectedChat == nil)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-#if os(iOS)
-                .background {
-                    if #available(iOS 26, *) {
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(.clear)
-                            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
-                    } else {
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(.ultraThinMaterial)
+    @ViewBuilder
+    private func renderedMessageContent(_ message: AgenticMessage) -> some View {
+        let segments = parseCodeFencedSegments(message.content)
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                switch segment {
+                case let .text(text):
+                    Text(.init(text))
+                        .textSelection(.enabled)
+                        .font(message.role == .tool ? .system(.footnote, design: .monospaced) : .body)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                case let .code(language, code):
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(language?.isEmpty == false ? language!.uppercased() : "CODE")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button {
+                                copyToClipboard(code)
+                            } label: {
+                                Label("Copy", systemImage: "doc.on.doc")
+                                    .font(.caption2)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+
+                        ScrollView(.horizontal) {
+                            Text(code)
+                                .textSelection(.enabled)
+                                .font(.system(.footnote, design: .monospaced))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(8)
+                        .background(.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
                     }
                 }
+            }
+        }
+    }
+
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let context = selectedComposerContext {
+                Button {
+                    if let chatID = store.selectedChatID {
+                        presentedComposerContext = .init(chatID: chatID, content: context)
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Text("Context")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                        Button {
+                            if let chatID = store.selectedChatID {
+                                draftContextByChatID[chatID] = nil
+                            }
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.white.opacity(0.95))
+                                .frame(width: 16, height: 16)
+                                .background(.white.opacity(0.18), in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.blue, in: RoundedRectangle(cornerRadius: 9))
+                }
+                .buttonStyle(.plain)
+            }
+
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Ask the agent to run commands, read/write files, create tests, or manage servers…", text: $input, axis: .vertical)
+                    .focused($isComposerFocused)
+                    .lineLimit(1...6)
+                    .disabled(isSending || selectedChat == nil)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+#if os(iOS)
+                    .background {
+                        if #available(iOS 26, *) {
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(.clear)
+                                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
+                        } else {
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(.ultraThinMaterial)
+                        }
+                    }
 #else
-                .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.roundedBorder)
 #endif
 
-            Button {
-                Task { await send() }
-            } label: {
-                if isSending {
-                    ProgressView()
-                } else {
-                    Label("Send", systemImage: "arrow.up")
-                        .labelStyle(.iconOnly)
+                Button {
+                    Task { await send() }
+                } label: {
+                    if isSending {
+                        ProgressView()
+                    } else {
+                        Label("Send", systemImage: "arrow.up")
+                            .labelStyle(.iconOnly)
+                    }
                 }
-            }
-            .disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending || selectedChat == nil)
+                .disabled(composedPromptForSelectedChat == nil || isSending || selectedChat == nil)
 #if os(iOS)
-            .buttonStyle(.glass)
+                .buttonStyle(.glass)
 #endif
+            }
         }
         .padding(.horizontal, 12)
         .padding(.top, 10)
@@ -295,13 +385,22 @@ struct AgenticView: View {
         }
     }
 
+    private func applyPendingContextIfNeeded() async {
+        guard let context = bridge.consumePendingContext() else { return }
+        let chatID = store.createChat(title: context.chatTitle, seededFromContext: true)
+        store.selectedChatID = chatID
+        draftContextByChatID[chatID] = context.draftMessage
+        input = ""
+        isComposerFocused = true
+    }
+
     private func send() async {
         guard let chat = selectedChat else { return }
-        let prompt = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty else { return }
+        guard let prompt = composedPrompt(for: chat.id) else { return }
 
         latestLLMRawResponses = []
         input = ""
+        draftContextByChatID[chat.id] = nil
         isSending = true
         defer { isSending = false }
         isComposerFocused = false
@@ -316,6 +415,64 @@ struct AgenticView: View {
             await presentFailureDebugAlert(chatID: chat.id, reason: reason, retryHistory: store.llmHistory(for: chat.id))
             isComposerFocused = true
         }
+    }
+
+    private var selectedComposerContext: String? {
+        guard let chatID = store.selectedChatID else { return nil }
+        return draftContextByChatID[chatID]
+    }
+
+    private var composedPromptForSelectedChat: String? {
+        guard let chatID = store.selectedChatID else { return nil }
+        return composedPrompt(for: chatID)
+    }
+
+    private func composedPrompt(for chatID: UUID) -> String? {
+        let context = draftContextByChatID[chatID]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let typed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !context.isEmpty, !typed.isEmpty {
+            return "\(context)\n\n\(typed)"
+        }
+        if !context.isEmpty {
+            return context
+        }
+        if !typed.isEmpty {
+            return typed
+        }
+        return nil
+    }
+
+    @ViewBuilder
+    private func composerContextSheet(_ presented: AgenticPresentedComposerContext) -> some View {
+        NavigationStack {
+            ScrollView {
+                Text(presented.content)
+                    .font(.system(.footnote, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            }
+            .navigationTitle("Context")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") {
+                        presentedComposerContext = nil
+                    }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button(role: .destructive) {
+                        draftContextByChatID[presented.chatID] = nil
+                        presentedComposerContext = nil
+                    } label: {
+                        Text("Remove")
+                    }
+                }
+            }
+        }
+#if os(iOS)
+        .presentationDetents([.medium, .large])
+#endif
     }
 
     private func runAgentLoop(chatID: UUID, seededHistory: [[String: String]]? = nil) async throws {
@@ -336,7 +493,10 @@ struct AgenticView: View {
             )
 
             let llmResponse = try await AgenticLLMClient.generateStreaming(
-                systemPrompt: AgenticLLMClient.systemPrompt(memory: memory),
+                systemPrompt: AgenticLLMClient.systemPrompt(
+                    memory: memory,
+                    servers: AgenticLLMClient.serverInventorySummary()
+                ),
                 history: workingHistory,
                 onProgress: { [chatID, streamingMessageID] accumulated in
                     let preview = AgenticStreamingPreviewParser.preview(from: accumulated)
@@ -474,7 +634,7 @@ struct AgenticView: View {
             return true
         }
         let base = trimmed.split(separator: " ").first.map(String.init)?.lowercased() ?? ""
-        let safeCommands: Set<String> = ["ls", "tree", "cat", "pwd", "whoami", "uname", "df", "du", "stat", "head", "tail", "wc"]
+        let safeCommands: Set<String> = ["ls", "tree", "cat", "pwd", "whoami", "uname", "df", "du", "stat", "head", "tail", "wc", "find"]
         return !safeCommands.contains(base)
     }
 
@@ -519,11 +679,15 @@ struct AgenticView: View {
 
     private func copyFailurePayloadToClipboard() {
         guard !failureDebugPayload.isEmpty else { return }
+        copyToClipboard(failureDebugPayload)
+    }
+
+    private func copyToClipboard(_ text: String) {
 #if canImport(UIKit)
-        UIPasteboard.general.string = failureDebugPayload
+        UIPasteboard.general.string = text
 #elseif canImport(AppKit)
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(failureDebugPayload, forType: .string)
+        NSPasteboard.general.setString(text, forType: .string)
 #endif
     }
 
@@ -641,6 +805,8 @@ struct AgenticView: View {
     @ViewBuilder
     private func toolBundleRow(id: UUID, tool: String, call: AgenticMessage, output: AgenticMessage?, system: AgenticMessage?) -> some View {
         let isExpanded = expandedToolBundles.contains(id)
+        let mutationPreview = mutationPreviewForTool(tool, systemMessage: system)
+        let runCommandSnippet = runCommandSnippetContext(from: system)
         VStack(alignment: .leading, spacing: 8) {
             Button {
                 if isExpanded {
@@ -679,10 +845,267 @@ struct AgenticView: View {
                     }
                 }
             }
+            if let mutationPreview {
+                Button {
+                    presentedMutationPreview = AgenticPresentedMutationPreview(messageID: id, preview: mutationPreview)
+                } label: {
+                    Label("View Change Preview", systemImage: "doc.text.magnifyingglass")
+                }
+                .buttonStyle(.bordered)
+            }
+
+            if let runCommandSnippet {
+                Button {
+                    Task { await saveRunCommandAsSnippet(messageID: id, context: runCommandSnippet) }
+                } label: {
+                    if savedSnippetMessageIDs.contains(id) {
+                        Label("Saved to Snippets", systemImage: "checkmark")
+                    } else {
+                        Label("Add as Snippet", systemImage: "text.badge.plus")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(savedSnippetMessageIDs.contains(id))
+            }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private func mutationPreviewSheet(_ presented: AgenticPresentedMutationPreview) -> some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(presented.preview.title)
+                        .font(.headline)
+
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Before")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(presented.preview.beforeText)
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                                .padding(8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("After")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(presented.preview.afterText)
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                                .padding(8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+
+                    if let undoCall = presented.preview.undoCall, let chatID = store.selectedChatID {
+                        Button {
+                            Task { await undoMutation(chatID: chatID, sourceMessageID: presented.messageID, call: undoCall) }
+                        } label: {
+                            if undoInFlightMessageIDs.contains(presented.messageID) {
+                                ProgressView()
+                            } else {
+                                Label("Undo AI Changes", systemImage: "arrow.uturn.backward")
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(undoInFlightMessageIDs.contains(presented.messageID))
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Change Preview")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") {
+                        presentedMutationPreview = nil
+                    }
+                }
+            }
+        }
+    }
+
+    private func mutationPreviewForTool(_ tool: String, systemMessage: AgenticMessage?) -> AgenticMutationPreview? {
+        guard let systemMessage,
+              let data = systemMessage.content.data(using: .utf8),
+              let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let payload = envelope["payload"] as? [String: Any],
+              let before = payload["before"] as? [String: Any],
+              let after = payload["after"] as? [String: Any] else {
+            return nil
+        }
+
+        let beforeText = prettyJSONObjectText(before)
+        let afterText = prettyJSONObjectText(after)
+        let undoCall: AgenticToolCall?
+        if let undoObject = payload["undo"] as? [String: Any],
+           let type = undoObject["type"] as? String, type.lowercased() == "tool",
+           let undoTool = undoObject["tool"] as? String {
+            let arguments = (undoObject["arguments"] as? [String: Any]) ?? [:]
+            undoCall = AgenticToolCall(tool: undoTool, arguments: arguments)
+        } else {
+            undoCall = nil
+        }
+
+        return AgenticMutationPreview(
+            title: "Diff for \(tool)",
+            beforeText: beforeText,
+            afterText: afterText,
+            undoCall: undoCall
+        )
+    }
+
+    private func prettyJSONObjectText(_ object: [String: Any]) -> String {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted]),
+              let text = String(data: data, encoding: .utf8) else {
+            return "\(object)"
+        }
+        return text
+    }
+
+    private enum AgenticMessageSegment {
+        case text(String)
+        case code(language: String?, code: String)
+    }
+
+    private func parseCodeFencedSegments(_ input: String) -> [AgenticMessageSegment] {
+        var segments: [AgenticMessageSegment] = []
+        let lines = input.split(separator: "\n", omittingEmptySubsequences: false)
+        var textBuffer: [String] = []
+        var codeBuffer: [String] = []
+        var inCode = false
+        var language: String?
+
+        func flushText() {
+            guard !textBuffer.isEmpty else { return }
+            let text = textBuffer.joined(separator: "\n")
+            if !text.isEmpty {
+                segments.append(.text(text))
+            }
+            textBuffer.removeAll(keepingCapacity: true)
+        }
+
+        func flushCode() {
+            guard !codeBuffer.isEmpty else { return }
+            segments.append(.code(language: language, code: codeBuffer.joined(separator: "\n")))
+            codeBuffer.removeAll(keepingCapacity: true)
+        }
+
+        for rawLine in lines {
+            let line = String(rawLine)
+            if line.hasPrefix("```") {
+                if inCode {
+                    flushCode()
+                    inCode = false
+                    language = nil
+                } else {
+                    flushText()
+                    let lang = String(line.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+                    language = lang.isEmpty ? nil : lang
+                    inCode = true
+                }
+                continue
+            }
+
+            if inCode {
+                codeBuffer.append(line)
+            } else {
+                textBuffer.append(line)
+            }
+        }
+
+        if inCode {
+            flushCode()
+        } else {
+            flushText()
+        }
+
+        return segments.isEmpty ? [.text(input)] : segments
+    }
+
+    private func undoMutation(chatID: UUID, sourceMessageID: UUID, call: AgenticToolCall) async {
+        guard let db else { return }
+        let executor = AgenticToolExecutor(database: db)
+        undoInFlightMessageIDs.insert(sourceMessageID)
+        defer { undoInFlightMessageIDs.remove(sourceMessageID) }
+
+        await store.appendMessage(AgenticMessage(role: .assistant, content: "Using tool: \(call.tool)"), to: chatID)
+        let result = await executor.execute(call: call)
+        await store.appendMessage(AgenticMessage(role: .tool, content: "Undo executed.\n\(result.userFacingSummary)"), to: chatID)
+        await store.appendMessage(
+            AgenticMessage(role: .system, content: result.toolResultEnvelope(tool: call.tool)),
+            to: chatID
+        )
+    }
+
+    private func runCommandSnippetContext(from systemMessage: AgenticMessage?) -> AgenticRunCommandSnippetContext? {
+        guard let systemMessage,
+              let data = systemMessage.content.data(using: .utf8),
+              let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tool = envelope["tool"] as? String,
+              tool == "run_command",
+              let payload = envelope["payload"] as? [String: Any],
+              let command = payload["command"] as? String else {
+            return nil
+        }
+
+        let trimmedCommand = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedCommand.isEmpty else { return nil }
+
+        let credentialKey = (payload["credentialKey"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let serverLabel = (payload["server"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return AgenticRunCommandSnippetContext(
+            command: trimmedCommand,
+            credentialKey: credentialKey?.isEmpty == true ? nil : credentialKey,
+            serverLabel: serverLabel?.isEmpty == true ? nil : serverLabel
+        )
+    }
+
+    private func saveRunCommandAsSnippet(messageID: UUID, context: AgenticRunCommandSnippetContext) async {
+        guard let db else { return }
+        let resolvedCredentialKey = context.credentialKey ?? resolveCredentialKey(from: context.serverLabel)
+        let comment: String
+        if let serverLabel = context.serverLabel {
+            comment = "Saved from Agentic (\(serverLabel))"
+        } else {
+            comment = "Saved from Agentic"
+        }
+        do {
+            try await Snippet.saveCommand(
+                command: context.command,
+                comment: comment,
+                credentialKey: resolvedCredentialKey,
+                in: db
+            )
+            savedSnippetMessageIDs.insert(messageID)
+        } catch {
+            print("Failed to save snippet from agentic tool result: \(error)")
+        }
+    }
+
+    private func resolveCredentialKey(from serverLabel: String?) -> String? {
+        guard let raw = serverLabel?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        if keychain().getCredential(for: raw) != nil {
+            return raw
+        }
+        return keychain()
+            .allKeys()
+            .compactMap { keychain().getCredential(for: $0) }
+            .first(where: { $0.label.caseInsensitiveCompare(raw) == .orderedSame })?
+            .key
     }
 }
 
@@ -705,6 +1128,26 @@ struct AgenticFailureRetryContext {
     var reason: String
 }
 
+struct AgenticMutationPreview {
+    var title: String
+    var beforeText: String
+    var afterText: String
+    var undoCall: AgenticToolCall?
+}
+
+struct AgenticPresentedMutationPreview: Identifiable {
+    var messageID: UUID
+    var preview: AgenticMutationPreview
+
+    var id: UUID { messageID }
+}
+
+struct AgenticRunCommandSnippetContext {
+    var command: String
+    var credentialKey: String?
+    var serverLabel: String?
+}
+
 struct AgenticPendingCommandApproval: Identifiable {
     var chatID: UUID
     var serverLabel: String
@@ -722,11 +1165,19 @@ struct AgenticEditContext: Identifiable {
     var id: UUID { messageID }
 }
 
+struct AgenticPresentedComposerContext: Identifiable {
+    var chatID: UUID
+    var content: String
+
+    var id: UUID { chatID }
+}
+
 @MainActor
 @Observable
 final class AgenticChatStore {
     var chats: [AgenticChat] = []
     var selectedChatID: UUID?
+    @ObservationIgnored private var contextSeededChatIDs: Set<UUID> = []
 
     private var configured = false
 
@@ -741,11 +1192,16 @@ final class AgenticChatStore {
         }
     }
 
-    func createChat() {
-        let chat = AgenticChat(title: "New Chat", messages: [])
+    @discardableResult
+    func createChat(title: String = "New Chat", seededFromContext: Bool = false) -> UUID {
+        let chat = AgenticChat(title: title, messages: [])
         chats.insert(chat, at: 0)
+        if seededFromContext {
+            contextSeededChatIDs.insert(chat.id)
+        }
         selectedChatID = chat.id
         save()
+        return chat.id
     }
 
     func deleteChats(at offsets: IndexSet) {
@@ -764,6 +1220,9 @@ final class AgenticChatStore {
         guard let index = chats.firstIndex(where: { $0.id == chatID }) else { return }
         var chat = chats[index]
         chat.messages.append(message)
+        if !chat.messages.isEmpty {
+            contextSeededChatIDs.remove(chatID)
+        }
         if chat.title == "New Chat", message.role == .user {
             chat.title = String(message.content.prefix(36))
         }
@@ -771,6 +1230,35 @@ final class AgenticChatStore {
         chats[index] = chat
         chats.sort { $0.updatedAt > $1.updatedAt }
         selectedChatID = chatID
+        save()
+    }
+
+    func cleanupContextOnlyChatIfNeeded(_ chatID: UUID, nextSelectedChatID: UUID?) {
+        guard contextSeededChatIDs.contains(chatID),
+              let index = chats.firstIndex(where: { $0.id == chatID }) else {
+            return
+        }
+
+        let chat = chats[index]
+        guard chat.messages.isEmpty else {
+            contextSeededChatIDs.remove(chatID)
+            return
+        }
+
+        chats.remove(at: index)
+        contextSeededChatIDs.remove(chatID)
+
+        if chats.isEmpty {
+            _ = createChat()
+            return
+        }
+
+        if selectedChatID == chatID {
+            selectedChatID = nextSelectedChatID
+        }
+        if !chats.contains(where: { $0.id == selectedChatID }) {
+            selectedChatID = chats.first?.id
+        }
         save()
     }
 
@@ -887,7 +1375,7 @@ struct AgenticMessage: Identifiable, Codable, Hashable {
 }
 
 enum AgenticLLMClient {
-    static func systemPrompt(memory: String) -> String {
+    static func systemPrompt(memory: String, servers: String) -> String {
         #"""
 You are ContainEye Agent, an autonomous operations assistant for server management.
 You can use tools to inspect servers, inspect indexed file paths, manage test definitions, and edit memory.
@@ -919,7 +1407,6 @@ Allowed tools:
 - create_test {"server":"<server label>", "title":"...", "command":"...", "expectedOutput":"...", "notes":"optional"}
 - add_server {"label":"...", "host":"...", "port":22, "username":"...", "authMethod":"password|privateKey|privateKeyWithPassphrase", "password":"...", "privateKey":"...", "passphrase":"..."}
 - update_server {"server":"<server label>", "label":"optional", "host":"optional", "port":22, "username":"optional", "authMethod":"optional", "password":"optional", "privateKey":"optional", "passphrase":"optional"}
-- list_documents {"server":"<server label>", "path":"<directory path prefix>", "query":"optional path filter"}
 - update_memory {"content":"<memory note>", "mode":"append|replace"}
 
 Rules:
@@ -927,20 +1414,35 @@ Rules:
 - Use tools when facts are needed.
 - Prefer solving autonomously with available tools before asking the user anything.
 - Only ask the user a question when required information cannot be discovered via tools.
+- For server-bound tools (`run_command`, `read_file`, `write_file`, `create_test`, `update_test`, `update_server`, `list_tests`), always provide an explicit `server` argument.
 - `run_command` approvals are handled by the app; never ask the user for approval in chat text.
-- `list_documents` reads the local indexed remote-path cache for the given server/path, not a live remote listing.
 - For any request to modify server metadata (host/label/username/port/auth), use `update_server`.
 - Prefer asking clarifying questions in a final response when information is missing.
 - You do not need to suggest options unless you are asking a question.
 - When you do ask a question, prefer short multiple-choice options so the user can reply with one tap/word (mobile-first UX).
 - For those questions, offer 2-5 concrete options when possible, and include a recommended default option.
 - Proactively call `update_memory` when you learn durable user preferences, constraints, or stable environment facts that will help future replies.
+- Proactively remember likely-reusable infrastructure facts (for example: deployed backends/services, key directories, common hosts, recurring maintenance windows, or preferred deployment commands) using `update_memory`.
 - Never fabricate command output.
 - Keep final responses concise and actionable.
+
+Current known servers (always prefer these labels/hosts):
+\#(servers)
 
 User memory:
 \#(memory.isEmpty ? "(none)" : memory)
 """#
+    }
+
+    static func serverInventorySummary() -> String {
+        let credentials = keychain().allKeys().compactMap { keychain().getCredential(for: $0) }
+        guard !credentials.isEmpty else { return "(none configured)" }
+        return credentials
+            .map { credential in
+                let auth = credential.effectiveAuthMethod.displayName
+                return "- \(credential.label) (\(credential.host):\(credential.port), user: \(credential.username), auth: \(auth), key: \(credential.key))"
+            }
+            .joined(separator: "\n")
     }
 
     static func generate(systemPrompt: String, history: [[String: String]]) async throws -> AgenticLLMResponse {
@@ -1247,12 +1749,12 @@ struct AgenticToolExecutor {
                 return try await listTests(arguments: call.arguments)
             case "create_test":
                 return try await createTest(arguments: call.arguments)
+            case "update_test":
+                return try await updateTest(arguments: call.arguments)
             case "add_server":
                 return try await addServer(arguments: call.arguments)
             case "update_server":
                 return try await updateServer(arguments: call.arguments)
-            case "list_documents":
-                return try await listDocuments(arguments: call.arguments)
             case "update_memory":
                 return updateMemory(arguments: call.arguments)
             default:
@@ -1283,6 +1785,7 @@ struct AgenticToolExecutor {
         let output = try await SSHClientActor.shared.execute(command, on: credential)
         let payload = serialize([
             "server": credential.label,
+            "credentialKey": credential.key,
             "command": command,
             "output": output,
         ])
@@ -1306,6 +1809,8 @@ struct AgenticToolExecutor {
         let path = stringArg("path", from: arguments)
         let content = stringArg("content", from: arguments)
         let credential = try resolveCredential(from: arguments)
+        let readBeforeCommand = "if [ -f \(shellSingleQuoted(path)) ]; then cat \(shellSingleQuoted(path)); fi"
+        let beforeContent = (try? await SSHClientActor.shared.execute(readBeforeCommand, on: credential)) ?? ""
         let base64 = Data(content.utf8).base64EncodedString()
         let command = """
         mkdir -p "$(dirname \(shellSingleQuoted(path)))"
@@ -1315,6 +1820,25 @@ struct AgenticToolExecutor {
         let payload = serialize([
             "server": credential.label,
             "path": path,
+            "before": [
+                "server": credential.label,
+                "path": path,
+                "content": truncated(beforeContent),
+            ],
+            "after": [
+                "server": credential.label,
+                "path": path,
+                "content": truncated(content),
+            ],
+            "undo": [
+                "type": "tool",
+                "tool": "write_file",
+                "arguments": [
+                    "server": credential.key,
+                    "path": path,
+                    "content": beforeContent,
+                ],
+            ],
             "writtenBytes": content.utf8.count,
         ])
         return .init(userFacingSummary: "Wrote \(content.utf8.count) bytes to \(path) on \(credential.label).", jsonPayload: payload)
@@ -1391,6 +1915,78 @@ struct AgenticToolExecutor {
         return .init(userFacingSummary: "Created test '\(test.title)' for \(credential.label).", jsonPayload: payload)
     }
 
+    private func updateTest(arguments: [String: Any]) async throws -> AgenticToolResult {
+        let testID = intArg("id", from: arguments)
+        guard testID > 0 else {
+            return errorResult("update_test requires a valid integer id")
+        }
+        guard var test = try await ServerTest.read(from: database, id: testID) else {
+            return errorResult("Test with id \(testID) not found")
+        }
+
+        let before: [String: Any] = [
+            "id": test.id,
+            "title": test.title,
+            "credentialKey": test.credentialKey,
+            "server": resolveServerLabel(for: test.credentialKey),
+            "command": test.command,
+            "expectedOutput": test.expectedOutput,
+            "notes": test.notes ?? "",
+        ]
+
+        if let title = arguments["title"] as? String {
+            test.title = title
+        }
+        if let command = arguments["command"] as? String {
+            test.command = command
+        }
+        if let expectedOutput = arguments["expectedOutput"] as? String {
+            test.expectedOutput = expectedOutput
+        }
+        if arguments.keys.contains("notes") {
+            let notes = (arguments["notes"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            test.notes = notes.isEmpty ? nil : notes
+        }
+        if arguments["server"] != nil || arguments["credentialKey"] != nil || arguments["credential"] != nil {
+            let credential = try resolveCredential(from: arguments)
+            test.credentialKey = credential.key
+        }
+
+        try await test.write(to: database)
+
+        let after: [String: Any] = [
+            "id": test.id,
+            "title": test.title,
+            "credentialKey": test.credentialKey,
+            "server": resolveServerLabel(for: test.credentialKey),
+            "command": test.command,
+            "expectedOutput": test.expectedOutput,
+            "notes": test.notes ?? "",
+        ]
+
+        let undoCall: [String: Any] = [
+            "type": "tool",
+            "tool": "update_test",
+            "arguments": [
+                "id": test.id,
+                "title": before["title"] as? String ?? test.title,
+                "credentialKey": before["credentialKey"] as? String ?? test.credentialKey,
+                "command": before["command"] as? String ?? test.command,
+                "expectedOutput": before["expectedOutput"] as? String ?? test.expectedOutput,
+                "notes": before["notes"] as? String ?? "",
+            ],
+        ]
+
+        let payload = serialize([
+            "id": test.id,
+            "before": before,
+            "after": after,
+            "undo": undoCall,
+        ])
+
+        return .init(userFacingSummary: "Updated test #\(test.id) (\(test.title)).", jsonPayload: payload)
+    }
+
     private func addServer(arguments: [String: Any]) async throws -> AgenticToolResult {
         let label = stringArg("label", from: arguments)
         let host = stringArg("host", from: arguments)
@@ -1433,6 +2029,18 @@ struct AgenticToolExecutor {
 
     private func updateServer(arguments: [String: Any]) async throws -> AgenticToolResult {
         var credential = try resolveCredential(from: arguments)
+        let previousPassword = credential.password
+        let previousPrivateKey = credential.privateKey
+        let previousPassphrase = credential.passphrase
+        let previousAuthMethod = credential.authMethod ?? .password
+        let before: [String: Any] = [
+            "credentialKey": credential.key,
+            "label": credential.label,
+            "host": credential.host,
+            "username": credential.username,
+            "port": Int(credential.port),
+            "authMethod": credential.effectiveAuthMethod.displayName,
+        ]
 
         if let label = arguments["label"] as? String { credential.label = label }
         if let host = arguments["host"] as? String { credential.host = host }
@@ -1461,11 +2069,45 @@ struct AgenticToolExecutor {
             try await Server(credentialKey: credential.key).write(to: database)
         }
 
-        let payload = serialize([
+        let after: [String: Any] = [
+            "credentialKey": credential.key,
             "label": credential.label,
             "host": credential.host,
             "username": credential.username,
             "port": Int(credential.port),
+            "authMethod": credential.effectiveAuthMethod.displayName,
+        ]
+
+        let undoAuthMethod: String
+        switch previousAuthMethod {
+        case .privateKey:
+            undoAuthMethod = "privateKey"
+        case .privateKeyWithPassphrase:
+            undoAuthMethod = "privateKeyWithPassphrase"
+        case .password:
+            undoAuthMethod = "password"
+        }
+
+        let undoArguments: [String: Any] = [
+            "credentialKey": before["credentialKey"] as? String ?? credential.key,
+            "label": before["label"] as? String ?? credential.label,
+            "host": before["host"] as? String ?? credential.host,
+            "username": before["username"] as? String ?? credential.username,
+            "port": before["port"] as? Int ?? Int(credential.port),
+            "authMethod": undoAuthMethod,
+            "password": previousPassword,
+            "privateKey": previousPrivateKey ?? "",
+            "passphrase": previousPassphrase ?? "",
+        ]
+        let undoPayload: [String: Any] = [
+            "type": "tool",
+            "tool": "update_server",
+            "arguments": undoArguments,
+        ]
+        let payload = serialize([
+            "before": before,
+            "after": after,
+            "undo": undoPayload,
         ])
         return .init(userFacingSummary: "Updated server '\(credential.label)'.", jsonPayload: payload)
     }
@@ -1520,6 +2162,7 @@ struct AgenticToolExecutor {
         guard !content.isEmpty else {
             return errorResult("update_memory requires non-empty content")
         }
+        let beforeSnapshot = AgenticMemoryStore.read()
 
         if mode == "replace" {
             AgenticMemoryStore.write(content)
@@ -1527,7 +2170,22 @@ struct AgenticToolExecutor {
             AgenticMemoryStore.append(content)
         }
         let snapshot = AgenticMemoryStore.read()
-        let payload = serialize(["memory": snapshot])
+        let payload = serialize([
+            "before": [
+                "memory": beforeSnapshot,
+            ],
+            "after": [
+                "memory": snapshot,
+            ],
+            "undo": [
+                "type": "tool",
+                "tool": "update_memory",
+                "arguments": [
+                    "mode": "replace",
+                    "content": beforeSnapshot,
+                ],
+            ],
+        ])
         return .init(userFacingSummary: "Updated memory.", jsonPayload: payload)
     }
 
@@ -1542,18 +2200,28 @@ struct AgenticToolExecutor {
             throw NSError(domain: "Agentic", code: 404, userInfo: [NSLocalizedDescriptionKey: "Server '\(raw)' not found"])
         }
 
-        if let first = keychain().allKeys().compactMap({ keychain().getCredential(for: $0) }).first {
-            return first
-        }
-
         if required {
-            throw NSError(domain: "Agentic", code: 404, userInfo: [NSLocalizedDescriptionKey: "No servers configured"])
+            throw NSError(domain: "Agentic", code: 422, userInfo: [NSLocalizedDescriptionKey: "Server argument is required (use 'server', 'credentialKey', or 'credential')"])
         }
         throw NSError(domain: "Agentic", code: 405, userInfo: [NSLocalizedDescriptionKey: "No optional server available"])
     }
 
     private func stringArg(_ key: String, from arguments: [String: Any]) -> String {
         (arguments[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private func intArg(_ key: String, from arguments: [String: Any]) -> Int {
+        if let value = arguments[key] as? Int { return value }
+        if let value = arguments[key] as? String, let intValue = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return intValue
+        }
+        return 0
+    }
+
+    private func truncated(_ text: String, maxLength: Int = 4000) -> String {
+        if text.count <= maxLength { return text }
+        let index = text.index(text.startIndex, offsetBy: maxLength)
+        return String(text[..<index]) + "\n…(truncated)"
     }
 
     private func resolveServerLabel(for credentialKey: String) -> String {

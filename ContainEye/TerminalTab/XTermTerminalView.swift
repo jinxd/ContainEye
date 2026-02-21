@@ -423,16 +423,18 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
               !selection.isEmpty else {
             return
         }
+        AgenticContextBridge.shared.openAgentic(
+            chatTitle: "Terminal Selection",
+            draftMessage: """
+            Explain and help me act on this terminal output:
 
-        let sheet = UIHostingController(
-            rootView: TerminalSelectionAIView(selectedText: String(selection.prefix(8000)))
+            ```
+            \(String(selection.prefix(8000)))
+            ```
+
+            I want:
+            """
         )
-        sheet.modalPresentationStyle = .pageSheet
-        if let presentation = sheet.sheetPresentationController {
-            presentation.detents = [.medium(), .large()]
-        }
-
-        findTopViewController()?.present(sheet, animated: true)
     }
 
     private func findTopViewController() -> UIViewController? {

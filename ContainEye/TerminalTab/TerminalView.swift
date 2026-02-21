@@ -682,7 +682,11 @@ final class TerminalWorkspaceViewController: UIViewController {
 
     @objc
     private func didTapSnippets() {
-        let picker = TerminalSnippetPickerViewController(database: SharedDatabase.db) { [weak self] snippet in
+        let currentCredentialKey = workspace.activeControllerInFocusedPane()?.credentialKey
+        let picker = TerminalSnippetPickerViewController(
+            database: SharedDatabase.db,
+            credentialKey: currentCredentialKey
+        ) { [weak self] snippet in
             self?.workspace.activeControllerInFocusedPane()?.applySuggestion(snippet.command)
         }
 
@@ -1363,6 +1367,7 @@ final class TerminalSnippetPickerViewController: UIViewController {
     }
 
     private let database: Blackbird.Database
+    private let credentialKey: String?
     private let onSelectSnippet: (Snippet) -> Void
 
     private let collectionView: UICollectionView
@@ -1371,8 +1376,9 @@ final class TerminalSnippetPickerViewController: UIViewController {
 
     private var snippets: [Snippet] = []
 
-    init(database: Blackbird.Database, onSelectSnippet: @escaping (Snippet) -> Void) {
+    init(database: Blackbird.Database, credentialKey: String?, onSelectSnippet: @escaping (Snippet) -> Void) {
         self.database = database
+        self.credentialKey = credentialKey
         self.onSelectSnippet = onSelectSnippet
 
         let layout = TerminalSnippetPickerViewController.makeLayout()
@@ -1446,21 +1452,26 @@ final class TerminalSnippetPickerViewController: UIViewController {
 
     private func loadSnippets() {
         Task {
-            await Snippet.ensureDefaults(in: database)
+            await Snippet.purgeLegacyDefaults(in: database)
             let rows = (try? await Snippet.read(
                 from: database,
                 matching: .all,
                 orderBy: .descending(\.$lastUse),
                 limit: 200
             )) ?? []
+            let filteredRows = rows.filter { snippet in
+                let key = snippet.credentialKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if key.isEmpty { return true }
+                return key == credentialKey
+            }
 
             await MainActor.run {
-                self.snippets = rows
+                self.snippets = filteredRows
                 var snapshot = NSDiffableDataSourceSnapshot<Section, String>()
                 snapshot.appendSections([.main])
-                snapshot.appendItems(rows.map(\.id), toSection: .main)
+                snapshot.appendItems(filteredRows.map(\.id), toSection: .main)
                 self.dataSource.apply(snapshot, animatingDifferences: true)
-                self.emptyStateLabel.isHidden = !rows.isEmpty
+                self.emptyStateLabel.isHidden = !filteredRows.isEmpty
             }
         }
     }
@@ -1517,7 +1528,7 @@ final class TerminalSnippetPickerViewController: UIViewController {
 
     @objc
     private func didTapManage() {
-        let manage = TerminalManageSnippetsViewController(database: database)
+        let manage = TerminalManageSnippetsViewController(database: database, credentialKey: credentialKey)
         navigationController?.pushViewController(manage, animated: true)
     }
 }
@@ -1548,20 +1559,21 @@ final class TerminalManageSnippetsViewController: UIViewController {
     }
 
     private let database: Blackbird.Database
+    private let credentialKey: String?
     private let collectionView: UICollectionView
     private lazy var dataSource = makeDataSource()
     private let emptyStateContainer = UIStackView()
     private let emptyStateTitleLabel = UILabel()
     private let emptyStateSubtitleLabel = UILabel()
     private let addSnippetButton = UIButton(type: .system)
-    private let addDefaultsButton = UIButton(type: .system)
     private let askAIButton = UIButton(type: .system)
 
     private var snippets: [Snippet] = []
     private let relativeFormatter = RelativeDateTimeFormatter()
 
-    init(database: Blackbird.Database) {
+    init(database: Blackbird.Database, credentialKey: String? = nil) {
         self.database = database
+        self.credentialKey = credentialKey
         let layout = TerminalManageSnippetsViewController.makeLayout()
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         super.init(nibName: nil, bundle: nil)
@@ -1629,7 +1641,7 @@ final class TerminalManageSnippetsViewController: UIViewController {
         emptyStateTitleLabel.textColor = UIColor.label
         emptyStateContainer.addArrangedSubview(emptyStateTitleLabel)
 
-        emptyStateSubtitleLabel.text = "Add your own snippet, insert defaults, or let AI draft one from a task."
+        emptyStateSubtitleLabel.text = "Add your own snippet or let AI draft one from a task."
         emptyStateSubtitleLabel.font = UIFont.systemFont(ofSize: UIFloat(15), weight: .regular)
         emptyStateSubtitleLabel.textAlignment = .center
         emptyStateSubtitleLabel.textColor = UIColor.secondaryLabel
@@ -1637,10 +1649,8 @@ final class TerminalManageSnippetsViewController: UIViewController {
         emptyStateContainer.addArrangedSubview(emptyStateSubtitleLabel)
 
         configureEmptyStateButton(addSnippetButton, title: "Add Snippet", filled: true, action: #selector(didTapAdd))
-        configureEmptyStateButton(addDefaultsButton, title: "Insert Defaults", filled: false, action: #selector(didTapInsertDefaults))
         configureEmptyStateButton(askAIButton, title: "Ask AI", filled: false, action: #selector(didTapAskAI))
         emptyStateContainer.addArrangedSubview(addSnippetButton)
-        emptyStateContainer.addArrangedSubview(addDefaultsButton)
         emptyStateContainer.addArrangedSubview(askAIButton)
     }
 
@@ -1648,21 +1658,26 @@ final class TerminalManageSnippetsViewController: UIViewController {
 
     private func loadSnippets() {
         Task {
-            await Snippet.ensureDefaults(in: database)
+            await Snippet.purgeLegacyDefaults(in: database)
             let rows = (try? await Snippet.read(
                 from: database,
                 matching: .all,
                 orderBy: .descending(\.$lastUse),
                 limit: 400
             )) ?? []
+            let filteredRows = rows.filter { snippet in
+                let key = snippet.credentialKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if key.isEmpty { return true }
+                return key == credentialKey
+            }
 
             await MainActor.run {
-                self.snippets = rows
+                self.snippets = filteredRows
                 var snapshot = NSDiffableDataSourceSnapshot<Section, String>()
                 snapshot.appendSections([.main])
-                snapshot.appendItems(rows.map(\.id), toSection: .main)
+                snapshot.appendItems(filteredRows.map(\.id), toSection: .main)
                 self.dataSource.apply(snapshot, animatingDifferences: true)
-                self.emptyStateContainer.isHidden = !rows.isEmpty
+                self.emptyStateContainer.isHidden = !filteredRows.isEmpty
             }
         }
     }
@@ -1763,16 +1778,6 @@ final class TerminalManageSnippetsViewController: UIViewController {
     }
 
     @objc
-    private func didTapInsertDefaults() {
-        Task {
-            await Snippet.addDefaults(in: database)
-            await MainActor.run {
-                self.loadSnippets()
-            }
-        }
-    }
-
-    @objc
     private func didTapAskAI() {
         let alert = UIAlertController(
             title: "Generate Snippet with AI",
@@ -1784,10 +1789,20 @@ final class TerminalManageSnippetsViewController: UIViewController {
         }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Generate", style: .default, handler: { [weak self] _ in
-            guard let self else { return }
+            guard self != nil else { return }
             let prompt = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard !prompt.isEmpty else { return }
-            self.generateSnippetWithAI(from: prompt)
+            AgenticContextBridge.shared.openAgentic(
+                chatTitle: "Snippet Draft",
+                draftMessage: """
+                Help me draft a reusable terminal snippet.
+
+                Goal:
+                \(prompt)
+
+                Please propose the command and a short comment.
+                """
+            )
         }))
         present(alert, animated: true)
     }
@@ -1881,7 +1896,7 @@ Rules:
             let comment = alert.textFields?.last?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
             Task {
-                var target = snippet ?? Snippet(command: command, comment: comment, lastUse: .now)
+                var target = snippet ?? Snippet(command: command, comment: comment, lastUse: .now, credentialKey: self.credentialKey)
                 target.command = command
                 target.comment = comment
                 if snippet == nil {

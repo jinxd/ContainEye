@@ -94,6 +94,7 @@ struct SFTPView: View {
     @State private var showingPathInput = false
     @State private var pathInput = ""
     @State private var terminalManager = TerminalNavigationManager.shared
+    @State private var contextStore = AgenticScreenContextStore.shared
     
     private let tempDirectory: URL = {
         FileManager.default.temporaryDirectory.appendingPathComponent("ContainEye")
@@ -544,9 +545,43 @@ struct SFTPView: View {
         }
         .onAppear {
             processPendingSFTPEditorRequests()
+            updateAgenticContext()
         }
         .onChange(of: terminalManager.sftpEditorOpenRequests.count) { _, _ in
             processPendingSFTPEditorRequests()
+        }
+        .onChange(of: credential) {
+            updateAgenticContext()
+        }
+        .onChange(of: currentDirectory) {
+            updateAgenticContext()
+        }
+        .onChange(of: openedFile) {
+            updateAgenticContext()
+        }
+    }
+
+    private func updateAgenticContext() {
+        if let credential {
+            let file = openedFile ?? "(none)"
+            let cwd = currentDirectory.isEmpty ? "/" : currentDirectory
+            contextStore.set(
+                chatTitle: "SFTP \(credential.label)",
+                draftMessage: """
+                Use this SFTP context:
+                - server: \(credential.label)
+                - host: \(credential.host)
+                - cwd: \(cwd)
+                - openedFile: \(file)
+
+                Help me with:
+                """
+            )
+        } else {
+            contextStore.set(
+                chatTitle: "SFTP",
+                draftMessage: "I am in SFTP server selection. Help me with:"
+            )
         }
     }
 

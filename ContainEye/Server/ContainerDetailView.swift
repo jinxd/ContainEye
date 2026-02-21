@@ -12,6 +12,7 @@ import Blackbird
 
 struct ContainerDetailView: View {
     @BlackbirdLiveModel var container: Container?
+    @State private var contextStore = AgenticScreenContextStore.shared
 
     var body: some View {
         if let container {
@@ -49,7 +50,30 @@ struct ContainerDetailView: View {
                     try? await Task.sleep(for: .seconds(2))
                 }
             }
+            .onAppear {
+                updateAgenticContext(container: container)
+            }
+            .onChange(of: container.name) {
+                updateAgenticContext(container: container)
+            }
+            .safeAreaInset(edge: .bottom) {
+                AgenticDetailFABInset()
+            }
         }
     }
-}
 
+    private func updateAgenticContext(container: Container) {
+        contextStore.set(
+            chatTitle: "Container \(container.name)",
+            draftMessage: """
+            Use this container as reference:
+            - container: \(container.name)
+            - serverId: \(container.serverId)
+            - status: \(container.status)
+            - id: \(container.id)
+
+            Help me with:
+            """
+        )
+    }
+}

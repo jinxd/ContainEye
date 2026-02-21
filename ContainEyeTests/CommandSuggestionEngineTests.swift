@@ -19,7 +19,7 @@ struct CommandSuggestionEngineTests {
         let index = RemoteDocumentTreeIndex()
         let engine = CommandSuggestionEngine(
             index: index,
-            fetchSnippetCommands: { ["git stash", "git switch main"] }
+            fetchSnippetCommands: { _ in ["git stash", "git switch main"] }
         )
 
         let context = CommandSuggestionContext(
@@ -41,7 +41,7 @@ struct CommandSuggestionEngineTests {
         let index = RemoteDocumentTreeIndex()
         let engine = CommandSuggestionEngine(
             index: index,
-            fetchSnippetCommands: { ["docker compose up -d"] }
+            fetchSnippetCommands: { _ in ["docker compose up -d"] }
         )
 
         let context = CommandSuggestionContext(
@@ -65,7 +65,7 @@ struct CommandSuggestionEngineTests {
 
         let engine = CommandSuggestionEngine(
             index: index,
-            fetchSnippetCommands: { [] }
+            fetchSnippetCommands: { _ in [] }
         )
 
         let context = CommandSuggestionContext(

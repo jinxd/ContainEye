@@ -9,6 +9,7 @@ import SwiftUI
 import Blackbird
 import ButtonKit
 import UserNotifications
+import KeychainAccess
 
 struct ServerTestView: View {
     @Environment(\.blackbirdDatabase) var db
@@ -26,50 +27,18 @@ struct ServerTestView: View {
             orderBy: .descending(\.$lastRun)
         )
     }) var suggestedTests
+    @BlackbirdLiveModels({
+        try await Snippet.read(
+            from: $0,
+            matching: .all,
+            orderBy: .descending(\.$lastUse)
+        )
+    }) var snippets
     @Environment(\.scenePhase) var scenePhase
     @State private var notificationsAllowed = true
     @Environment(\.namespace) var namespace
     @State private var isRunningAllTests = false
-    @State private var selectedFilter: TestFilter = .all
     @State private var showingAddTest = false
-    
-    enum TestFilter: String, CaseIterable {
-        case all = "All"
-        case passing = "Passing"
-        case failing = "Failing"
-        case running = "Running"
-        
-        var icon: String {
-            switch self {
-            case .all: return "list.bullet"
-            case .passing: return "checkmark.circle.fill"
-            case .failing: return "xmark.circle.fill"
-            case .running: return "clock.fill"
-            }
-        }
-        
-        var color: Color {
-            switch self {
-            case .all: return .blue
-            case .passing: return .green
-            case .failing: return .red
-            case .running: return .orange
-            }
-        }
-    }
-    
-    var filteredTests: [ServerTest] {
-        switch selectedFilter {
-        case .all:
-            return activeTests.results
-        case .passing:
-            return activeTests.results.filter { $0.status == .success }
-        case .failing:
-            return activeTests.results.filter { $0.status == .failed }
-        case .running:
-            return activeTests.results.filter { $0.status == .running }
-        }
-    }
     
     var overallStatus: ServerTest.TestStatus {
         let tests = activeTests.results
@@ -91,20 +60,16 @@ struct ServerTestView: View {
                         // Quick actions
                         quickActionsSection
                         
-                        // Filter section
-                        if !activeTests.results.isEmpty {
-                            filterSection
-                        }
-                        
                         // Tests grid
-                        if filteredTests.isEmpty && selectedFilter != .all {
-                            emptyFilteredState
-                        } else if activeTests.results.isEmpty {
+                        if activeTests.results.isEmpty {
                             emptyActiveTestsState
                         } else {
                             activeTestsGrid
                         }
                         
+                        // Snippets section
+                        snippetsSection
+
                         // Suggested tests section
                         if !suggestedTests.results.isEmpty {
                             suggestedTestsSection
@@ -116,7 +81,7 @@ struct ServerTestView: View {
                 .padding()
                 .padding(.top, 10)
             }
-            .navigationTitle("Tests")
+            .navigationTitle("Code")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -264,29 +229,6 @@ struct ServerTestView: View {
         }
     }
     
-    private var filterSection: some View {
-        VStack(alignment: .leading) {
-            Text("Filter Tests")
-                .font(.headline)
-                .foregroundStyle(.primary)
-            
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack {
-                    ForEach(TestFilter.allCases, id: \.self) { filter in
-                        FilterChip(
-                            filter: filter,
-                            isSelected: selectedFilter == filter,
-                            count: countForFilter(filter)
-                        ) {
-                            selectedFilter = filter
-                        }
-                    }
-                }
-                .padding(.horizontal, 2)
-            }
-        }
-    }
-    
     private var activeTestsGrid: some View {
         VStack(alignment: .leading) {
             Text("Active Tests")
@@ -296,9 +238,42 @@ struct ServerTestView: View {
             LazyVGrid(columns: [
                 GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 12)
             ], spacing: 12) {
-                ForEach(filteredTests) { test in
+                ForEach(activeTests.results) { test in
                     TestCard(test: test)
                         .matchedTransitionSource(id: test.id, in: namespace!)
+                }
+            }
+        }
+    }
+
+    private var snippetsSection: some View {
+        VStack(alignment: .leading) {
+            HStack {
+                Text("Snippets")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text("\(snippets.results.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if snippets.results.isEmpty {
+                Text("No snippets yet")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
+            } else {
+                LazyVGrid(columns: [
+                    GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 12)
+                ], spacing: 12) {
+                    ForEach(snippets.results) { snippet in
+                        NavigationLink(value: snippet) {
+                            SnippetCard(snippet: snippet)
+                                .matchedTransitionSource(id: snippet.id, in: namespace!)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
         }
@@ -368,24 +343,6 @@ struct ServerTestView: View {
         .padding(.vertical, 40)
     }
     
-    private var emptyFilteredState: some View {
-        VStack {
-            Image(systemName: selectedFilter.icon)
-                .font(.system(size: 32))
-                .foregroundStyle(selectedFilter.color)
-            
-            Text("No \(selectedFilter.rawValue) Tests")
-                .font(.headline)
-                .foregroundStyle(.primary)
-            
-            Text("Try adjusting your filter or run some tests")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .padding(.vertical, 40)
-    }
-    
     private var loadingState: some View {
         VStack {
             ProgressView()
@@ -396,15 +353,6 @@ struct ServerTestView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 60)
-    }
-    
-    private func countForFilter(_ filter: TestFilter) -> Int {
-        switch filter {
-        case .all: return activeTests.results.count
-        case .passing: return activeTests.results.filter { $0.status == .success }.count
-        case .failing: return activeTests.results.filter { $0.status == .failed }.count
-        case .running: return activeTests.results.filter { $0.status == .running }.count
-        }
     }
     
     private func runAllTests() async {
@@ -475,44 +423,6 @@ struct TestMetricCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-    }
-}
-
-struct FilterChip: View {
-    let filter: ServerTestView.TestFilter
-    let isSelected: Bool
-    let count: Int
-    let action: () -> Void
-    
-    var body: some View {
-        Button(action: action) {
-            HStack {
-                Image(systemName: filter.icon)
-                    .font(.caption)
-                
-                Text(filter.rawValue)
-                    .font(.caption)
-                    .fontWeight(.medium)
-                
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.primary.opacity(0.1))
-                        .clipShape(Capsule())
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                isSelected ? filter.color : .secondary.opacity(0.1),
-                in: Capsule()
-            )
-            .foregroundStyle(isSelected ? .white : .primary)
-        }
-        .buttonStyle(.plain)
     }
 }
 
@@ -618,6 +528,380 @@ struct TestCard: View {
         Task {
             try await test.delete(from: db!)
         }
+    }
+}
+
+struct SnippetCard: View {
+    let snippet: Snippet
+    @Environment(\.blackbirdDatabase) var db
+    @State private var isRunning = false
+    @State private var terminalOutput = ""
+    @State private var showTerminal = false
+
+    var body: some View {
+        Menu {
+            AsyncButton("Run Snippet", systemImage: "play.fill") {
+                await runSnippet()
+            }
+
+            NavigationLink(value: snippet) {
+                Label("Edit Snippet", systemImage: "pencil")
+            }
+
+            Divider()
+
+            Button("Delete Snippet", systemImage: "trash", role: .destructive) {
+                deleteSnippet()
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    ZStack {
+                        Circle()
+                            .fill(.blue.opacity(0.12))
+                            .frame(width: 32, height: 32)
+
+                        if isRunning {
+                            ProgressView()
+                                .controlSize(.mini)
+                        } else {
+                            Image(systemName: "terminal")
+                                .font(.caption)
+                                .foregroundStyle(.blue)
+                        }
+                    }
+
+                    Spacer()
+                }
+
+                Text(snippet.comment.isEmpty ? "Snippet" : snippet.comment)
+                    .font(.headline)
+                    .fontWeight(.medium)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text(snippet.command)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+
+                Text(serverDisplayText)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+
+                if showTerminal {
+                    ScrollView {
+                        Text(terminalOutput)
+                            .font(.system(.caption2, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    .frame(maxHeight: 90)
+                    .padding(8)
+                    .background(.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 8))
+                    .foregroundStyle(.green)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding()
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(.blue.opacity(0.2), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
+        }
+        .multilineTextAlignment(.leading)
+        .buttonStyle(.plain)
+    }
+
+    private var serverDisplayText: String {
+        let key = snippet.credentialKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !key.isEmpty else { return "Global snippet (no server)" }
+        return keychain().getCredential(for: key)?.label ?? "Server key: \(key)"
+    }
+
+    private func runSnippet() async {
+        let key = snippet.credentialKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !key.isEmpty else {
+            terminalOutput = "Snippet has no server assigned. Create it for a specific server first."
+            showTerminal = true
+            return
+        }
+        guard let credential = keychain().getCredential(for: key) else {
+            terminalOutput = "Server not found for key \(key)."
+            showTerminal = true
+            return
+        }
+
+        isRunning = true
+        defer { isRunning = false }
+
+        do {
+            let output = try await SSHClientActor.shared.execute(snippet.command, on: credential)
+            terminalOutput = output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "(no output)" : output
+            showTerminal = true
+
+            var updated = snippet
+            updated.lastUse = .now
+            try? await updated.write(to: db!)
+        } catch {
+            terminalOutput = "Error: \(error.localizedDescription)"
+            showTerminal = true
+        }
+    }
+
+    private func deleteSnippet() {
+        Task {
+            try? await snippet.delete(from: db!)
+        }
+    }
+}
+
+struct SnippetDetailView: View {
+    @BlackbirdLiveModel var snippet: Snippet?
+    @Environment(\.blackbirdDatabase) private var db
+    @Environment(\.dismiss) private var dismiss
+    @State private var contextStore = AgenticScreenContextStore.shared
+
+    @State private var isEditing = false
+    @State private var editCommand = ""
+    @State private var editComment = ""
+    @State private var editCredentialKey = ""
+    @State private var showingDeleteConfirmation = false
+
+    var body: some View {
+        if let snippet {
+            ScrollView {
+                VStack(spacing: 12) {
+                    headerSection(snippet)
+                    configurationSection(snippet)
+                    actionsSection(snippet)
+                }
+                .padding()
+            }
+            .navigationTitle(isEditing ? "Edit Snippet" : (snippet.comment.isEmpty ? "Snippet" : snippet.comment))
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(isEditing ? "Save" : "Edit") {
+                        if isEditing {
+                            saveChanges(snippet)
+                        } else {
+                            startEditing(snippet)
+                        }
+                    }
+                    .fontWeight(.medium)
+                }
+            }
+            .onAppear {
+                updateAgenticContext(snippet: snippet, useDraft: isEditing)
+            }
+            .onChange(of: isEditing) {
+                updateAgenticContext(snippet: snippet, useDraft: isEditing)
+            }
+            .onChange(of: editCommand) {
+                if isEditing { updateAgenticContext(snippet: snippet, useDraft: true) }
+            }
+            .onChange(of: editComment) {
+                if isEditing { updateAgenticContext(snippet: snippet, useDraft: true) }
+            }
+            .onChange(of: editCredentialKey) {
+                if isEditing { updateAgenticContext(snippet: snippet, useDraft: true) }
+            }
+            .safeAreaInset(edge: .bottom) {
+                AgenticDetailFABInset()
+            }
+            .alert("Delete Snippet", isPresented: $showingDeleteConfirmation) {
+                Button(role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    deleteSnippet(snippet)
+                }
+            } message: {
+                Text("Are you sure you want to delete this snippet?")
+            }
+        }
+    }
+
+    private func headerSection(_ snippet: Snippet) -> some View {
+        VStack {
+            HStack {
+                ZStack {
+                    Circle()
+                        .fill(.blue.opacity(0.12))
+                        .frame(width: 60, height: 60)
+                    Image(systemName: "terminal")
+                        .font(.system(size: 24))
+                        .foregroundStyle(.blue)
+                }
+
+                VStack(alignment: .leading) {
+                    if isEditing {
+                        TextField("Snippet title/comment", text: $editComment)
+                            .textFieldStyle(EditFieldStyle())
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                    } else {
+                        Text(snippet.comment.isEmpty ? "Snippet" : snippet.comment)
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                    }
+
+                    Text(serverLabel(for: isEditing ? editCredentialKey : (snippet.credentialKey ?? "")))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+        }
+        .padding()
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func configurationSection(_ snippet: Snippet) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Configuration")
+                .font(.headline)
+                .fontWeight(.medium)
+
+            if isEditing {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Server")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
+
+                    Picker("Server", selection: $editCredentialKey) {
+                        Text("Global (no server)")
+                            .tag("")
+                        let credentials = keychain().allKeys().compactMap { keychain().getCredential(for: $0) }
+                        ForEach(credentials, id: \.key) { credential in
+                            Text(credential.label)
+                                .tag(credential.key)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Command")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+
+                if isEditing {
+                    TextField("Enter command", text: $editCommand, axis: .vertical)
+                        .lineLimit(3...6)
+                        .textFieldStyle(EditFieldStyle())
+                        .font(.system(.body, design: .monospaced))
+                } else {
+                    Text(snippet.command)
+                        .font(.system(.body, design: .monospaced))
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                }
+            }
+
+            if !isEditing {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Last Used")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
+                    Text("\(snippet.lastUse, style: .relative) ago")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding()
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func actionsSection(_ snippet: Snippet) -> some View {
+        VStack(spacing: 12) {
+            if !isEditing {
+                Button {
+                    showingDeleteConfirmation = true
+                } label: {
+                    HStack {
+                        Image(systemName: "trash")
+                        Text("Delete Snippet")
+                            .fontWeight(.medium)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(.red.opacity(0.1))
+                    .foregroundStyle(.red)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        }
+    }
+
+    private func startEditing(_ snippet: Snippet) {
+        editComment = snippet.comment
+        editCommand = snippet.command
+        editCredentialKey = snippet.credentialKey ?? ""
+        withAnimation(.easeInOut) {
+            isEditing = true
+        }
+    }
+
+    private func saveChanges(_ snippet: Snippet) {
+        Task {
+            var updated = snippet
+            updated.comment = editComment
+            updated.command = editCommand
+            updated.credentialKey = editCredentialKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : editCredentialKey
+            try await updated.write(to: db!)
+            await MainActor.run {
+                withAnimation(.easeInOut) {
+                    isEditing = false
+                }
+            }
+        }
+    }
+
+    private func deleteSnippet(_ snippet: Snippet) {
+        Task {
+            try await snippet.delete(from: db!)
+            await MainActor.run {
+                dismiss()
+            }
+        }
+    }
+
+    private func serverLabel(for credentialKey: String) -> String {
+        let key = credentialKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if key.isEmpty {
+            return "Global (no server)"
+        }
+        return keychain().getCredential(for: key)?.label ?? "Unknown server"
+    }
+
+    private func updateAgenticContext(snippet: Snippet, useDraft: Bool) {
+        let command = useDraft ? editCommand : snippet.command
+        let comment = useDraft ? editComment : snippet.comment
+        let credential = useDraft ? editCredentialKey : (snippet.credentialKey ?? "")
+        let server = serverLabel(for: credential)
+        contextStore.set(
+            chatTitle: "Edit Snippet \(snippet.id)",
+            draftMessage: """
+            Edit this existing snippet.
+            - id: \(snippet.id)
+            - server: \(server)
+            - command: \(command)
+            - comment: \(comment.isEmpty ? "(none)" : comment)
+
+            Requested changes:
+            """
+        )
     }
 }
 

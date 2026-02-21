@@ -13,14 +13,17 @@ struct Snippet: BlackbirdModel{
     @BlackbirdColumn var command: String
     @BlackbirdColumn var comment: String
     @BlackbirdColumn var lastUse: Date
+    @BlackbirdColumn var credentialKey: String? = nil
 
     static let primaryKey: [BlackbirdColumnKeyPath] = [ \.$id ]
 
     static let indexes: [[BlackbirdColumnKeyPath]] = [
+        [ \.$credentialKey, \.$lastUse ],
         [ \.$comment, \.$lastUse, \.$command ]
     ]
 
-    static let defaultSnippets: [(command: String, comment: String)] = [
+    // Legacy defaults used in earlier app versions; kept only for cleanup.
+    private static let legacyDefaultSnippets: [(command: String, comment: String)] = [
         ("docker ps --format 'table {{.Names}}\\t{{.Status}}\\t{{.Ports}}'", "List running containers with status and ports"),
         ("docker logs --tail 100 <container>", "Show the latest 100 log lines for a container"),
         ("docker exec -it <container> sh", "Open a shell in a running container"),
@@ -32,39 +35,70 @@ struct Snippet: BlackbirdModel{
     ]
 
     static func ensureDefaults(in db: Blackbird.Database) async {
-        let defaultsKey = "terminal.snippets.defaults.seeded.v1"
-        if UserDefaults.standard.bool(forKey: defaultsKey) {
-            return
-        }
-
-        let existing = (try? await Snippet.read(from: db, matching: .all, limit: 1)) ?? []
-        guard existing.isEmpty else {
-            UserDefaults.standard.set(true, forKey: defaultsKey)
-            return
-        }
-
-        for template in defaultSnippets {
-            let snippet = Snippet(
-                command: template.command,
-                comment: template.comment,
-                lastUse: .distantPast
-            )
-            try? await snippet.write(to: db)
-        }
-        UserDefaults.standard.set(true, forKey: defaultsKey)
+        _ = db
     }
 
     static func addDefaults(in db: Blackbird.Database) async {
-        let existing = (try? await Snippet.read(from: db, matching: .all, limit: 400)) ?? []
-        let existingCommands = Set(existing.map(\.command))
+        _ = db
+    }
 
-        for template in defaultSnippets where !existingCommands.contains(template.command) {
-            let snippet = Snippet(
-                command: template.command,
-                comment: template.comment,
-                lastUse: .distantPast
-            )
-            try? await snippet.write(to: db)
+    static func purgeLegacyDefaults(in db: Blackbird.Database) async {
+        let cleanupKey = "terminal.snippets.legacy-defaults-removed.v1"
+        if UserDefaults.standard.bool(forKey: cleanupKey) {
+            return
+        }
+
+        let legacyCommands = Set(legacyDefaultSnippets.map(\.command))
+        do {
+            let rows = try await Snippet.read(from: db, matching: .all, limit: 1200)
+            for row in rows where legacyCommands.contains(row.command) && (row.credentialKey ?? "").isEmpty {
+                try await row.delete(from: db)
+            }
+            UserDefaults.standard.set(true, forKey: cleanupKey)
+        } catch {
+            print("Failed to purge legacy default snippets: \(error)")
+        }
+    }
+
+    static func saveCommand(
+        command: String,
+        comment: String,
+        credentialKey: String?,
+        in db: Blackbird.Database
+    ) async throws {
+        let normalizedCommand = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedCommand.isEmpty else { return }
+        let all = try await Snippet.read(from: db, matching: .all, orderBy: .descending(\.$lastUse), limit: 500)
+        if var existing = all.first(where: {
+            $0.command == normalizedCommand &&
+            (($0.credentialKey ?? "") == (credentialKey ?? ""))
+        }) {
+            existing.lastUse = .now
+            if !comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                existing.comment = comment
+            }
+            try await existing.write(to: db)
+            return
+        }
+
+        let snippet = Snippet(
+            command: normalizedCommand,
+            comment: comment.trimmingCharacters(in: .whitespacesAndNewlines),
+            lastUse: .now,
+            credentialKey: credentialKey
+        )
+        try await snippet.write(to: db)
+    }
+
+    static func deleteForServer(credentialKey: String, in db: Blackbird.Database) async {
+        guard !credentialKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        do {
+            let scoped = try await Snippet.read(from: db, matching: \.$credentialKey == credentialKey, limit: 1000)
+            for snippet in scoped {
+                try await snippet.delete(from: db)
+            }
+        } catch {
+            print("Failed to delete snippets for server \(credentialKey): \(error)")
         }
     }
 }

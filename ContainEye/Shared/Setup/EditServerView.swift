@@ -475,6 +475,7 @@ struct EditServerView: View {
                 if let server = try? await Server.read(from: db!, id: credential.key) {
                     try await server.delete(from: db!)
                 }
+                await Snippet.deleteForServer(credentialKey: credential.key, in: db!)
                 
                 await MainActor.run {
                     dismiss()

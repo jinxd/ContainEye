@@ -41,32 +41,28 @@ struct ConfigureDisabledTestView: View {
                 HStack {
                     TextField("Describe how to change the test...", text: $aiPrompt, axis: .vertical)
                     AsyncButton {
-                        do {
-                            let aiPrompt = "\(test.title)\n\(test.notes ?? "")\n```\(test.command)```\nShould produce currently:\n```\(test.expectedOutput)```\nPlease help me adapt this test as described here:\n\(aiPrompt)"
-                            let dirtyOutput = await LLM.generate(
-                                prompt: aiPrompt,
-                                systemPrompt: LLM.addTestSystemPrompt
-                            )
-                            let llmOutput = LLM.cleanLLMOutput(dirtyOutput.output)
+                        let requestedChanges = aiPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !requestedChanges.isEmpty else { return }
+                        let serverLabel = keychain().getCredential(for: test.credentialKey)?.label ?? test.credentialKey
+                        let draft = """
+                        Edit this existing test using tool calls.
 
-                            guard let data = llmOutput.data(using: .utf8) else {
-                                throw NSError(
-                                    domain: "AITestGeneration",
-                                    code: 1,
-                                    userInfo: [NSLocalizedDescriptionKey: "AI returned an invalid response."]
-                                )
-                            }
+                        Use `update_test` for this record:
+                        - id: \(test.id)
+                        - server: \(serverLabel)
+                        - title: \(test.title)
+                        - command: \(test.command)
+                        - expectedOutput: \(test.expectedOutput)
+                        - notes: \(test.notes ?? "(none)")
 
-                            let output = try JSONDecoder().decode(LLM.Output.self, from: data)
-                            var test = test
-                            test.command = output.content.command
-                            test.title = output.content.title
-                            test.expectedOutput = output.content.expectedOutput
-                            try await test.write(to: db!)
-                            self.aiPrompt.removeAll()
-                        } catch {
-                            ConfirmatorManager.reportError(error, title: "AI Test Update Failed")
-                        }
+                        Requested changes:
+                        \(requestedChanges)
+                        """
+                        AgenticContextBridge.shared.openAgentic(
+                            chatTitle: "Edit Test #\(test.id)",
+                            draftMessage: draft
+                        )
+                        aiPrompt.removeAll()
                     } label: {
                         Image(systemName: "arrow.up.circle.fill")
                     }

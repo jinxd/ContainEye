@@ -33,7 +33,7 @@ protocol CommandSuggestionProviding: AnyObject {
 }
 
 final class CommandSuggestionEngine: CommandSuggestionProviding {
-    typealias SnippetCommandsProvider = () async -> [String]
+    typealias SnippetCommandsProvider = (_ credentialKey: String) async -> [String]
 
     private let index: RemoteDocumentTreeIndex
     private let fetchSnippetCommands: SnippetCommandsProvider
@@ -44,8 +44,11 @@ final class CommandSuggestionEngine: CommandSuggestionProviding {
     init(
         index: RemoteDocumentTreeIndex,
         fetchSnippetCommands: @escaping SnippetCommandsProvider = {
-            let snippets = (try? await Snippet.read(from: SharedDatabase.db, matching: .all, orderBy: .descending(\.$lastUse), limit: 120)) ?? []
-            return snippets.map(\.command)
+            credentialKey in
+            let snippets = (try? await Snippet.read(from: SharedDatabase.db, matching: .all, orderBy: .descending(\.$lastUse), limit: 220)) ?? []
+            return snippets
+                .filter { ($0.credentialKey ?? "").isEmpty || $0.credentialKey == credentialKey }
+                .map(\.command)
         }
     ) {
         self.index = index
@@ -106,7 +109,7 @@ final class CommandSuggestionEngine: CommandSuggestionProviding {
 
         scored.append(contentsOf: historyMatches)
 
-        let snippetMatches = await fetchSnippetCommands()
+        let snippetMatches = await fetchSnippetCommands(context.credential.key)
             .filter { $0.hasPrefix(trimmedInput) }
             .prefix(6)
             .map { CommandSuggestion(text: $0, source: .snippet, score: scoreForPrefixMatch(prefix: trimmedInput, candidate: $0, sourceBoost: 0.75)) }

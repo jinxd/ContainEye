@@ -19,6 +19,7 @@ struct ServerDetailView: View {
     @Environment(\.blackbirdDatabase) var db
     @Environment(\.dismiss) private var dismiss
     @State private var showingClearContainersAlert = false
+    @State private var contextStore = AgenticScreenContextStore.shared
 
     init(server: BlackbirdLiveModel<Server>, id serverId: String) {
         self._server = server
@@ -60,7 +61,34 @@ struct ServerDetailView: View {
                 Text("This will remove all cached container data for this server. The data will be refreshed from the server.")
             }
             .trackView("servers/detail")
+            .onAppear {
+                updateAgenticContext(server: server)
+            }
+            .onChange(of: server.credential?.label ?? "") {
+                updateAgenticContext(server: server)
+            }
+            .safeAreaInset(edge: .bottom) {
+                AgenticDetailFABInset()
+            }
         }
+    }
+
+    private func updateAgenticContext(server: Server) {
+        let label = server.credential?.label ?? server.id
+        let host = server.credential?.host ?? "unknown host"
+        let username = server.credential?.username ?? "unknown"
+        contextStore.set(
+            chatTitle: "Server \(label)",
+            draftMessage: """
+            Use this server as reference:
+            - label: \(label)
+            - host: \(host)
+            - username: \(username)
+            - credentialKey: \(server.credentialKey)
+
+            Help me with:
+            """
+        )
     }
     
     @ViewBuilder

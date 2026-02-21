@@ -15,6 +15,7 @@ struct ServerTestDetail: View {
     @Environment(\.blackbirdDatabase) private var db
     @Environment(\.dismiss) private var dismiss
     @Environment(\.namespace) var namespace
+    @State private var contextStore = AgenticScreenContextStore.shared
     
     @State private var isEditing = false
     @State private var isRunning = false
@@ -26,10 +27,6 @@ struct ServerTestDetail: View {
     @State private var editExpectedOutput = ""
     @State private var editNotes = ""
     @State private var editCredentialKey = ""
-    
-    // AI assistance
-    @State private var showingAIAssistant = false
-    @State private var aiPrompt = ""
     
     var body: some View {
         if let test {
@@ -61,31 +58,41 @@ struct ServerTestDetail: View {
                 .navigationBarTitleDisplayMode(.large)
                 .toolbar {
                     ToolbarItem(placement: .navigationBarTrailing) {
-                        HStack {
-                            if !isEditing {
-                                Button {
-                                    showingAIAssistant = true
-                                } label: {
-                                    Image(systemName: "wand.and.sparkles")
-                                        .foregroundStyle(.blue)
-                                }
+                        Button(isEditing ? "Save" : "Edit") {
+                            if isEditing {
+                                saveChanges(test: test)
+                            } else {
+                                startEditing(test: test)
                             }
-                            
-                            Button(isEditing ? "Save" : "Edit") {
-                                if isEditing {
-                                    saveChanges(test: test)
-                                } else {
-                                    startEditing(test: test)
-                                }
-                            }
-                            .fontWeight(.medium)
+                            updateAgenticContext(test: test, useDraft: isEditing)
                         }
+                        .fontWeight(.medium)
                     }
                 }
-            .sheet(isPresented: $showingAIAssistant) {
-                AIAssistantView(test: test, prompt: $aiPrompt)
-                    .confirmator()
-            }
+                .onAppear {
+                    updateAgenticContext(test: test, useDraft: isEditing)
+                }
+                .onChange(of: isEditing) {
+                    updateAgenticContext(test: test, useDraft: isEditing)
+                }
+                .onChange(of: editTitle) {
+                    if isEditing { updateAgenticContext(test: test, useDraft: true) }
+                }
+                .onChange(of: editCommand) {
+                    if isEditing { updateAgenticContext(test: test, useDraft: true) }
+                }
+                .onChange(of: editExpectedOutput) {
+                    if isEditing { updateAgenticContext(test: test, useDraft: true) }
+                }
+                .onChange(of: editNotes) {
+                    if isEditing { updateAgenticContext(test: test, useDraft: true) }
+                }
+                .onChange(of: editCredentialKey) {
+                    if isEditing { updateAgenticContext(test: test, useDraft: true) }
+                }
+                .safeAreaInset(edge: .bottom) {
+                    AgenticDetailFABInset()
+                }
             .alert("Delete Test", isPresented: $showingDeleteConfirmation) {
                 Button(role: .cancel) { }
                 Button("Delete", role: .destructive) {
@@ -473,6 +480,31 @@ struct ServerTestDetail: View {
                 dismiss()
             }
         }
+    }
+
+    private func updateAgenticContext(test: ServerTest, useDraft: Bool) {
+        let title = useDraft ? editTitle : test.title
+        let command = useDraft ? editCommand : test.command
+        let expectedOutput = useDraft ? editExpectedOutput : test.expectedOutput
+        let notes = useDraft ? editNotes : (test.notes ?? "")
+        let credentialKey = useDraft ? editCredentialKey : test.credentialKey
+        let serverLabel = serverDisplayName(for: credentialKey)
+        contextStore.set(
+            chatTitle: "Edit Test #\(test.id)",
+            draftMessage: """
+            Edit this existing test using tool calls.
+
+            Use `update_test` for this record:
+            - id: \(test.id)
+            - server: \(serverLabel)
+            - title: \(title)
+            - command: \(command)
+            - expectedOutput: \(expectedOutput)
+            - notes: \(notes.isEmpty ? "(none)" : notes)
+
+            Requested changes:
+            """
+        )
     }
 }
 
