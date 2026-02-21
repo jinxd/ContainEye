@@ -93,8 +93,8 @@ struct SFTPView: View {
     @State private var uploadProgress: Double = 0
     @State private var showingPathInput = false
     @State private var pathInput = ""
-    @State private var terminalManager = TerminalNavigationManager.shared
-    @State private var contextStore = AgenticScreenContextStore.shared
+    @Environment(\.terminalNavigationManager) private var terminalManager
+    @Environment(\.agenticContextStore) private var contextStore
     
     private let tempDirectory: URL = {
         FileManager.default.temporaryDirectory.appendingPathComponent("ContainEye")

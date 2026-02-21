@@ -16,9 +16,9 @@ struct ContentView: View {
     @AppStorage("screen") private var screen = Screen.serverList
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.blackbirdDatabase) var db
+    @Environment(\.agenticBridge) private var bridge
+    @Environment(\.agenticContextStore) private var contextStore
     @Namespace var namespace
-    @State private var bridge = AgenticContextBridge.shared
-    @State private var contextStore = AgenticScreenContextStore.shared
     @State private var lastNonAgenticScreen: Screen = .serverList
 
     enum Screen: String, CaseIterable, Identifiable {

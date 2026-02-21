@@ -45,14 +45,15 @@ struct AgenticFloatingActionButton: View {
 }
 
 struct AgenticDetailFABInset: View {
-    @State private var contextStore = AgenticScreenContextStore.shared
+    @Environment(\.agenticBridge) private var bridge
+    @Environment(\.agenticContextStore) private var contextStore
 
     var body: some View {
         if let context = contextStore.currentContext {
             HStack {
                 Spacer()
                 AgenticFloatingActionButton {
-                    AgenticContextBridge.shared.openAgentic(
+                    bridge.openAgentic(
                         chatTitle: context.chatTitle,
                         draftMessage: context.draftMessage
                     )

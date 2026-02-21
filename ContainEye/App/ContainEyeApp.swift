@@ -22,6 +22,10 @@ import WidgetKit
 struct ContainEyeApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     let db = SharedDatabase.db
+    let agenticBridge = AgenticContextBridge.shared
+    let contextStore = AgenticScreenContextStore.shared
+    let terminalNavigationManager = TerminalNavigationManager.shared
+    let storeKitManager = StoreKitManager.shared
     @Environment(\.scenePhase) var scenePhase
 
     init() {
@@ -34,6 +38,10 @@ struct ContainEyeApp: App {
             ContentView()
                 .confirmable()
                 .environment(\.blackbirdDatabase, db)
+                .environment(\.agenticBridge, agenticBridge)
+                .environment(\.agenticContextStore, contextStore)
+                .environment(\.terminalNavigationManager, terminalNavigationManager)
+                .environment(\.storeKitManager, storeKitManager)
 #if !os(macOS)
                 .onAppear{
                     try? BGTaskScheduler.shared.submit(

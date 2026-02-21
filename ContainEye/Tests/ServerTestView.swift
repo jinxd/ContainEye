@@ -13,6 +13,7 @@ import KeychainAccess
 
 struct ServerTestView: View {
     @Environment(\.blackbirdDatabase) var db
+    @Environment(\.agenticBridge) private var bridge
     @BlackbirdLiveModels({
         try await ServerTest.read(
             from: $0,
@@ -38,7 +39,6 @@ struct ServerTestView: View {
     @State private var notificationsAllowed = true
     @Environment(\.namespace) var namespace
     @State private var isRunningAllTests = false
-    @State private var showingAddTest = false
     
     var overallStatus: ServerTest.TestStatus {
         let tests = activeTests.results
@@ -56,10 +56,7 @@ struct ServerTestView: View {
                     if activeTests.didLoad {
                         // Header section with stats
                         testsHeaderSection
-                        
-                        // Quick actions
-                        quickActionsSection
-                        
+
                         // Tests grid
                         if activeTests.results.isEmpty {
                             emptyActiveTestsState
@@ -85,30 +82,27 @@ struct ServerTestView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showingAddTest = true
+                    Menu {
+                        Button {
+                            openAgenticForTestCreation()
+                        } label: {
+                            Label("Create Test", systemImage: "testtube.2")
+                        }
+
+                        Button {
+                            openAgenticForSnippetCreation()
+                        } label: {
+                            Label("Create Snippet", systemImage: "terminal")
+                        }
                     } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title2)
-                            .foregroundStyle(.blue)
+                        Image(systemName: "plus")
                     }
+                    .accessibilityLabel("Create")
+#if os(iOS)
+                    .buttonStyle(.glass)
+#endif
                 }
             }
-        }
-        .sheet(isPresented: $showingAddTest) {
-            NavigationView {
-                AddTestFlowView()
-                    .navigationTitle("Create Test")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarLeading) {
-                            Button(role: .cancel) {
-                                showingAddTest = false
-                            }
-                        }
-                    }
-            }
-            .confirmator()
         }
         .onAppear {
             checkNotificationPermissions()
@@ -146,15 +140,36 @@ struct ServerTestView: View {
                 }
                 
                 Spacer()
-                
-                VStack(alignment: .trailing) {
+
+                VStack(alignment: .trailing, spacing: 8) {
                     Text("Total Tests")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    
+
                     Text("\(activeTests.results.count)")
                         .font(.title2)
                         .fontWeight(.semibold)
+
+                    AsyncButton {
+                        await runAllTests()
+                    } label: {
+                        HStack(spacing: 6) {
+                            if isRunningAllTests {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "play.fill")
+                            }
+                            Text(isRunningAllTests ? "Running..." : "Run All")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .foregroundStyle(.white)
+                        .background(.blue, in: Capsule())
+                    }
+                    .disabled(activeTests.results.isEmpty || isRunningAllTests)
                 }
             }
             
@@ -184,49 +199,6 @@ struct ServerTestView: View {
         }
         .padding()
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-    }
-    
-    private var quickActionsSection: some View {
-        HStack {
-            // Run all tests button
-            AsyncButton {
-                await runAllTests()
-            } label: {
-                HStack {
-                    if isRunningAllTests {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(.white)
-                    } else {
-                        Image(systemName: "play.fill")
-                    }
-                    Text(isRunningAllTests ? "Running..." : "Run All Tests")
-                        .fontWeight(.medium)
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(.blue)
-                .foregroundStyle(.white)
-                .clipShape(Capsule())
-            }
-            .disabled(activeTests.results.isEmpty || isRunningAllTests)
-            
-            // Add test button
-            Button {
-                showingAddTest = true
-            } label: {
-                HStack {
-                    Image(systemName: "plus")
-                    Text("New Test")
-                        .fontWeight(.medium)
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(.green)
-                .foregroundStyle(.white)
-                .clipShape(Capsule())
-            }
-        }
     }
     
     private var activeTestsGrid: some View {
@@ -327,7 +299,7 @@ struct ServerTestView: View {
             }
             
             Button {
-                showingAddTest = true
+                openAgenticForTestCreation()
             } label: {
                 HStack {
                     Image(systemName: "plus")
@@ -394,6 +366,29 @@ struct ServerTestView: View {
             }
         }
     }
+
+    private func openAgenticForTestCreation() {
+        bridge.openAgentic(
+            chatTitle: "Create Test",
+            draftMessage: """
+            Create a new server test.
+            Use `list_servers` if needed to confirm server labels.
+            Then use `create_test` with `server`, `title`, `command`, and `expectedOutput`.
+            """
+        )
+    }
+
+    private func openAgenticForSnippetCreation() {
+        bridge.openAgentic(
+            chatTitle: "Create Snippet",
+            draftMessage: """
+            Create a new snippet.
+            Use `create_snippet` with `command` and optional `comment`.
+            Optionally provide `server` for a server-scoped snippet, or leave it global.
+            """
+        )
+    }
+
 }
 
 // MARK: - Supporting Views
@@ -904,9 +899,6 @@ struct SnippetDetailView: View {
         )
     }
 }
-
-
-
 
 #Preview {
     let db = try! Blackbird.Database.inMemoryDatabase()

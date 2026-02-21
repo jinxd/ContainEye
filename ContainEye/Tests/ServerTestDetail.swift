@@ -15,7 +15,7 @@ struct ServerTestDetail: View {
     @Environment(\.blackbirdDatabase) private var db
     @Environment(\.dismiss) private var dismiss
     @Environment(\.namespace) var namespace
-    @State private var contextStore = AgenticScreenContextStore.shared
+    @Environment(\.agenticContextStore) private var contextStore
     
     @State private var isEditing = false
     @State private var isRunning = false

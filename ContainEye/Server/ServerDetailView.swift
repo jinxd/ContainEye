@@ -18,8 +18,9 @@ struct ServerDetailView: View {
     @Environment(\.namespace) var namespace
     @Environment(\.blackbirdDatabase) var db
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.agenticContextStore) private var contextStore
+    @Environment(\.terminalNavigationManager) private var terminalManager
     @State private var showingClearContainersAlert = false
-    @State private var contextStore = AgenticScreenContextStore.shared
 
     init(server: BlackbirdLiveModel<Server>, id serverId: String) {
         self._server = server
@@ -100,7 +101,7 @@ struct ServerDetailView: View {
             HStack(spacing: 16) {
                 Button(action: {
                     if let credential = server.credential {
-                        TerminalNavigationManager.shared.navigateToTerminal(with: credential)
+                        terminalManager.navigateToTerminal(with: credential)
                         dismiss()
                     }
                 }) {

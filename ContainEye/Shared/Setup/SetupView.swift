@@ -9,7 +9,7 @@ import SwiftUI
 
 struct SetupView: View {
     @AppStorage("setupScreen") private var setupScreen : Int = 0
-    @AppStorage("screen") private var screen = ContentView.Screen.testList
+    @AppStorage("screen") private var screen = ContentView.Screen.serverList
 
     var body: some View {
         TabView(selection: $setupScreen) {
@@ -18,12 +18,6 @@ struct SetupView: View {
             }
             Tab(value: 1) {
                 AddServerView(screen: $setupScreen)
-            }
-            Tab(value: 3) {
-                WouldYouLikeToAddATestView(screen: $setupScreen)
-            }
-            Tab(value: 2) {
-                AddTestView(screen: $setupScreen)
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
@@ -34,7 +28,7 @@ struct SetupView: View {
         .toolbar {
             if setupScreen > 0 {
                 Button(role: .cancel) {
-                    UserDefaults.standard.set(setupScreen == 1 ? ContentView.Screen.serverList.rawValue : ContentView.Screen.testList.rawValue, forKey: "screen")
+                    UserDefaults.standard.set(ContentView.Screen.serverList.rawValue, forKey: "screen")
                 }
             }
         }
@@ -44,6 +38,4 @@ struct SetupView: View {
 #Preview {
     SetupView()
 }
-
-
 

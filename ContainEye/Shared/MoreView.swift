@@ -15,8 +15,8 @@ import AppKit
 
 struct AgenticView: View {
     @Environment(\.blackbirdDatabase) private var db
+    @Environment(\.agenticBridge) private var bridge
     @State private var store = AgenticChatStore()
-    @State private var bridge = AgenticContextBridge.shared
     @State private var input = ""
     @State private var isSending = false
     @State private var expandedToolBundles: Set<UUID> = []
@@ -94,12 +94,31 @@ struct AgenticView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button {
-                    store.createChat()
+                Menu {
+                    Button {
+                        store.createChat()
+                    } label: {
+                        Label("New Chat", systemImage: "plus")
+                    }
+
+                    Button {
+                        startCreationChat(kind: .test)
+                    } label: {
+                        Label("Create Test", systemImage: "testtube.2")
+                    }
+
+                    Button {
+                        startCreationChat(kind: .snippet)
+                    } label: {
+                        Label("Create Snippet", systemImage: "terminal")
+                    }
                 } label: {
                     Image(systemName: "plus")
                 }
-                .accessibilityLabel("New chat")
+                .accessibilityLabel("New")
+#if os(iOS)
+                .buttonStyle(.glass)
+#endif
             }
         }
         .task {
@@ -337,7 +356,7 @@ struct AgenticView: View {
             }
 
             HStack(alignment: .bottom, spacing: 8) {
-                TextField("Ask the agent to run commands, read/write files, create tests, or manage servers…", text: $input, axis: .vertical)
+                TextField("Ask the agent to run commands, read/write files, create tests/snippets, or manage servers…", text: $input, axis: .vertical)
                     .focused($isComposerFocused)
                     .lineLimit(1...6)
                     .disabled(isSending || selectedChat == nil)
@@ -390,6 +409,38 @@ struct AgenticView: View {
         let chatID = store.createChat(title: context.chatTitle, seededFromContext: true)
         store.selectedChatID = chatID
         draftContextByChatID[chatID] = context.draftMessage
+        input = ""
+        isComposerFocused = true
+    }
+
+    private enum CreationKind {
+        case test
+        case snippet
+    }
+
+    private func startCreationChat(kind: CreationKind) {
+        let title: String
+        let draft: String
+        switch kind {
+        case .test:
+            title = "Create Test"
+            draft = """
+            Create a new server test.
+            Use `list_servers` if needed to confirm labels.
+            Then use `create_test` with `server`, `title`, `command`, and `expectedOutput`.
+            """
+        case .snippet:
+            title = "Create Snippet"
+            draft = """
+            Create a new snippet.
+            Use `create_snippet` with `command` and optional `comment`.
+            Optionally set `server` for a server-scoped snippet, or leave it global.
+            """
+        }
+
+        let chatID = store.createChat(title: title, seededFromContext: true)
+        store.selectedChatID = chatID
+        draftContextByChatID[chatID] = draft
         input = ""
         isComposerFocused = true
     }
@@ -1405,6 +1456,10 @@ Allowed tools:
 - write_file {"server":"<server label>", "path":"</path/to/file>", "content":"<full file content>"}
 - list_tests {"server":"optional server label", "status":"optional failed|success|running|notRun", "query":"optional title/path filter"}
 - create_test {"server":"<server label>", "title":"...", "command":"...", "expectedOutput":"...", "notes":"optional"}
+- update_test {"id":123, "server":"optional server label", "title":"optional", "command":"optional", "expectedOutput":"optional", "notes":"optional"}
+- list_snippets {"server":"optional server label", "query":"optional comment/command filter"}
+- create_snippet {"server":"optional server label", "command":"...", "comment":"optional"}
+- update_snippet {"id":"<snippet id>", "server":"optional server label or empty for global", "command":"optional", "comment":"optional"}
 - add_server {"label":"...", "host":"...", "port":22, "username":"...", "authMethod":"password|privateKey|privateKeyWithPassphrase", "password":"...", "privateKey":"...", "passphrase":"..."}
 - update_server {"server":"<server label>", "label":"optional", "host":"optional", "port":22, "username":"optional", "authMethod":"optional", "password":"optional", "privateKey":"optional", "passphrase":"optional"}
 - update_memory {"content":"<memory note>", "mode":"append|replace"}
@@ -1415,6 +1470,7 @@ Rules:
 - Prefer solving autonomously with available tools before asking the user anything.
 - Only ask the user a question when required information cannot be discovered via tools.
 - For server-bound tools (`run_command`, `read_file`, `write_file`, `create_test`, `update_test`, `update_server`, `list_tests`), always provide an explicit `server` argument.
+- For snippet tools, `server` is optional; omit it or set it to empty for global snippets.
 - `run_command` approvals are handled by the app; never ask the user for approval in chat text.
 - For any request to modify server metadata (host/label/username/port/auth), use `update_server`.
 - Prefer asking clarifying questions in a final response when information is missing.
@@ -1751,6 +1807,12 @@ struct AgenticToolExecutor {
                 return try await createTest(arguments: call.arguments)
             case "update_test":
                 return try await updateTest(arguments: call.arguments)
+            case "list_snippets":
+                return try await listSnippets(arguments: call.arguments)
+            case "create_snippet":
+                return try await createSnippet(arguments: call.arguments)
+            case "update_snippet":
+                return try await updateSnippet(arguments: call.arguments)
             case "add_server":
                 return try await addServer(arguments: call.arguments)
             case "update_server":
@@ -1985,6 +2047,160 @@ struct AgenticToolExecutor {
         ])
 
         return .init(userFacingSummary: "Updated test #\(test.id) (\(test.title)).", jsonPayload: payload)
+    }
+
+    private func listSnippets(arguments: [String: Any]) async throws -> AgenticToolResult {
+        let query = (arguments["query"] as? String)?.lowercased()
+        let hasServerArgument = arguments["server"] != nil || arguments["credentialKey"] != nil || arguments["credential"] != nil
+        let maybeCredential = hasServerArgument ? (try? resolveCredential(from: arguments, required: true)) : nil
+
+        var snippets = try await Snippet.read(
+            from: database,
+            matching: .all,
+            orderBy: .descending(\.$lastUse),
+            limit: 300
+        )
+
+        if let credential = maybeCredential {
+            snippets = snippets.filter { $0.credentialKey == credential.key }
+        }
+        if let query, !query.isEmpty {
+            snippets = snippets.filter {
+                $0.command.lowercased().contains(query)
+                    || $0.comment.lowercased().contains(query)
+            }
+        }
+
+        let rows = snippets.prefix(180).map { snippet in
+            [
+                "id": snippet.id,
+                "server": resolveServerLabel(for: snippet.credentialKey ?? ""),
+                "credentialKey": snippet.credentialKey ?? "",
+                "comment": snippet.comment,
+                "command": snippet.command,
+                "lastUse": snippet.lastUse.formatted(date: .abbreviated, time: .shortened),
+            ]
+        }
+
+        let payload = serialize(["snippets": rows])
+        return .init(userFacingSummary: payload, jsonPayload: payload)
+    }
+
+    private func createSnippet(arguments: [String: Any]) async throws -> AgenticToolResult {
+        let command = stringArg("command", from: arguments)
+        guard !command.isEmpty else {
+            return errorResult("create_snippet requires a non-empty command")
+        }
+        let comment = stringArg("comment", from: arguments)
+
+        let hasServerArgument = arguments["server"] != nil || arguments["credentialKey"] != nil || arguments["credential"] != nil
+        let credential = hasServerArgument ? try resolveCredential(from: arguments, required: true) : nil
+        let credentialKey = credential?.key
+
+        try await Snippet.saveCommand(
+            command: command,
+            comment: comment,
+            credentialKey: credentialKey,
+            in: database
+        )
+
+        let snippets = try await Snippet.read(
+            from: database,
+            matching: .all,
+            orderBy: .descending(\.$lastUse),
+            limit: 320
+        )
+        let created = snippets.first {
+            $0.command == command && (($0.credentialKey ?? "") == (credentialKey ?? ""))
+        }
+
+        let payload = serialize([
+            "id": created?.id ?? "",
+            "server": credential?.label ?? "Global (no server)",
+            "credentialKey": credentialKey ?? "",
+            "comment": created?.comment ?? comment,
+            "command": created?.command ?? command,
+        ])
+        return .init(
+            userFacingSummary: "Saved snippet\(credential == nil ? "" : " for \(credential!.label)").",
+            jsonPayload: payload
+        )
+    }
+
+    private func updateSnippet(arguments: [String: Any]) async throws -> AgenticToolResult {
+        let snippetID = stringArg("id", from: arguments)
+        guard !snippetID.isEmpty else {
+            return errorResult("update_snippet requires a non-empty id")
+        }
+        guard var snippet = try await Snippet.read(from: database, id: snippetID) else {
+            return errorResult("Snippet with id \(snippetID) not found")
+        }
+
+        let before: [String: Any] = [
+            "id": snippet.id,
+            "credentialKey": snippet.credentialKey ?? "",
+            "server": resolveServerLabel(for: snippet.credentialKey ?? ""),
+            "command": snippet.command,
+            "comment": snippet.comment,
+        ]
+
+        if arguments.keys.contains("command") {
+            let command = stringArg("command", from: arguments)
+            guard !command.isEmpty else {
+                return errorResult("update_snippet command cannot be empty")
+            }
+            snippet.command = command
+        }
+        if arguments.keys.contains("comment") {
+            snippet.comment = stringArg("comment", from: arguments)
+        }
+
+        let hasServerArgument = arguments["server"] != nil || arguments["credentialKey"] != nil || arguments["credential"] != nil
+        if hasServerArgument {
+            let rawServer = (
+                (arguments["server"] as? String)
+                ?? (arguments["credentialKey"] as? String)
+                ?? (arguments["credential"] as? String)
+                ?? ""
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if rawServer.isEmpty {
+                snippet.credentialKey = nil
+            } else {
+                let credential = try resolveCredential(from: arguments, required: true)
+                snippet.credentialKey = credential.key
+            }
+        }
+
+        snippet.lastUse = .now
+        try await snippet.write(to: database)
+
+        let after: [String: Any] = [
+            "id": snippet.id,
+            "credentialKey": snippet.credentialKey ?? "",
+            "server": resolveServerLabel(for: snippet.credentialKey ?? ""),
+            "command": snippet.command,
+            "comment": snippet.comment,
+        ]
+
+        let undoCall: [String: Any] = [
+            "type": "tool",
+            "tool": "update_snippet",
+            "arguments": [
+                "id": snippet.id,
+                "credentialKey": before["credentialKey"] as? String ?? "",
+                "command": before["command"] as? String ?? snippet.command,
+                "comment": before["comment"] as? String ?? snippet.comment,
+            ],
+        ]
+
+        let payload = serialize([
+            "id": snippet.id,
+            "before": before,
+            "after": after,
+            "undo": undoCall,
+        ])
+        return .init(userFacingSummary: "Updated snippet \(snippet.id).", jsonPayload: payload)
     }
 
     private func addServer(arguments: [String: Any]) async throws -> AgenticToolResult {

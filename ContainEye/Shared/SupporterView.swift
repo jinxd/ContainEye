@@ -11,11 +11,8 @@ import ButtonKit
 
 struct SupporterView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.storeKitManager) private var storeManager
     @State private var isPurchasing = false
-
-    private var storeManager: StoreKitManager {
-        StoreKitManager.shared
-    }
 
     var body: some View {
         ScrollView {

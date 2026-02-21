@@ -28,7 +28,7 @@ struct AddTestView: View {
     var body: some View {
         VStack {
             Spacer()
-            Text("Alright, let's add a Test")
+            Text("Add a Test")
                 .font(.largeTitle.bold())
                 .multilineTextAlignment(.center)
 
@@ -80,7 +80,8 @@ struct AddTestView: View {
                         do {
                             try await test.write(to: db!)
                             test = ServerTest(id: .random(in: (.min)...(.max)), title: "", credentialKey: "", command: "", expectedOutput: "", status: .notRun)
-                            screen = 3
+                            UserDefaults.standard.set(ContentView.Screen.testList.rawValue, forKey: "screen")
+                            screen = 0
                             _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
                         } catch {
                             ConfirmatorManager.reportError(error)
@@ -123,6 +124,7 @@ The regex/string must match exactly the entire output of the command. Consider u
                                 try await test.write(to: db!)
                                 test = ServerTest(id: .random(in: (.min)...(.max)), title: "", credentialKey: "", command: "", expectedOutput: "", status: .notRun)
                                 UserDefaults.standard.set(ContentView.Screen.testList.rawValue, forKey: "screen")
+                                screen = 0
                                 _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
                             } catch {
                                 ConfirmatorManager.reportError(error)

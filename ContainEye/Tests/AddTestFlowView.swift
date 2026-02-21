@@ -18,7 +18,7 @@ struct AddTestFlowView: View {
                 setupScreen = 2
             }
             .onChange(of: setupScreen) {
-                if setupScreen == 3 {
+                if setupScreen != 2 {
                     dismiss()
                 }
             }

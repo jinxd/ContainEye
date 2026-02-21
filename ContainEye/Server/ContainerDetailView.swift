@@ -12,7 +12,7 @@ import Blackbird
 
 struct ContainerDetailView: View {
     @BlackbirdLiveModel var container: Container?
-    @State private var contextStore = AgenticScreenContextStore.shared
+    @Environment(\.agenticContextStore) private var contextStore
 
     var body: some View {
         if let container {

@@ -13,6 +13,7 @@ import ButtonKit
 struct ConfigureDisabledTestView: View {
     @BlackbirdLiveModel var test: ServerTest?
     @Environment(\.blackbirdDatabase) var db
+    @Environment(\.agenticBridge) private var bridge
     @State private var aiPrompt = ""
     @State private var isShowingServerPicker = false
     @State private var credentialKey = "-"
@@ -58,7 +59,7 @@ struct ConfigureDisabledTestView: View {
                         Requested changes:
                         \(requestedChanges)
                         """
-                        AgenticContextBridge.shared.openAgentic(
+                        bridge.openAgentic(
                             chatTitle: "Edit Test #\(test.id)",
                             draftMessage: draft
                         )
