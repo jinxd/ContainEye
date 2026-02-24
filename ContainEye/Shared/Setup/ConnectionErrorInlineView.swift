@@ -11,3 +11,8 @@ struct ConnectionErrorInlineView: View {
         }
     }
 }
+
+#Preview(traits: .sampleData) {
+    ConnectionErrorInlineView(error: "Connection test failed")
+        .padding()
+}

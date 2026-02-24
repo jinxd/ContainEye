@@ -554,17 +554,17 @@ extension View {
     }
 }
 
-#Preview("Question") {
+#Preview("Question", traits: .sampleData) {
     let _ = ConfirmatorManager.shared.question = "I've detected some Docker containers that aren't running efficiently. Would you like me to help optimize their resource allocation and restart them with better configurations?"
     Confirmator()
 }
 
-#Preview("Command") {
+#Preview("Command", traits: .sampleData) {
     let _ = ConfirmatorManager.shared.command = "docker ps -a --format 'table {{.Names}}\\t{{.Status}}\\t{{.Ports}}'"
     Confirmator()
 }
 
-#Preview("Error") {
+#Preview("Error", traits: .sampleData) {
     let _ = {
         ConfirmatorManager.shared.errorTitle = "Connection Failed"
         ConfirmatorManager.shared.errorMessage = "Unable to connect to the SSH server. Please check your credentials and network connection, then try again."

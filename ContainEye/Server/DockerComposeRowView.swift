@@ -127,7 +127,7 @@ struct DockerComposeRowView: View {
     }
 }
 
-#Preview {
+#Preview(traits: .sampleData) {
     DockerComposeRowView(
         composeFile: DockerCompose(
             serverId: "test",

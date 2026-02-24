@@ -12,62 +12,6 @@ import UniformTypeIdentifiers
 import Blackbird
 @preconcurrency import Citadel
 
-struct SFTPItem: Identifiable, Hashable, Equatable {
-    static func == (lhs: SFTPItem, rhs: SFTPItem) -> Bool {
-        lhs.id == rhs.id && lhs.path == rhs.path
-    }
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-        hasher.combine(path)
-    }
-
-    var id = UUID().uuidString
-    var isDirectory: Bool
-    var file: SFTPPathComponent
-    var path: String
-
-    func delete(using sftp: SFTPClient, credential: Credential) async throws {
-        if isDirectory {
-            do {
-                try await sftp.rmdir(at: path)
-            } catch {
-                 let _ = try await SSHClientActor.shared.execute("rm -r \(path)", on: credential)
-            }
-        } else {
-            try await sftp.remove(at: path)
-        }
-    }
-    func rename(to newName: String, using sftp: SFTPClient) async throws {
-        let newPath = "/\(path.split(separator: "/").dropLast().joined(separator: "/"))/\(newName)"
-        try await sftp.rename(at: path, to: newPath)
-    }
-    func move(to newPath: String, using sftp: SFTPClient) async throws {
-        try await sftp.rename(at: path, to: newPath)
-    }
-}
-
-class DocumentInteractionController: NSObject, UIDocumentInteractionControllerDelegate {
-    var onDismiss: (() -> Void)?
-    
-    func documentInteractionControllerDidDismissOpenInMenu(_ controller: UIDocumentInteractionController) {
-        onDismiss?()
-    }
-}
-
-class DocumentPickerController: NSObject, UIDocumentPickerDelegate {
-    var onPick: (([URL]) -> Void)?
-    
-    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-        onPick?(urls)
-    }
-}
-
-enum OpenDocumentMode {
-    case ask
-    case asText
-    case export
-}
-
 struct SFTPView: View {
     @BlackbirdLiveModels({try await Server.read(from: $0, matching: .all)}) var servers
     @State private var credential : Credential? = {
@@ -83,11 +27,10 @@ struct SFTPView: View {
     @State private var showHiddenFiles = false
     @State private var currentDirectory = ""
     @State private var fileContent = ""
-    @Environment(\.editMode) var editMode: Binding<EditMode>?
-    @State private var isloading = false
+    @State private var isLoading = false
     @State private var documentController: UIDocumentInteractionController?
-    @State private var documentDelegate = DocumentInteractionController()
-    @State private var documentPickerDelegate = DocumentPickerController()
+    private let documentDelegate = DocumentInteractionController()
+    private let documentPickerDelegate = DocumentPickerController()
     @State private var tempFileURL: URL?
     @State private var isUploading = false
     @State private var uploadProgress: Double = 0
@@ -112,433 +55,53 @@ struct SFTPView: View {
     var body: some View {
         Group {
             if let credential {
-                VStack{
-                if let openedFile {
-                    PowerfulTextEditorView(
-                        text: $fileContent,
-                        filePath: openedFile,
-                        onSave: {
-                            try await sftp?.withFile(filePath: openedFile, flags: [.create, .read, .write], { file in
-                                try await file.write(.init(string: fileContent))
-                            })
-                            UINotificationFeedbackGenerator().notificationOccurred(.success)
-                        },
-                        onClose: {
-                            self.openedFile = nil
-                            fileContent.removeAll()
-                            try await updateDirectories(appending: "")
-                        }
-                    )
-                } else if let sftp {
-                    // Enhanced Navigation Header
-                    VStack {
-                        HStack {
-                            // Home Button
-                            AsyncButton{
-                                try await goHome()
-                            } label: {
-                                Image(systemName: "house.fill")
-                                    .font(.title3)
-                                    .foregroundStyle(.white)
-                                    .frame(width: 44, height: 44)
-                                    .background(
-                                        LinearGradient(
-                                            colors: [.blue, .blue.opacity(0.8)],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                    )
-                                    .clipShape(Circle())
-                                    .shadow(color: .blue.opacity(0.3), radius: 4, x: 0, y: 2)
-                            }
-                            
-                            // Server Picker
-                            Picker("Server", selection: $credential) {
-                                let keychain = keychain()
-                                let credentials = keychain.allKeys().compactMap({keychain.getCredential(for: $0)})
-                                ForEach(credentials, id: \.key){ credential in
-                                    Text(credential.label)
-                                        .tag(credential)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(.regularMaterial)
-                                    .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
-                            )
-                            
-                            // Hidden Files Toggle
-                            Button {
-                                showHiddenFiles.toggle()
-                            } label: {
-                                Image(systemName: showHiddenFiles ? "eye.fill" : "eye.slash.fill")
-                                    .font(.title3)
-                                    .foregroundStyle(showHiddenFiles ? .orange : .secondary)
-                                    .frame(width: 44, height: 44)
-                                    .background(
-                                        Circle()
-                                            .fill(showHiddenFiles ? .orange.opacity(0.1) : .secondary.opacity(0.1))
-                                            .stroke(showHiddenFiles ? .orange.opacity(0.3) : .secondary.opacity(0.3), lineWidth: 1)
-                                    )
-                            }
-                        }
-                        .padding(.horizontal)
-                        
-                        // Enhanced Path Display
-                        VStack {
-                            HStack {
-                                Image(systemName: "folder")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                
-                                Text("Current Path")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                
-                                Spacer()
-                            }
-                            
-                            Button(action: {
-                                pathInput = currentDirectory
-                                showingPathInput = true
-                            }) {
-                                HStack {
-                                    Text(currentDirectory.isEmpty ? "/" : currentDirectory)
-                                        .font(.system(.body, design: .monospaced))
-                                        .foregroundStyle(.primary)
-                                        .lineLimit(1)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                    
-                                    Image(systemName: "pencil")
-                                        .font(.caption)
-                                        .foregroundStyle(.blue)
-                                }
-                                .padding()
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(.regularMaterial)
-                                        .stroke(.blue.opacity(0.2), lineWidth: 1)
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.horizontal)
-                    }
-                    
-                    Form{
-                        let ffiles : [SFTPItem] = (files ?? []).filter({showHiddenFiles || !$0.file.filename.hasPrefix(".")})
-                        
-                        // Action buttons section
-                        Section {
-                            if currentDirectory != "/" {
-                                // Go Up Button
-                                AsyncButton {
-                                    try await updateDirectories(appending: "..")
-                                } label: {
-                                    HStack {
-                                        Image(systemName: "arrow.up")
-                                            .font(.title3)
-                                            .foregroundStyle(.blue)
-                                        
-                                        VStack(alignment: .leading) {
-                                            Text("Go Up")
-                                                .font(.headline)
-                                                .foregroundStyle(.primary)
-                                            Text("Navigate to parent directory")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        
-                                        Spacer()
-                                        
-                                        Image(systemName: "chevron.up")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .contentShape(.rect)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            
-                            // Upload Files
-                            Button {
-                                presentFilePicker()
-                            } label: {
-                                HStack {
-                                    Image(systemName: "icloud.and.arrow.up")
-                                        .font(.title3)
-                                        .foregroundStyle(.blue)
-                                    
-                                    VStack(alignment: .leading) {
-                                        Text("Upload Files")
-                                            .font(.headline)
-                                            .foregroundStyle(.primary)
-                                        Text("Select files from your device")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    
-                                    Spacer()
-                                    
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(.rect)
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(isUploading)
-                            .opacity(isUploading ? 0.6 : 1.0)
-                            
-                            // New Folder
-                            Button {
-                                Task {
-                                    do {
-                                        let dirName = try await ConfirmatorManager.shared.ask("What do you want to call the new directory?")
-                                        try await sftp.createDirectory(atPath: "\(currentDirectory)/\(dirName)")
-                                        try await updateDirectories(appending: "")
-                                        UINotificationFeedbackGenerator().notificationOccurred(.success)
-                                    } catch {
-                                        ConfirmatorManager.shared.showError(error, title: "Failed to Create Directory")
-                                    }
-                                }
-                            } label: {
-                                HStack {
-                                    Image(systemName: "folder.badge.plus")
-                                        .font(.title3)
-                                        .foregroundStyle(.orange)
-                                    
-                                    VStack(alignment: .leading) {
-                                        Text("New Folder")
-                                            .font(.headline)
-                                            .foregroundStyle(.primary)
-                                        Text("Create a new directory")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    
-                                    Spacer()
-                                    
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(.rect)
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(isUploading)
-                            .opacity(isUploading ? 0.6 : 1.0)
-                            
-                            // New File
-                            Button {
-                                Task {
-                                    do {
-                                        let fileName = try await ConfirmatorManager.shared.ask("What do you want to call the new file?")
-                                        try await openFile(path: "\(currentDirectory)/\(fileName)")
-                                    } catch {
-                                        ConfirmatorManager.shared.showError(error, title: "Failed to Create File")
-                                    }
-                                }
-                            } label: {
-                                HStack {
-                                    Image(systemName: "doc.badge.plus")
-                                        .font(.title3)
-                                        .foregroundStyle(.green)
-                                    
-                                    VStack(alignment: .leading) {
-                                        Text("New File")
-                                            .font(.headline)
-                                            .foregroundStyle(.primary)
-                                        Text("Create a new file")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    
-                                    Spacer()
-                                    
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(.rect)
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(isUploading)
-                            .opacity(isUploading ? 0.6 : 1.0)
-                        }
-                        
-                        // Files and folders section
-                        if !ffiles.isEmpty {
-                            Section("Files & Folders") {
-                                ForEach(ffiles, id: \.id) { file in
-                                    FileSummaryView(sftp: sftp, credential: credential, file: file) { append in
-                                        try await updateDirectories(appending: append)
-                                    } openFile: { path, mode in
-                                        try await openFile(path: path, mode: mode)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .refreshable {
-                        try? await updateDirectories(appending: "")
-                    }
-                    .safeAreaInset(edge: .bottom) {
-                        if isUploading {
-                            VStack {
-                                HStack {
-                                    Image(systemName: "icloud.and.arrow.up")
-                                        .font(.title3)
-                                        .foregroundStyle(.blue)
-                                        .symbolEffect(.pulse)
-                                    
-                                    VStack(alignment: .leading) {
-                                        Text("Uploading Files...")
-                                            .font(.headline)
-                                            .foregroundStyle(.primary)
-                                        
-                                        Text("\(Int(uploadProgress * 100))% complete")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    
-                                    Spacer()
-                                    
-                                    Text("\(Int(uploadProgress * 100))%")
-                                        .font(.title3)
-                                        .fontWeight(.semibold)
-                                        .foregroundStyle(.blue)
-                                        .monospacedDigit()
-                                }
-                                
-                                // Custom Progress Bar
-                                GeometryReader { geometry in
-                                    ZStack(alignment: .leading) {
-                                        // Background
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(.blue.opacity(0.1))
-                                            .frame(height: 8)
-                                        
-                                        // Progress
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(
-                                                LinearGradient(
-                                                    colors: [.blue, .blue.opacity(0.7)],
-                                                    startPoint: .leading,
-                                                    endPoint: .trailing
-                                                )
-                                            )
-                                            .frame(width: geometry.size.width * uploadProgress, height: 8)
-                                            .animation(.easeInOut(duration: 0.3), value: uploadProgress)
-                                    }
-                                }
-                                .frame(height: 8)
-                            }
-                            .padding()
-                            .background(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .fill(.blue.opacity(0.05))
-                                    .stroke(.blue.opacity(0.2), lineWidth: 1)
-                            )
-                            .padding(.horizontal)
-                        }
+                SFTPConnectedContentView(
+                    selectedCredential: $credential,
+                    credential: credential,
+                    sftp: sftp,
+                    openedFile: $openedFile,
+                    fileContent: $fileContent,
+                    files: files,
+                    showHiddenFiles: showHiddenFiles,
+                    currentDirectory: currentDirectory,
+                    isLoading: isLoading,
+                    isUploading: isUploading,
+                    uploadProgress: uploadProgress,
+                    onGoHome: goHome,
+                    onToggleHiddenFiles: { showHiddenFiles.toggle() },
+                    onStartPathEditing: {
+                        pathInput = currentDirectory
+                        showingPathInput = true
+                    },
+                    onUpdateDirectories: updateDirectories,
+                    onPresentFilePicker: presentFilePicker,
+                    onCreateDirectory: createDirectory,
+                    onCreateFile: createFile,
+                    onOpenFile: openFile,
+                    onEditorSave: saveOpenedFile,
+                    onEditorClose: closeOpenedFileEditor
+                )
+                .task(id: credential) {
+                    do {
+                        try await goHome()
+                    } catch {
+                        print(error)
                     }
                 }
-            }
-            .redacted(reason: isloading ? .invalidated : [])
-            .task(id: credential) {
-                do {
-                    try await goHome()
-                } catch {
-                    print(error)
-                }
-            }
-            .trackView("sftp/connected")
+                .trackView("sftp/connected")
             } else {
-                let keychain = keychain()
-                let credentials = keychain.allKeys().compactMap({keychain.getCredential(for: $0)})
-                if credentials.isEmpty {
-                    ContentUnavailableView("You don't have any servers yet.", systemImage: "server.rack")
-                        .trackView("sftp/no-servers")
-                } else {
-                    VStack {
-                        VStack {
-                            Image(systemName: "externaldrive.connected.to.line.below")
-                                .font(.system(size: 60))
-                                .foregroundStyle(.blue)
-                                .symbolEffect(.pulse)
-                            
-                            Text("Connect to Server")
-                                .font(.largeTitle)
-                                .fontWeight(.bold)
-                                .foregroundStyle(.primary)
-                            
-                            Text("Select a server to browse files and manage content")
-                                .font(.body)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                        }
-                        .padding()
-                        
-                        LazyVGrid(columns: [
-                            GridItem(.flexible()),
-                            GridItem(.flexible())
-                        ]) {
-                            ForEach(credentials, id: \.key) { credential in
-                                Button {
-                                    self.credential = credential
-                                } label: {
-                                    VStack {
-                                        if let server = servers.results.first(where: { $0.credentialKey == credential.key }) {
-                                            OSIconView(server: server, size: 32)
-                                        } else {
-                                            Image(systemName: "server.rack")
-                                                .font(.title)
-                                                .foregroundStyle(.blue)
-                                        }
-                                        
-                                        Text(credential.label)
-                                            .font(.headline)
-                                            .foregroundStyle(.primary)
-                                            .lineLimit(2)
-                                            .multilineTextAlignment(.center)
-                                        
-                                        Text(credential.host)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 16)
-                                            .fill(.blue.opacity(0.05))
-                                            .stroke(.blue.opacity(0.2), lineWidth: 1)
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.horizontal)
-                        
-                        Spacer()
-                    }
-                    .trackView("sftp/select-server")
-                }
+                SFTPServerSelectionContentView(
+                    credentials: keychain().allKeys().compactMap { keychain().getCredential(for: $0) },
+                    servers: servers.results,
+                    onSelectCredential: { credential = $0 }
+                )
             }
         }
         .alert("Navigate to Path", isPresented: $showingPathInput) {
             TextField("Enter path", text: $pathInput)
             Button(role: .cancel) { }
             Button("Go") {
-                Task {
-                    await navigateToPath(pathInput)
-                }
+                navigateToEnteredPath()
             }
         } message: {
             Text("Enter the full path you want to navigate to")
@@ -665,8 +228,8 @@ struct SFTPView: View {
         }
     }
     func updateDirectories(appending: String) async throws {
-        isloading = true
-        defer { isloading = false}
+        isLoading = true
+        defer { isLoading = false}
         if !(sftp?.isActive ?? false) {
             try? await sftp?.close()
             guard let credential else {return}
@@ -702,7 +265,6 @@ struct SFTPView: View {
                 files?.append(.init(isDirectory: dirs[filepath] ?? false, file: file, path: filepath))
             }
         }
-        print("end")
     }
     
     func navigateToPath(_ path: String) async {
@@ -731,10 +293,52 @@ struct SFTPView: View {
             print("Failed to navigate to path: \(path), error: \(error)")
         }
     }
+
+    private func navigateToEnteredPath() {
+        Task {
+            await navigateToPath(pathInput)
+        }
+    }
+
+    func saveOpenedFile() async throws {
+        guard let openedFile else { return }
+        try await sftp?.withFile(filePath: openedFile, flags: [.create, .read, .write]) { file in
+            try await file.write(.init(string: fileContent))
+        }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    func closeOpenedFileEditor() async throws {
+        openedFile = nil
+        fileContent.removeAll()
+        try await updateDirectories(appending: "")
+    }
+
+    func createDirectory() async {
+        guard let sftp else { return }
+        do {
+            let dirName = try await ConfirmatorManager.shared.ask("What do you want to call the new directory?")
+            try await sftp.createDirectory(atPath: "\(currentDirectory)/\(dirName)")
+            try await updateDirectories(appending: "")
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        } catch {
+            ConfirmatorManager.shared.showError(error, title: "Failed to Create Directory")
+        }
+    }
+
+    func createFile() async {
+        do {
+            let fileName = try await ConfirmatorManager.shared.ask("What do you want to call the new file?")
+            try await openFile(path: "\(currentDirectory)/\(fileName)")
+        } catch {
+            ConfirmatorManager.shared.showError(error, title: "Failed to Create File")
+        }
+    }
+
     func openFile(path: String, mode: OpenDocumentMode = .ask) async throws {
         guard let sftp else { return }
-        isloading = true
-        defer { isloading = false }
+        isLoading = true
+        defer { isLoading = false }
         
         // Create a temporary file URL
         let fileName = URL(fileURLWithPath: path).lastPathComponent
@@ -984,97 +588,6 @@ struct SFTPView: View {
     }
 }
 
-
-
-struct FileInfoSheet: View {
-    let filePath: String
-    let fileType: String
-    let lineCount: Int
-    let characterCount: Int
-    @Environment(\.dismiss) private var dismiss
-    
-    private var fileName: String {
-        URL(fileURLWithPath: filePath).lastPathComponent
-    }
-    
-    private var fileSize: String {
-        let bytes = characterCount
-        if bytes < 1024 {
-            return "\(bytes) bytes"
-        } else if bytes < 1024 * 1024 {
-            return String(format: "%.1f KB", Double(bytes) / 1024)
-        } else {
-            return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
-        }
-    }
-    
-    var body: some View {
-        NavigationView {
-            List {
-                Section("File Information") {
-                    HStack {
-                        Text("Name")
-                        Spacer()
-                        Text(fileName)
-                            .foregroundStyle(.secondary)
-                    }
-                    
-                    HStack {
-                        Text("Path")
-                        Spacer()
-                        Text(filePath)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    
-                    HStack {
-                        Text("Type")
-                        Spacer()
-                        Text(fileType)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                
-                Section("Statistics") {
-                    HStack {
-                        Text("Lines")
-                        Spacer()
-                        Text("\(lineCount)")
-                            .foregroundStyle(.secondary)
-                    }
-                    
-                    HStack {
-                        Text("Characters")
-                        Spacer()
-                        Text("\(characterCount)")
-                            .foregroundStyle(.secondary)
-                    }
-                    
-                    HStack {
-                        Text("Size")
-                        Spacer()
-                        Text(fileSize)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                
-                Section("Editor Features") {
-                    Label("Syntax highlighting", systemImage: "paintbrush")
-                    Label("Line numbers", systemImage: "list.number")
-                    Label("Word wrapping", systemImage: "arrow.turn.down.right")
-                    Label("Search & replace", systemImage: "magnifyingglass")
-                    Label("Adjustable font size", systemImage: "textformat.size")
-                }
-            }
-            .navigationTitle("File Info")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
-        }
-    }
+#Preview("Server Picker", traits: .sampleData) {
+    SFTPView()
 }

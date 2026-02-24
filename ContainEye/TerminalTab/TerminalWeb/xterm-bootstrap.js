@@ -344,9 +344,25 @@
     });
     const unicode11Addon = new window.Unicode11Addon.Unicode11Addon();
     const oscAddon = new window.Osc4545Addon(postBridge);
+    const terminalElement = document.getElementById("terminal");
+
+    function applyThemeBackground(theme) {
+      const fallbackBackground = "#0d1117";
+      const themeBackground = theme && typeof theme.background === "string"
+        ? theme.background
+        : fallbackBackground;
+      const background = themeBackground || fallbackBackground;
+      document.documentElement.style.setProperty("--terminal-background", background);
+      if (document.body) {
+        document.body.style.background = background;
+      }
+      if (terminalElement) {
+        terminalElement.style.background = background;
+      }
+    }
 
     terminal.loadAddon(oscAddon);
-    terminal.open(document.getElementById("terminal"));
+    terminal.open(terminalElement);
 
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(searchAddon);
@@ -354,6 +370,7 @@
     terminal.loadAddon(webLinksAddon);
     terminal.loadAddon(unicode11Addon);
     terminal.unicode.activeVersion = "11";
+    applyThemeBackground(terminal.options.theme || {});
 
     fitAddon.fit();
     installTouchSelection(terminal);
@@ -420,6 +437,28 @@
       },
       submitEnter: function () {
         terminal.input("\r", true);
+      },
+      setFontSize: function (size) {
+        const parsed = Number(size);
+        if (!Number.isFinite(parsed)) {
+          return;
+        }
+        terminal.options.fontSize = parsed;
+        fitAddon.fit();
+        postBridge("terminal_resized", {
+          cols: terminal.cols,
+          rows: terminal.rows,
+        });
+      },
+      setTheme: function (theme) {
+        if (!theme || typeof theme !== "object") {
+          return;
+        }
+        terminal.options.theme = {
+          ...terminal.options.theme,
+          ...theme,
+        };
+        applyThemeBackground(terminal.options.theme);
       },
       getSelectionText: function () {
         return terminal.getSelection() || "";

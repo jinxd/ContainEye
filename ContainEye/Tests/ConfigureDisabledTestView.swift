@@ -12,11 +12,11 @@ import ButtonKit
 
 struct ConfigureDisabledTestView: View {
     @BlackbirdLiveModel var test: ServerTest?
-    @Environment(\.blackbirdDatabase) var db
+    @Environment(\.blackbirdDatabase) private var db
     @Environment(\.agenticBridge) private var bridge
     @State private var aiPrompt = ""
-    @State private var isShowingServerPicker = false
-    @State private var credentialKey = "-"
+    @State private var isPresentingServerPicker = false
+    @State private var selectedCredentialKey = ""
 
     var body: some View {
         if let test {
@@ -41,7 +41,7 @@ struct ConfigureDisabledTestView: View {
 
                 HStack {
                     TextField("Describe how to change the test...", text: $aiPrompt, axis: .vertical)
-                    AsyncButton {
+                    AsyncButton("Submit", systemImage: "arrow.up.circle.fill") {
                         let requestedChanges = aiPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
                         guard !requestedChanges.isEmpty else { return }
                         let serverLabel = keychain().getCredential(for: test.credentialKey)?.label ?? test.credentialKey
@@ -64,32 +64,31 @@ struct ConfigureDisabledTestView: View {
                             draftMessage: draft
                         )
                         aiPrompt.removeAll()
-                    } label: {
-                        Image(systemName: "arrow.up.circle.fill")
                     }
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.circle)
-                    .accessibilityLabel("Submit")
 
                 }
                 .padding(10)
                 .background(.accent.quinary, in: .capsule)
                 .padding(.horizontal, 30)
 
-                Button("Save") {isShowingServerPicker = true}
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.capsule)
+                Button("Save") {
+                    selectedCredentialKey = test.credentialKey == "-" ? "" : test.credentialKey
+                    isPresentingServerPicker = true
+                }
+                    .capsuleProminentButton()
                     .padding(.top)
             }
             .overlay {
-                if isShowingServerPicker {
+                if isPresentingServerPicker {
                     VStack {
                         Spacer()
                         Text("Choose where to execute the test").monospaced()
 
-                        Picker("Select Server", selection: $credentialKey) {
+                        Picker("Select Server", selection: $selectedCredentialKey) {
                             Text("Select a server")
-                                .tag("-")
+                                .tag("")
                             let keychain = keychain()
                             let allCredentials = keychain.allKeys().compactMap({keychain.getCredential(for: $0)})
                             ForEach(allCredentials, id: \.key) {credential in
@@ -101,13 +100,14 @@ struct ConfigureDisabledTestView: View {
                         Spacer()
                         AsyncButton("Save") {
                             var test = test
-                            test.credentialKey = credentialKey
+                            test.credentialKey = selectedCredentialKey
                             try await test.write(to: db!)
+                            isPresentingServerPicker = false
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(credentialKey == "-")
+                        .capsuleProminentButton()
+                        .disabled(selectedCredentialKey.isEmpty)
                         Button(role: .cancel) {
-                            isShowingServerPicker = false
+                            isPresentingServerPicker = false
                         }
                         .buttonStyle(.bordered)
                     }
@@ -124,7 +124,7 @@ struct ConfigureDisabledTestView: View {
     }
 }
 
-#Preview {
+#Preview(traits: .sampleData) {
     NavigationStack {
         ConfigureDisabledTestView(test: ServerTest(id: 12638712454, title: "Check docker containers", notes: "Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet.", credentialKey: "-", command: "docker ps | wsl -i", expectedOutput: "8", status: .notRun).liveModel)
     }

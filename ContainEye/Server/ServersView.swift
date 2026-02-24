@@ -116,6 +116,6 @@ struct ServersView: View {
 }
 
 
-#Preview {
+#Preview(traits: .sampleData) {
     ServersView()
 }

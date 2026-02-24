@@ -221,7 +221,7 @@ struct DockerComposeDetailView: View {
     }
 }
 
-#Preview {
+#Preview(traits: .sampleData) {
     NavigationStack {
         DockerComposeDetailView(
             composeFile: DockerCompose(

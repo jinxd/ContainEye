@@ -259,7 +259,7 @@ struct DependencyRow: View {
     }
 }
 
-#Preview {
+#Preview(traits: .sampleData) {
     NavigationStack {
         CreditsView()
     }

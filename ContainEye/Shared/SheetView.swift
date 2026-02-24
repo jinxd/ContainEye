@@ -51,6 +51,6 @@ struct SheetView: View {
 
 
 
-#Preview {
+#Preview(traits: .sampleData) {
     SheetView(sheet: .feedback)
 }

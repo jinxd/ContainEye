@@ -6,6 +6,7 @@ struct TerminalTabState: Identifiable, Codable, Hashable {
     var credentialKey: String
     var title: String
     var createdAt: Date
+    var themeOverrideSelectionKey: String?
 }
 
 struct TerminalPaneState: Identifiable, Codable, Hashable {
@@ -71,7 +72,7 @@ final class TerminalWorkspaceStore {
         restoreWorkspace()
     }
 
-    func openTab(credentialKey: String, inFocusedPane: Bool = true) {
+    func openTab(credentialKey: String, inFocusedPane: Bool = true, themeOverrideSelectionKey: String? = nil) {
         guard tabs.count < maxTabCount else {
             return
         }
@@ -107,7 +108,8 @@ final class TerminalWorkspaceStore {
             id: UUID(),
             credentialKey: credentialKey,
             title: tabTitle,
-            createdAt: .now
+            createdAt: .now,
+            themeOverrideSelectionKey: themeOverrideSelectionKey
         )
 
         tabs[tab.id] = tab

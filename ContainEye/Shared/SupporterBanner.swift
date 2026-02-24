@@ -89,7 +89,7 @@ struct SupporterBanner: View {
     }
 }
 
-#Preview {
+#Preview(traits: .sampleData) {
     NavigationStack {
         VStack {
             SupporterBanner()

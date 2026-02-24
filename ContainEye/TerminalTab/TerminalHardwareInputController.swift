@@ -8,6 +8,7 @@ final class TerminalHardwareInputController: NSObject, ObservableObject {
     private var volumeView: MPVolumeView?
     private var slider: UISlider?
     private var baselineVolume: Float = 0.5
+    private var isResettingVolume = false
     private var isObserving = false
     private var volumeObservation: NSKeyValueObservation?
     private var onVolumeDown: (() -> Void)?
@@ -40,8 +41,8 @@ final class TerminalHardwareInputController: NSObject, ObservableObject {
         }
 
         if let slider {
-            baselineVolume = min(0.9, max(0.1, slider.value))
-            slider.value = baselineVolume
+            baselineVolume = min(0.999, max(0.001, slider.value))
+            resetVolumeToBaseline(immediately: true)
         }
 
         volumeObservation = AVAudioSession.sharedInstance().observe(\.outputVolume, options: [.new]) { [weak self] _, change in
@@ -72,13 +73,29 @@ final class TerminalHardwareInputController: NSObject, ObservableObject {
     }
 
     private func handleVolumeChange(_ volume: Float) {
+        if isResettingVolume {
+            isResettingVolume = false
+            return
+        }
+
+        guard abs(volume - baselineVolume) > 0.0001 else {
+            return
+        }
+
         if volume < baselineVolume {
             onVolumeDown?()
         } else if volume > baselineVolume {
             onVolumeUp?()
         }
 
-        slider?.value = baselineVolume
+        resetVolumeToBaseline(immediately: true)
+    }
+
+    private func resetVolumeToBaseline(immediately: Bool) {
+        guard let slider else { return }
+        isResettingVolume = true
+        slider.setValue(baselineVolume, animated: !immediately)
+        slider.sendActions(for: .valueChanged)
     }
 
     deinit {

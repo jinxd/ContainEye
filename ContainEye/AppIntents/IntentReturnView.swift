@@ -41,3 +41,23 @@ struct IntentReturnView: View {
         .padding()
     }
 }
+
+#Preview(traits: .sampleData) {
+    IntentReturnView(
+        tests: [
+            PreviewSamples.test,
+            ServerTest(
+                id: 9002,
+                title: "Disk Usage",
+                notes: nil,
+                credentialKey: PreviewSamples.credential.key,
+                command: "df -h",
+                expectedOutput: "Avail",
+                lastRun: .now.addingTimeInterval(-60),
+                status: .failed,
+                output: "Filesystem full"
+            )
+        ],
+        retryIntent: nil
+    )
+}

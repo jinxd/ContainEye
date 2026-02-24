@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Blackbird
+import ButtonKit
 
 struct ManageSnippetsView: View {
     @BlackbirdLiveModels({try await Snippet.read(from: $0, matching: .all, orderBy: .descending(\.$lastUse))}) var snippets
@@ -36,12 +37,10 @@ struct ManageSnippetsView: View {
                 }
                 .navigationTitle("Snippets")
                 .toolbar {
-                    Button{
-                        Task{
-                            let snippet = Snippet(command: "", comment: "", lastUse: .now)
-                            try? await snippet.write(to: db!)
-                            editingSnippet = snippet.id
-                        }
+                    AsyncButton {
+                        let snippet = Snippet(command: "", comment: "", lastUse: .now)
+                        try? await snippet.write(to: db!)
+                        editingSnippet = snippet.id
                     } label: {
                         Image(systemName: "plus")
                     }
@@ -53,14 +52,8 @@ struct ManageSnippetsView: View {
     }
 }
 
-#Preview {
-    let db = try! Blackbird.Database.inMemoryDatabase()
-    let _ = Task{
-        try? await Snippet(command: "df -h", comment: "Disk usage", lastUse: Date()).write(to: db)
-        try? await Snippet(command: "df -h", comment: "The Disk usage", lastUse: Date()).write(to: db)
-    }
+#Preview(traits: .sampleData) {
     ManageSnippetsView()
-        .environment(\.blackbirdDatabase, db)
 }
 
 struct SnippetSummaryView: View {

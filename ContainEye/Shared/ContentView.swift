@@ -453,6 +453,6 @@ struct ContentView: View {
 
 
 
-#Preview {
+#Preview(traits: .sampleData) {
     ContentView()
 }

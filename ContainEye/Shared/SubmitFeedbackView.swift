@@ -71,6 +71,6 @@ struct SubmitFeedbackView: View {
     }
 }
 
-#Preview {
+#Preview(traits: .sampleData) {
     SubmitFeedbackView()
 }

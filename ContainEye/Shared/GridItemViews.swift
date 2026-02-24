@@ -98,3 +98,12 @@ enum GridItemView {
         }
     }
 }
+
+#Preview("Grid Items", traits: .sampleData) {
+    HStack {
+        GridItemView.Date(title: "Updated", value: .now.addingTimeInterval(-120))
+        GridItemView.Text(title: "Status", text: "Healthy")
+        GridItemView.Percentage(title: "CPU", percentage: 0.36)
+    }
+    .padding()
+}

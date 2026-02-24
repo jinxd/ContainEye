@@ -93,6 +93,6 @@ struct ServerSummaryView: View {
 }
 
 
-#Preview {
+#Preview(traits: .sampleData) {
     ServerSummaryView(server: .init(.init(credentialKey: "lol")), hostInsteadOfLabel: true)
 }

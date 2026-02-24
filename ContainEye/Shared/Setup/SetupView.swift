@@ -35,7 +35,7 @@ struct SetupView: View {
     }
 }
 
-#Preview {
+#Preview(traits: .sampleData) {
     SetupView()
 }
 

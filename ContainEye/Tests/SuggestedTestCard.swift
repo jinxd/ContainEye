@@ -12,93 +12,79 @@ import ButtonKit
 
 struct SuggestedTestCard: View {
     let test: ServerTest
-    @Environment(\.blackbirdDatabase) var db
     @State private var isAdding = false
-    @State private var showingServerSelection = false
-    @State private var selectedServer: String?
-    @BlackbirdLiveModels({
-        try await Server.read(from: $0, matching: .all)
-    }) var servers
-    
+    @State private var isPresentingServerSelection = false
+    @State private var selectedServerKey: String?
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading) {
             HStack {
                 Image(systemName: "lightbulb.fill")
                     .font(.caption)
-                    .foregroundStyle(.orange)
-                
+
                 Spacer()
-                
+
                 Text("Suggested")
                     .font(.caption2)
                     .fontWeight(.medium)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(.orange.opacity(0.1))
-                    .foregroundStyle(.orange)
-                    .clipShape(Capsule())
+                    .padding(.horizontal)
+                    .padding(.vertical, 4)
+                    .background(.orange.opacity(0.1), in: .capsule)
             }
-            
+            .foregroundStyle(.orange)
+
             VStack(alignment: .leading) {
                 Text(test.title)
                     .font(.headline)
                     .fontWeight(.medium)
                     .lineLimit(2)
-                
+
                 Text(test.command)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            
             Spacer()
-            
-            Button {
-                showingServerSelection = true
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "plus")
-                        .font(.caption2)
-                    Text("Add Test")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .background(.green)
-                .foregroundStyle(.white)
-                .clipShape(Capsule())
+            Button("Add Test", systemImage: "plus") {
+                isPresentingServerSelection = true
             }
+            .frame(maxWidth: .infinity)
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            .tint(.green)
             .disabled(isAdding)
         }
         .padding()
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(
+        .overlay {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(.orange.opacity(0.3), lineWidth: 1)
-        )
-        .sheet(isPresented: $showingServerSelection) {
+        }
+        .sheet(isPresented: $isPresentingServerSelection) {
             ServerSelectionView(
                 test: test,
-                selectedServer: $selectedServer,
+                selectedServer: $selectedServerKey,
                 isAdding: $isAdding,
-                onAdd: { serverKey in
-                    await addTest(to: serverKey)
-                }
+                isPresented: $isPresentingServerSelection
             )
             .confirmator()
         }
     }
-    
-    private func addTest(to serverKey: String) async {
-        isAdding = true
-        
-        var newTest = test
-        newTest.id = Int.random(in: 1000...999999)
-        newTest.credentialKey = serverKey
-        
-        try? await newTest.write(to: db!)
-        isAdding = false
-        showingServerSelection = false
-    }
+}
+
+#Preview(traits: .sampleData) {
+    SuggestedTestCard(
+        test: ServerTest(
+            id: 9010,
+            title: "Check API health endpoint",
+            notes: nil,
+            credentialKey: "-",
+            command: "curl -sf http://localhost:8080/health",
+            expectedOutput: "ok",
+            lastRun: nil,
+            status: .notRun,
+            output: nil
+        )
+    )
+    .padding()
 }

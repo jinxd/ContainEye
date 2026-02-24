@@ -34,3 +34,9 @@ private extension AuthenticationMethod {
         }
     }
 }
+
+#Preview(traits: .sampleData) {
+    @Previewable @State var selectedMethod: AuthenticationMethod? = .privateKeyWithPassphrase
+    return ServerAuthMethodPicker(selectedMethod: $selectedMethod)
+        .padding()
+}

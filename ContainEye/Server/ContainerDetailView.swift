@@ -77,3 +77,9 @@ struct ContainerDetailView: View {
         )
     }
 }
+
+#Preview(traits: .sampleData) {
+    NavigationStack {
+        ContainerDetailView(container: .init(PreviewSamples.container, updatesEnabled: false))
+    }
+}

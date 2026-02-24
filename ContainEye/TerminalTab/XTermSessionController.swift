@@ -25,6 +25,8 @@ protocol XTermTerminalHost: AnyObject {
     func selectAll()
     func clearSelection()
     func submitEnter()
+    func setFontSize(_ size: Int)
+    func setTheme(_ payload: [String: String])
 }
 
 @MainActor
@@ -64,6 +66,10 @@ final class XTermSessionController: Identifiable {
     private var bypassSFTPEditPromptOnce = false
 
     private static let sftpEditPromptNeverShowKey = "terminal.sftpEditorPrompt.neverShow"
+
+    var currentInputBuffer: String {
+        inputBuffer
+    }
 
     init(
         id: UUID = UUID(),
@@ -248,6 +254,21 @@ final class XTermSessionController: Identifiable {
     func sendArrowRight() {
         clearControlModifier()
         stream?.write("\u{1B}[C")
+    }
+
+    func sendPageUp() {
+        clearControlModifier()
+        stream?.write("\u{1B}[5~")
+    }
+
+    func sendPageDown() {
+        clearControlModifier()
+        stream?.write("\u{1B}[6~")
+    }
+
+    func sendInterrupt() {
+        clearControlModifier()
+        stream?.write("\u{3}")
     }
 
     func sendEscape() {

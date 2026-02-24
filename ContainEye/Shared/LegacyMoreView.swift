@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import ButtonKit
 
 struct MoreView: View {
     @Environment(\.namespace) var namespace
@@ -156,10 +157,8 @@ struct MoreView: View {
                     }
 
                     CardRow(icon: "star.bubble", title: "Force Review Prompt", subtitle: "Test review request UI") {
-                        Button {
-                            Task {
-                                LaunchTracker.requestReview()
-                            }
+                        AsyncButton {
+                            LaunchTracker.requestReview()
                         } label: {
                             EmptyView()
                         }
@@ -265,7 +264,7 @@ struct CardRowButtonStyle: ButtonStyle {
     }
 }
 
-#Preview {
+#Preview(traits: .sampleData) {
     NavigationStack {
         MoreView()
     }

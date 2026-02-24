@@ -183,6 +183,6 @@ struct FeatureCard: View {
     }
 }
 
-#Preview {
+#Preview(traits: .sampleData) {
     WelcomeView(setupScreen: .constant(0))
 }

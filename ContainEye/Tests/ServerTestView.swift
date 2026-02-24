@@ -8,7 +8,6 @@
 import SwiftUI
 import Blackbird
 import ButtonKit
-import UserNotifications
 import KeychainAccess
 
 struct ServerTestView: View {
@@ -35,11 +34,9 @@ struct ServerTestView: View {
             orderBy: .descending(\.$lastUse)
         )
     }) var snippets
-    @Environment(\.scenePhase) var scenePhase
-    @State private var notificationsAllowed = true
-    @Environment(\.namespace) var namespace
+    @Environment(\.namespace) private var namespace
     @State private var isRunningAllTests = false
-    
+
     var overallStatus: ServerTest.TestStatus {
         let tests = activeTests.results
         if tests.isEmpty { return .notRun }
@@ -48,72 +45,62 @@ struct ServerTestView: View {
         if tests.allSatisfy({ $0.status == .success }) { return .success }
         return .notRun
     }
-    
+
     var body: some View {
-        NavigationView {
-            ScrollView {
-                LazyVStack {
-                    if activeTests.didLoad {
-                        // Header section with stats
-                        testsHeaderSection
+        ScrollView {
+            LazyVStack {
+                if activeTests.didLoad {
+                    // Header section with stats
+                    testsHeaderSection
 
-                        // Tests grid
-                        if activeTests.results.isEmpty {
-                            emptyActiveTestsState
-                        } else {
-                            activeTestsGrid
-                        }
-                        
-                        // Snippets section
-                        snippetsSection
-
-                        // Suggested tests section
-                        if !suggestedTests.results.isEmpty {
-                            suggestedTestsSection
-                        }
+                    // Tests grid
+                    if activeTests.results.isEmpty {
+                        emptyActiveTestsState
                     } else {
-                        loadingState
+                        activeTestsGrid
                     }
-                }
-                .padding()
-                .padding(.top, 10)
-            }
-            .navigationTitle("Code")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        Button {
-                            openAgenticForTestCreation()
-                        } label: {
-                            Label("Create Test", systemImage: "testtube.2")
-                        }
 
-                        Button {
-                            openAgenticForSnippetCreation()
-                        } label: {
-                            Label("Create Snippet", systemImage: "terminal")
-                        }
-                    } label: {
-                        Image(systemName: "plus")
+                    // Snippets section
+                    snippetsSection
+
+                    // Suggested tests section
+                    if !suggestedTests.results.isEmpty {
+                        suggestedTestsSection
                     }
-                    .accessibilityLabel("Create")
-#if os(iOS)
-                    .buttonStyle(.glass)
-#endif
+                } else {
+                    loadingState
                 }
             }
+            .padding()
+            .padding(.top, 10)
         }
-        .onAppear {
-            checkNotificationPermissions()
-        }
-        .onChange(of: scenePhase) {
-            if scenePhase == .active {
-                checkNotificationPermissions()
+        .navigationTitle("Code")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    Button {
+                        openAgenticForTestCreation()
+                    } label: {
+                        Label("Create Test", systemImage: "testtube.2")
+                    }
+
+                    Button {
+                        openAgenticForSnippetCreation()
+                    } label: {
+                        Label("Create Snippet", systemImage: "terminal")
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("Create")
+#if os(iOS)
+                .buttonStyle(.glass)
+#endif
             }
         }
     }
-    
+
     private var testsHeaderSection: some View {
         VStack {
             // Status indicator
@@ -122,23 +109,23 @@ struct ServerTestView: View {
                     Circle()
                         .fill(overallStatus.color.opacity(0.1))
                         .frame(width: 60, height: 60)
-                    
+
                     Image(systemName: overallStatus.icon)
                         .font(.system(size: 24))
                         .foregroundStyle(overallStatus.color)
                 }
-                
+
                 VStack(alignment: .leading) {
                     Text("Test Status")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    
+
                     Text(overallStatus.displayText)
                         .font(.title2)
                         .fontWeight(.semibold)
                         .foregroundStyle(overallStatus.color)
                 }
-                
+
                 Spacer()
 
                 VStack(alignment: .trailing, spacing: 8) {
@@ -153,7 +140,7 @@ struct ServerTestView: View {
                     AsyncButton {
                         await runAllTests()
                     } label: {
-                        HStack(spacing: 6) {
+                        HStack {
                             if isRunningAllTests {
                                 ProgressView()
                                     .controlSize(.small)
@@ -164,15 +151,12 @@ struct ServerTestView: View {
                                 .font(.caption)
                                 .fontWeight(.semibold)
                         }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .foregroundStyle(.white)
-                        .background(.blue, in: Capsule())
                     }
+                    .capsuleProminentButton()
                     .disabled(activeTests.results.isEmpty || isRunningAllTests)
                 }
             }
-            
+
             // Metrics row
             HStack {
                 TestMetricCard(
@@ -181,14 +165,14 @@ struct ServerTestView: View {
                     color: .green,
                     icon: "checkmark.circle.fill"
                 )
-                
+
                 TestMetricCard(
                     title: "Failing",
                     count: activeTests.results.filter { $0.status == .failed }.count,
                     color: .red,
                     icon: "xmark.circle.fill"
                 )
-                
+
                 TestMetricCard(
                     title: "Running",
                     count: activeTests.results.filter { $0.status == .running }.count,
@@ -197,22 +181,21 @@ struct ServerTestView: View {
                 )
             }
         }
-        .padding()
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .testSectionCard()
     }
-    
+
     private var activeTestsGrid: some View {
         VStack(alignment: .leading) {
             Text("Active Tests")
                 .font(.headline)
                 .foregroundStyle(.primary)
-            
+
             LazyVGrid(columns: [
                 GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 12)
             ], spacing: 12) {
                 ForEach(activeTests.results) { test in
                     TestCard(test: test)
-                        .matchedTransitionSource(id: test.id, in: namespace!)
+                        .matchedTransitionIfAvailable(id: test.id, in: namespace)
                 }
             }
         }
@@ -242,7 +225,7 @@ struct ServerTestView: View {
                     ForEach(snippets.results) { snippet in
                         NavigationLink(value: snippet) {
                             SnippetCard(snippet: snippet)
-                                .matchedTransitionSource(id: snippet.id, in: namespace!)
+                                .matchedTransitionIfAvailable(id: snippet.id, in: namespace)
                         }
                         .buttonStyle(.plain)
                     }
@@ -250,21 +233,21 @@ struct ServerTestView: View {
             }
         }
     }
-    
+
     private var suggestedTestsSection: some View {
         VStack(alignment: .leading) {
             HStack {
                 Text("Suggested Tests")
                     .font(.headline)
                     .foregroundStyle(.primary)
-                
+
                 Spacer()
-                
+
                 Text("\(suggestedTests.results.count) available")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            
+
             LazyVGrid(columns: [
                 GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 12)
             ], spacing: 12) {
@@ -274,30 +257,30 @@ struct ServerTestView: View {
             }
         }
     }
-    
+
     private var emptyActiveTestsState: some View {
         VStack {
             ZStack {
                 Circle()
                     .fill(.blue.opacity(0.1))
                     .frame(width: 80, height: 80)
-                
+
                 Image(systemName: "testtube.2")
                     .font(.system(size: 32))
                     .foregroundStyle(.blue)
             }
-            
+
             VStack {
                 Text("No Tests Yet")
                     .font(.title2)
                     .fontWeight(.semibold)
-                
+
                 Text("Create your first test to monitor server health and performance")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
-            
+
             Button {
                 openAgenticForTestCreation()
             } label: {
@@ -306,37 +289,34 @@ struct ServerTestView: View {
                     Text("Create Your First Test")
                         .fontWeight(.medium)
                 }
-                .padding()
-                .background(.blue)
-                .foregroundStyle(.white)
-                .clipShape(Capsule())
             }
+            .capsuleProminentButton()
         }
         .padding(.vertical, 40)
     }
-    
+
     private var loadingState: some View {
         VStack {
             ProgressView()
                 .controlSize(.large)
-            
+
             Text("Loading Tests...")
                 .font(.body)
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 60)
     }
-    
+
     private func runAllTests() async {
         isRunningAllTests = true
-        
+
         for test in activeTests.results {
             var test = test
             do {
                 test.status = .running
                 try await test.write(to: db!)
                 test = await test.test()
-                
+
 #if !os(macOS)
                 if test.status == .failed {
                     UINotificationFeedbackGenerator().notificationOccurred(.error)
@@ -344,7 +324,7 @@ struct ServerTestView: View {
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                 }
 #endif
-                
+
                 try await test.write(to: db!)
                 try await test.testIntent().donate()
             } catch {
@@ -354,17 +334,8 @@ struct ServerTestView: View {
                 }
             }
         }
-        
+
         isRunningAllTests = false
-    }
-    
-    private func checkNotificationPermissions() {
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            let allowed = settings.authorizationStatus == .authorized
-            Task{@MainActor in
-                notificationsAllowed = allowed
-            }
-        }
     }
 
     private func openAgenticForTestCreation() {
@@ -398,18 +369,18 @@ struct TestMetricCard: View {
     let count: Int
     let color: Color
     let icon: String
-    
+
     var body: some View {
         HStack {
             Image(systemName: icon)
                 .font(.caption)
                 .foregroundStyle(color)
-            
+
             VStack(alignment: .leading) {
                 Text("\(count)")
                     .font(.headline)
                     .fontWeight(.semibold)
-                
+
                 Text(title)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -425,7 +396,7 @@ struct TestCard: View {
     let test: ServerTest
     @Environment(\.blackbirdDatabase) var db
     @State private var isRunning = false
-    
+
     var body: some View {
         Menu {
             AsyncButton("Run Test", systemImage: "play.fill") {
@@ -482,23 +453,22 @@ struct TestCard: View {
 
                 Spacer()
             }
-            .padding()
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-            .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
+            .testSectionCard()
+            .testCardShadow()
         }
         .multilineTextAlignment(.leading)
         .buttonStyle(.plain)
     }
-    
+
     private func runTest() async {
         isRunning = true
         var updatedTest = test
-        
+
         do {
             updatedTest.status = .running
             try await updatedTest.write(to: db!)
             updatedTest = await updatedTest.test()
-            
+
 #if !os(macOS)
             if updatedTest.status == .failed {
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
@@ -506,7 +476,7 @@ struct TestCard: View {
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
             }
 #endif
-            
+
             try await updatedTest.write(to: db!)
             try await updatedTest.testIntent().donate()
         } catch {
@@ -515,10 +485,10 @@ struct TestCard: View {
                 try? await updatedTest.write(to: db!)
             }
         }
-        
+
         isRunning = false
     }
-    
+
     private func deleteTest() {
         Task {
             try await test.delete(from: db!)
@@ -549,7 +519,7 @@ struct SnippetCard: View {
                 deleteSnippet()
             }
         } label: {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading) {
                 HStack {
                     ZStack {
                         Circle()
@@ -600,13 +570,12 @@ struct SnippetCard: View {
 
                 Spacer(minLength: 0)
             }
-            .padding()
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .testSectionCard()
             .overlay(
                 RoundedRectangle(cornerRadius: 16)
                     .stroke(.blue.opacity(0.2), lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
+            .testCardShadow()
         }
         .multilineTextAlignment(.leading)
         .buttonStyle(.plain)
@@ -659,7 +628,7 @@ struct SnippetDetailView: View {
     @BlackbirdLiveModel var snippet: Snippet?
     @Environment(\.blackbirdDatabase) private var db
     @Environment(\.dismiss) private var dismiss
-    @State private var contextStore = AgenticScreenContextStore.shared
+    @Environment(\.agenticContextStore) private var contextStore
 
     @State private var isEditing = false
     @State private var editCommand = ""
@@ -670,7 +639,7 @@ struct SnippetDetailView: View {
     var body: some View {
         if let snippet {
             ScrollView {
-                VStack(spacing: 12) {
+                VStack {
                     headerSection(snippet)
                     configurationSection(snippet)
                     actionsSection(snippet)
@@ -745,29 +714,25 @@ struct SnippetDetailView: View {
                     }
 
                     Text(serverLabel(for: isEditing ? editCredentialKey : (snippet.credentialKey ?? "")))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .testFieldLabelStyle()
                 }
 
                 Spacer()
             }
         }
-        .padding()
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .testSectionCard()
     }
 
     private func configurationSection(_ snippet: Snippet) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading) {
             Text("Configuration")
                 .font(.headline)
                 .fontWeight(.medium)
 
             if isEditing {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading) {
                     Text("Server")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.secondary)
+                        .testFieldLabelStyle()
 
                     Picker("Server", selection: $editCredentialKey) {
                         Text("Global (no server)")
@@ -782,11 +747,9 @@ struct SnippetDetailView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading) {
                 Text("Command")
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.secondary)
+                    .testFieldLabelStyle()
 
                 if isEditing {
                     TextField("Enter command", text: $editCommand, axis: .vertical)
@@ -796,45 +759,32 @@ struct SnippetDetailView: View {
                 } else {
                     Text(snippet.command)
                         .font(.system(.body, design: .monospaced))
-                        .padding()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                        .testContentBlock()
                 }
             }
 
             if !isEditing {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading) {
                     Text("Last Used")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.secondary)
+                        .testFieldLabelStyle()
                     Text("\(snippet.lastUse, style: .relative) ago")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
         }
-        .padding()
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .testSectionCard()
     }
 
     private func actionsSection(_ snippet: Snippet) -> some View {
-        VStack(spacing: 12) {
+        VStack {
             if !isEditing {
                 Button {
                     showingDeleteConfirmation = true
                 } label: {
-                    HStack {
-                        Image(systemName: "trash")
-                        Text("Delete Snippet")
-                            .fontWeight(.medium)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(.red.opacity(0.1))
-                    .foregroundStyle(.red)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    Label("Delete Snippet", systemImage: "trash")
                 }
+                .destructiveBorderedAction()
             }
         }
     }
@@ -893,27 +843,13 @@ struct SnippetDetailView: View {
             - server: \(server)
             - command: \(command)
             - comment: \(comment.isEmpty ? "(none)" : comment)
-
+            
             Requested changes:
             """
         )
     }
 }
 
-#Preview {
-    let db = try! Blackbird.Database.inMemoryDatabase()
-    let test1 = ServerTest(id: 1, title: "Disk Space Check", credentialKey: "server1", command: "df -h", expectedOutput: "Available", status: .success)
-    let test2 = ServerTest(id: 2, title: "Memory Usage", credentialKey: "server1", command: "free -m", expectedOutput: "free", status: .failed)
-    let test3 = ServerTest(id: 3, title: "Service Status", credentialKey: "server2", command: "systemctl status nginx", expectedOutput: "active", status: .running)
-    let suggestion = ServerTest(id: 4, title: "HTTP Health Check", credentialKey: "-", command: "curl -f http://localhost", expectedOutput: "200", status: .notRun)
-    
-    Task {
-        try await test1.write(to: db)
-        try await test2.write(to: db)
-        try await test3.write(to: db)
-        try await suggestion.write(to: db)
-    }
-    
-    return ServerTestView()
-        .environment(\.blackbirdDatabase, db)
+#Preview(traits: .sampleData) {
+    ServerTestView()
 }

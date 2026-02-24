@@ -54,9 +54,7 @@ struct ServerDetailView: View {
             .alert("Clear Cached Containers", isPresented: $showingClearContainersAlert) {
                 Button(role: .cancel) { }
                 Button("Clear", role: .destructive) {
-                    Task {
-                        try? await server.clearCachedContainers()
-                    }
+                    clearCachedContainers(for: server)
                 }
             } message: {
                 Text("This will remove all cached container data for this server. The data will be refreshed from the server.")
@@ -90,6 +88,12 @@ struct ServerDetailView: View {
             Help me with:
             """
         )
+    }
+
+    private func clearCachedContainers(for server: Server) {
+        Task {
+            try? await server.clearCachedContainers()
+        }
     }
     
     @ViewBuilder
@@ -340,6 +344,6 @@ struct ServerDetailView: View {
     }
 }
 
-#Preview {
+#Preview(traits: .sampleData) {
     ServerDetailView(server: Server(credentialKey: UUID().uuidString).liveModel, id: UUID().uuidString)
 }

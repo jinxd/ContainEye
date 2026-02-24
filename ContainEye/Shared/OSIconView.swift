@@ -48,7 +48,7 @@ struct OSIconView: View {
     }
 }
 
-#Preview {
+#Preview(traits: .sampleData) {
     VStack {
         // Example with Ubuntu
         OSIconView(server: Server(credentialKey: "test"))

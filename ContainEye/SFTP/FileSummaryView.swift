@@ -97,3 +97,12 @@ struct FileSummaryView: View {
         }
     }
 }
+
+#Preview("File Row (Placeholder)", traits: .sampleData) {
+    ContentUnavailableView(
+        "Preview Requires Live SFTP Data",
+        systemImage: "externaldrive.badge.questionmark",
+        description: Text("FileSummaryView needs Citadel SFTPPathComponent values that are not publicly constructible.")
+    )
+    .padding()
+}

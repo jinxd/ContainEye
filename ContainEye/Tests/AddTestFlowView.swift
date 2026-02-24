@@ -24,3 +24,9 @@ struct AddTestFlowView: View {
             }
     }
 }
+
+#Preview(traits: .sampleData) {
+    NavigationStack {
+        AddTestFlowView()
+    }
+}

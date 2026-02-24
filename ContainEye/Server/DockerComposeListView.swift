@@ -60,7 +60,7 @@ struct DockerComposeListView: View {
     }
 }
 
-#Preview {
+#Preview(traits: .sampleData) {
     NavigationStack {
         DockerComposeListView(
             server: Server(credentialKey: "test"),

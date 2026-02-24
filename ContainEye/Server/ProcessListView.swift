@@ -158,16 +158,12 @@ struct ProcessListView: View {
                     Button(role: .cancel) { }
                     Button("Kill", role: .destructive) {
                         if let processToKill {
-                            Task {
-                                await killProcess(processToKill, server: server)
-                            }
+                            requestKill(processToKill, server: server)
                         }
                     }
                     Button("Force Kill", role: .destructive) {
                         if let processToKill {
-                            Task {
-                                await forceKillProcess(processToKill, server: server)
-                            }
+                            requestForceKill(processToKill, server: server)
                         }
                     }
                 } message: {
@@ -208,6 +204,18 @@ struct ProcessListView: View {
             await server.fetchProcesses()
         } catch {
             print("Failed to force kill process \(process.pid): \(error)")
+        }
+    }
+
+    private func requestKill(_ process: Process, server: Server) {
+        Task {
+            await killProcess(process, server: server)
+        }
+    }
+
+    private func requestForceKill(_ process: Process, server: Server) {
+        Task {
+            await forceKillProcess(process, server: server)
         }
     }
 }
@@ -276,6 +284,6 @@ struct ProcessRowView: View {
     }
 }
 
-#Preview {
+#Preview(traits: .sampleData) {
     ProcessListView(server: Server(credentialKey: UUID().uuidString).liveModel, id: UUID().uuidString)
 }

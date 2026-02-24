@@ -32,11 +32,9 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
 
         scriptHandler.owner = self
         contentController.add(scriptHandler, name: "terminalBridge")
-        if #available(iOS 16.0, *) {
-            let interaction = UIEditMenuInteraction(delegate: self)
-            addInteraction(interaction)
-            editMenuInteraction = interaction
-        }
+        let interaction = UIEditMenuInteraction(delegate: self)
+        addInteraction(interaction)
+        editMenuInteraction = interaction
 
         webView.backgroundColor = .clear
         webView.isOpaque = false
@@ -104,6 +102,17 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
 
     func submitEnter() {
         enqueueOrRun(js: "window.terminalHost?.submitEnter?.();")
+    }
+
+    func setFontSize(_ size: Int) {
+        enqueueOrRun(js: "window.terminalHost?.setFontSize?.(\(size));")
+    }
+
+    func setTheme(_ payload: [String: String]) {
+        guard let json = jsonObject(payload) else {
+            return
+        }
+        enqueueOrRun(js: "window.terminalHost?.setTheme?.(\(json));")
     }
 
     private func loadTerminalPage() {
@@ -174,6 +183,16 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
         }
 
         return "\"\""
+    }
+
+    private func jsonObject(_ value: [String: String]) -> String? {
+        guard JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value, options: []),
+              let json = String(data: data, encoding: .utf8)
+        else {
+            return nil
+        }
+        return json
     }
 
     private func disableInputAssistantBar() {
@@ -423,18 +442,14 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
               !selection.isEmpty else {
             return
         }
-        AgenticContextBridge.shared.openAgentic(
-            chatTitle: "Terminal Selection",
-            draftMessage: """
-            Explain and help me act on this terminal output:
+        let sheet = UIHostingController(rootView: TerminalSelectionAIView(selectedText: String(selection.prefix(8000))))
+        sheet.modalPresentationStyle = .pageSheet
+        if let presentation = sheet.sheetPresentationController {
+            presentation.detents = [.medium(), .large()]
+            presentation.prefersGrabberVisible = true
+        }
 
-            ```
-            \(String(selection.prefix(8000)))
-            ```
-
-            I want:
-            """
-        )
+        findTopViewController()?.present(sheet, animated: true)
     }
 
     private func findTopViewController() -> UIViewController? {
@@ -560,6 +575,13 @@ private struct TerminalSelectionAIView: View {
                             .font(.caption)
                             .foregroundStyle(.red)
                     }
+
+                    Button("Continue In Agentic Tab", systemImage: "lasso.badge.sparkles") {
+                        continueInAgentic()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, UIFloat(8))
                 }
                 .padding(UIFloat(16))
             }
@@ -576,6 +598,50 @@ private struct TerminalSelectionAIView: View {
                 await generateExplanation()
             }
         }
+    }
+
+    private func continueInAgentic() {
+        AgenticContextBridge.shared.openAgenticAsUserMessage(
+            chatTitle: "Terminal Selection",
+            message: agenticDraftMessage,
+            autoRunAgent: true
+        )
+        dismiss()
+    }
+
+    private var agenticDraftMessage: String {
+        let clippedSelection = String(selectedText.prefix(8000))
+        let summaryText = response?.summary.joined(separator: "\n- ").trimmingCharacters(in: .whitespacesAndNewlines)
+        let whatItMeansText = response?.whatItMeans.joined(separator: "\n- ").trimmingCharacters(in: .whitespacesAndNewlines)
+        let nextStepsText = response?.nextSteps.joined(separator: "\n- ").trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallback = fallbackText?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        var sections: [String] = [
+            """
+            I started this in the terminal Ask AI sheet. Continue this conversation in Agentic mode.
+
+            Selected terminal text:
+            ```
+            \(clippedSelection)
+            ```
+            """
+        ]
+
+        if let summaryText, !summaryText.isEmpty {
+            sections.append("Ask AI summary:\n- \(summaryText)")
+        }
+        if let whatItMeansText, !whatItMeansText.isEmpty {
+            sections.append("Ask AI interpretation:\n- \(whatItMeansText)")
+        }
+        if let nextStepsText, !nextStepsText.isEmpty {
+            sections.append("Ask AI next steps:\n- \(nextStepsText)")
+        }
+        if let fallback, !fallback.isEmpty {
+            sections.append("Ask AI raw response:\n\(fallback)")
+        }
+
+        sections.append("Please help me continue from here with concrete next commands.")
+        return sections.joined(separator: "\n\n")
     }
 
     private func generateExplanation() async {
@@ -644,4 +710,10 @@ Selected text:
             }
         }
     }
+}
+
+#Preview("Selection AI", traits: .sampleData) {
+    TerminalSelectionAIView(
+        selectedText: "docker ps --format 'table {{.Names}}\\t{{.Status}}'"
+    )
 }

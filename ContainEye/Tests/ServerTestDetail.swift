@@ -14,7 +14,6 @@ struct ServerTestDetail: View {
     @BlackbirdLiveModel var test: ServerTest?
     @Environment(\.blackbirdDatabase) private var db
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.namespace) var namespace
     @Environment(\.agenticContextStore) private var contextStore
     
     @State private var isEditing = false
@@ -176,8 +175,7 @@ struct ServerTestDetail: View {
                 }
             }
         }
-        .padding()
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .testSectionCard()
     }
     
     // MARK: - Status Section
@@ -217,23 +215,18 @@ struct ServerTestDetail: View {
                         Text("Run Test")
                             .fontWeight(.medium)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(.blue)
-                    .foregroundStyle(.white)
-                    .clipShape(Capsule())
                 }
+                .capsuleProminentButton()
                 .disabled(isRunning || test.status == .running || isEditing)
             }
         }
-        .padding()
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .testSectionCard()
     }
     
     // MARK: - Configuration Section
     
     private func testConfigurationSection(test: ServerTest) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading) {
             Text("Configuration")
                 .font(.headline)
                 .fontWeight(.medium)
@@ -243,9 +236,7 @@ struct ServerTestDetail: View {
                 if isEditing {
                     VStack(alignment: .leading) {
                         Text("Server")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundStyle(.secondary)
+                            .testFieldLabelStyle()
                         
                         Picker("Server", selection: $editCredentialKey) {
                             Text("Do not execute")
@@ -266,9 +257,7 @@ struct ServerTestDetail: View {
                 // Command
                 VStack(alignment: .leading) {
                     Text("Command")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.secondary)
+                        .testFieldLabelStyle()
                     
                     if isEditing {
                         TextField("Enter command to execute", text: $editCommand, axis: .vertical)
@@ -278,9 +267,7 @@ struct ServerTestDetail: View {
                     } else {
                         Text(test.command)
                             .font(.system(.body, design: .monospaced))
-                            .padding()
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                            .testContentBlock()
                             .contextMenu {
                                 Button("Copy", systemImage: "doc.on.doc") {
                                     UIPasteboard.general.string = test.command
@@ -292,9 +279,7 @@ struct ServerTestDetail: View {
                 // Expected Output
                 VStack(alignment: .leading) {
                     Text("Expected Output")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.secondary)
+                        .testFieldLabelStyle()
                     
                     if isEditing {
                         TextField("Expected output or regex pattern", text: $editExpectedOutput, axis: .vertical)
@@ -304,9 +289,7 @@ struct ServerTestDetail: View {
                     } else {
                         Text(test.expectedOutput)
                             .font(.system(.body, design: .monospaced))
-                            .padding()
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                            .testContentBlock()
                             .contextMenu {
                                 Button("Copy", systemImage: "doc.on.doc") {
                                     UIPasteboard.general.string = test.expectedOutput
@@ -318,9 +301,7 @@ struct ServerTestDetail: View {
                 // Notes
                 VStack(alignment: .leading) {
                     Text("Notes")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.secondary)
+                        .testFieldLabelStyle()
                     
                     if isEditing {
                         TextField("Add notes about this test", text: $editNotes, axis: .vertical)
@@ -331,15 +312,12 @@ struct ServerTestDetail: View {
                             .font(.body)
                             .foregroundStyle(test.notes?.isEmpty == false ? .primary : .secondary)
                             .italic(test.notes?.isEmpty != false)
-                            .padding()
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                            .testContentBlock()
                     }
                 }
             }
         }
-        .padding()
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .testSectionCard()
     }
     
     // MARK: - Output Section
@@ -373,29 +351,18 @@ struct ServerTestDetail: View {
                     .stroke(test.status == .success ? .green.opacity(0.3) : test.status == .failed ? .red.opacity(0.3) : .blue.opacity(0.3), lineWidth: 1)
             )
         }
-        .padding()
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .testSectionCard()
     }
     
     // MARK: - Actions Section
     
     private func testActionsSection(test: ServerTest) -> some View {
-        VStack(spacing: 12) {
+        VStack {
             if !isEditing {
-                Button {
+                Button("Delete Test", systemImage: "trash", role: .destructive) {
                     showingDeleteConfirmation = true
-                } label: {
-                    HStack {
-                        Image(systemName: "trash")
-                        Text("Delete Test")
-                            .fontWeight(.medium)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(.red.opacity(0.1))
-                    .foregroundStyle(.red)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
+                .destructiveBorderedAction()
             }
         }
     }
@@ -534,7 +501,7 @@ struct AIAssistantView: View {
     @State private var showingPreview = false
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack {
                 if let improvedTest, showingPreview {
                     testPreviewSection(improvedTest)
@@ -824,24 +791,6 @@ struct AIAssistantView: View {
     }
 }
 
-#Preview {
-    let db = try! Blackbird.Database.inMemoryDatabase()
-    let test = ServerTest(
-        id: 1,
-        title: "Disk Space Check",
-        notes: "Monitor available disk space on the root partition",
-        credentialKey: "server1",
-        command: "df -h / | grep -E '^/' | awk '{print $5}' | sed 's/%//'",
-        expectedOutput: "^[0-9]{1,2}$",
-        lastRun: Date().addingTimeInterval(-3600),
-        status: .success,
-        output: "15"
-    )
-    
-    Task {
-        try await test.write(to: db)
-    }
-    
-    return ServerTestDetail(test: test.liveModel)
-        .environment(\.blackbirdDatabase, db)
+#Preview(traits: .sampleData) {
+    ServerTestDetail(test: PreviewSamples.test.liveModel)
 }

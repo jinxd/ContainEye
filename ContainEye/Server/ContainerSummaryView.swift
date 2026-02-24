@@ -75,3 +75,7 @@ struct ContainerSummaryView: View {
         }
     }
 }
+
+#Preview(traits: .sampleData) {
+    ContainerSummaryView(container: .init(PreviewSamples.container, updatesEnabled: false))
+}

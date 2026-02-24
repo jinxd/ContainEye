@@ -62,3 +62,11 @@ struct AgenticDetailFABInset: View {
         }
     }
 }
+
+#Preview("Floating Button", traits: .sampleData) {
+    AgenticFloatingActionButton(action: {})
+}
+
+#Preview("Detail Inset", traits: .sampleData) {
+    AgenticDetailFABInset()
+}

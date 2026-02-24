@@ -92,10 +92,8 @@ struct SupporterView: View {
                 .padding(.horizontal)
 
                 // Restore Button
-                Button {
-                    Task {
-                        await restorePurchases()
-                    }
+                AsyncButton {
+                    await restorePurchases()
                 } label: {
                     Text("Restore Purchases")
                         .font(.subheadline)
@@ -265,6 +263,6 @@ extension Product.SubscriptionPeriod {
     }
 }
 
-#Preview {
+#Preview(traits: .sampleData) {
     SupporterView()
 }

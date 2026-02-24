@@ -68,3 +68,24 @@ struct ServerAuthenticationInputs: View {
         }
     }
 }
+
+#Preview(traits: .sampleData) {
+    @Previewable @State var credential = Credential(
+        key: "preview-auth",
+        label: "Preview",
+        host: "host",
+        port: 22,
+        username: "root",
+        password: "",
+        authMethod: .privateKeyWithPassphrase,
+        privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\npreview\n-----END OPENSSH PRIVATE KEY-----",
+        passphrase: "secret"
+    )
+    @FocusState var focused: Bool
+    return ServerAuthenticationInputs(
+        credential: $credential,
+        isFieldFocused: $focused,
+        showsKeyTips: true
+    )
+    .padding()
+}

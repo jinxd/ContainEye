@@ -249,3 +249,10 @@ The regex/string must match exactly the entire output of the command. Consider u
     }
 
 }
+
+#Preview(traits: .sampleData) {
+    @Previewable @State var screen = 2
+    return NavigationStack {
+        AddTestView(screen: $screen)
+    }
+}

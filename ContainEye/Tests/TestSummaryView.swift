@@ -150,8 +150,8 @@ struct TestSummaryView: View {
     private var actionMenu: some View {
         Menu {
             if let test, test.credentialKey != "-" {
-                Button("Run Test", systemImage: "play.fill") {
-                    Task { await executeTest() }
+                AsyncButton("Run Test", systemImage: "play.fill") {
+                    await executeTest()
                 }
                 
                 NavigationLink(value: test) {
@@ -241,23 +241,23 @@ struct TestSummaryView: View {
 }
 
 
-#Preview {
-    let db = try! Blackbird.Database.inMemoryDatabase()
-    let test1 = ServerTest(id: 1, title: "Disk Space Check", credentialKey: "server1", command: "df -h", expectedOutput: "Available", status: .success)
-    let test2 = ServerTest(id: 2, title: "Memory Usage Monitor", credentialKey: "server1", command: "free -m", expectedOutput: "free", status: .failed)
-    let test3 = ServerTest(id: 3, title: "Service Status", credentialKey: "server2", command: "systemctl status nginx", expectedOutput: "active", status: .running)
-    
-    Task {
-        try await test1.write(to: db)
-        try await test2.write(to: db)
-        try await test3.write(to: db)
-    }
-    
+#Preview(traits: .sampleData) {
     return VStack(spacing: 16) {
-        TestSummaryView(test: test1.liveModel)
-        TestSummaryView(test: test2.liveModel)
-        TestSummaryView(test: test3.liveModel)
+        TestSummaryView(test: PreviewSamples.test.liveModel)
+        TestSummaryView(
+            test: ServerTest(
+                id: 9003,
+                title: "Memory Usage",
+                notes: nil,
+                credentialKey: PreviewSamples.credential.key,
+                command: "free -m",
+                expectedOutput: "free",
+                lastRun: .now.addingTimeInterval(-45),
+                status: .failed,
+                output: "command failed"
+            )
+            .liveModel
+        )
     }
     .padding()
-    .environment(\.blackbirdDatabase, db)
 }

@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Blackbird
+import ButtonKit
 #if canImport(UIKit)
 import UIKit
 #elseif canImport(AppKit)
@@ -33,6 +34,9 @@ struct AgenticView: View {
     @State private var savedSnippetMessageIDs: Set<UUID> = []
     @State private var draftContextByChatID: [UUID: String] = [:]
     @State private var presentedComposerContext: AgenticPresentedComposerContext?
+    @State private var renamingChatID: UUID?
+    @State private var renameChatDraft = ""
+    @State private var showRenameChatAlert = false
     @FocusState private var isComposerFocused: Bool
 
     var body: some View {
@@ -53,14 +57,27 @@ struct AgenticView: View {
         }
         .alert("Allow Command?", isPresented: $showCommandApprovalAlert, presenting: pendingCommandApproval) { context in
             Button("Allow") {
-                Task { await handlePendingCommandApproval(allow: true, context: context) }
+                approvePendingCommand(context)
             }
             Button("Deny", role: .destructive) {
-                Task { await handlePendingCommandApproval(allow: false, context: context) }
+                denyPendingCommand(context)
             }
             Button("Cancel", role: .cancel) {}
         } message: { context in
             Text("\(context.serverLabel)\n\(context.command)")
+        }
+        .alert("Rename Chat", isPresented: $showRenameChatAlert) {
+            TextField("Chat name", text: $renameChatDraft)
+            Button("Save") {
+                commitRenameChat()
+            }
+            .disabled(renameChatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Cancel", role: .cancel) {
+                renamingChatID = nil
+                renameChatDraft = ""
+            }
+        } message: {
+            Text("Enter a new name for this chat.")
         }
         .sheet(item: $editingMessage) { _ in
             NavigationStack {
@@ -78,8 +95,8 @@ struct AgenticView: View {
                         }
                     }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Save") {
-                            Task { await saveEditedMessageAndContinue() }
+                        AsyncButton("Save") {
+                            await saveEditedMessageAndContinue()
                         }
                         .disabled(editDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
@@ -154,6 +171,19 @@ struct AgenticView: View {
                             )
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            beginRename(chat: chat)
+                        } label: {
+                            Label("Rename Chat", systemImage: "pencil")
+                        }
+
+                        Button(role: .destructive) {
+                            store.deleteChat(id: chat.id)
+                        } label: {
+                            Label("Delete Chat", systemImage: "trash")
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 12)
@@ -270,8 +300,8 @@ struct AgenticView: View {
             }
 
             if message.role == .error, let chatID = store.selectedChatID, failureRetryContexts[chatID] != nil {
-                Button {
-                    Task { await retryFromFailure(chatID: chatID) }
+                AsyncButton {
+                    await retryFromFailure(chatID: chatID)
                 } label: {
                     Label("Retry from failure point", systemImage: "arrow.clockwise")
                         .font(.caption2)
@@ -364,21 +394,16 @@ struct AgenticView: View {
                     .padding(.vertical, 10)
 #if os(iOS)
                     .background {
-                        if #available(iOS 26, *) {
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(.clear)
-                                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
-                        } else {
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(.ultraThinMaterial)
-                        }
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(.clear)
+                            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
                     }
 #else
                     .textFieldStyle(.roundedBorder)
 #endif
 
-                Button {
-                    Task { await send() }
+                AsyncButton {
+                    await send()
                 } label: {
                     if isSending {
                         ProgressView()
@@ -404,13 +429,73 @@ struct AgenticView: View {
         }
     }
 
+    private func beginRename(chat: AgenticChat) {
+        renamingChatID = chat.id
+        renameChatDraft = chat.title
+        showRenameChatAlert = true
+    }
+
+    private func commitRenameChat() {
+        guard let chatID = renamingChatID else { return }
+        let trimmed = renameChatDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        store.renameChat(id: chatID, title: trimmed)
+        renamingChatID = nil
+        renameChatDraft = ""
+    }
+
     private func applyPendingContextIfNeeded() async {
         guard let context = bridge.consumePendingContext() else { return }
         let chatID = store.createChat(title: context.chatTitle, seededFromContext: true)
         store.selectedChatID = chatID
-        draftContextByChatID[chatID] = context.draftMessage
         input = ""
         isComposerFocused = true
+
+        switch context.deliveryMode {
+        case .composerDraft:
+            draftContextByChatID[chatID] = context.draftMessage
+        case .userMessage:
+            await deliverIncomingUserMessage(context.draftMessage, to: chatID, autoRunAgent: context.autoRunAgent)
+        }
+    }
+
+    private func deliverIncomingUserMessage(_ message: String, to chatID: UUID, autoRunAgent: Bool) async {
+        let prompt = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty else { return }
+
+        latestLLMRawResponses = []
+        input = ""
+        draftContextByChatID[chatID] = nil
+
+        await store.appendMessage(AgenticMessage(role: .user, content: prompt), to: chatID)
+
+        guard autoRunAgent else {
+            isComposerFocused = true
+            return
+        }
+
+        isSending = true
+        defer {
+            isSending = false
+            isComposerFocused = true
+        }
+        isComposerFocused = false
+
+        do {
+            try await runAgentLoop(chatID: chatID)
+        } catch {
+            let reason = "Agent error: \(error.localizedDescription)"
+            await store.appendMessage(AgenticMessage(role: .error, content: reason), to: chatID)
+            await presentFailureDebugAlert(chatID: chatID, reason: reason, retryHistory: store.llmHistory(for: chatID))
+        }
+    }
+
+    private func approvePendingCommand(_ context: AgenticPendingCommandApproval) {
+        Task { await handlePendingCommandApproval(allow: true, context: context) }
+    }
+
+    private func denyPendingCommand(_ context: AgenticPendingCommandApproval) {
+        Task { await handlePendingCommandApproval(allow: false, context: context) }
     }
 
     private enum CreationKind {
@@ -906,8 +991,8 @@ struct AgenticView: View {
             }
 
             if let runCommandSnippet {
-                Button {
-                    Task { await saveRunCommandAsSnippet(messageID: id, context: runCommandSnippet) }
+                AsyncButton {
+                    await saveRunCommandAsSnippet(messageID: id, context: runCommandSnippet)
                 } label: {
                     if savedSnippetMessageIDs.contains(id) {
                         Label("Saved to Snippets", systemImage: "checkmark")
@@ -959,8 +1044,8 @@ struct AgenticView: View {
                     }
 
                     if let undoCall = presented.preview.undoCall, let chatID = store.selectedChatID {
-                        Button {
-                            Task { await undoMutation(chatID: chatID, sourceMessageID: presented.messageID, call: undoCall) }
+                        AsyncButton {
+                            await undoMutation(chatID: chatID, sourceMessageID: presented.messageID, call: undoCall)
                         } label: {
                             if undoInFlightMessageIDs.contains(presented.messageID) {
                                 ProgressView()
@@ -1265,6 +1350,28 @@ final class AgenticChatStore {
         } else {
             save()
         }
+    }
+
+    func deleteChat(id: UUID) {
+        guard let index = chats.firstIndex(where: { $0.id == id }) else { return }
+        contextSeededChatIDs.remove(id)
+        deleteChats(at: IndexSet(integer: index))
+    }
+
+    func renameChat(id: UUID, title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let index = chats.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+
+        var chat = chats[index]
+        chat.title = trimmed
+        chat.updatedAt = .now
+        chats[index] = chat
+        chats.sort { $0.updatedAt > $1.updatedAt }
+        selectedChatID = id
+        save()
     }
 
     func appendMessage(_ message: AgenticMessage, to chatID: UUID) async {
@@ -2463,7 +2570,7 @@ struct AgenticToolExecutor {
     }
 }
 
-#Preview {
+#Preview(traits: .sampleData) {
     NavigationStack {
         AgenticView()
     }

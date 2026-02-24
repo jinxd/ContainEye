@@ -102,10 +102,11 @@ final class CommandSuggestionEngine: CommandSuggestionProviding {
             }
         }
 
-        let historyMatches = context.history
-            .filter { $0.hasPrefix(trimmedInput) }
-            .prefix(6)
-            .map { CommandSuggestion(text: $0, source: .history, score: scoreForPrefixMatch(prefix: trimmedInput, candidate: $0, sourceBoost: 0.8)) }
+        let historyMatches = await historySuggestions(
+            for: context,
+            command: command,
+            trimmedInput: trimmedInput
+        )
 
         scored.append(contentsOf: historyMatches)
 
@@ -214,6 +215,25 @@ final class CommandSuggestionEngine: CommandSuggestionProviding {
 
         let lengthPenalty = min(Double(candidate.count) / 120.0, 0.35)
         return sourceBoost + prefixScore - lengthPenalty
+    }
+
+    private func historySuggestions(
+        for context: CommandSuggestionContext,
+        command: String,
+        trimmedInput: String
+    ) async -> [CommandSuggestion] {
+        _ = command
+        let candidates = context.history
+            .filter { $0.hasPrefix(trimmedInput) }
+            .prefix(6)
+
+        return candidates.map {
+            CommandSuggestion(
+                text: $0,
+                source: .history,
+                score: scoreForPrefixMatch(prefix: trimmedInput, candidate: $0, sourceBoost: 0.8)
+            )
+        }
     }
 
     private func livePathSuggestions(credential: Credential, directory: String, prefix: String, limit: Int) async -> [String] {

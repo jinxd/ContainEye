@@ -46,3 +46,18 @@ struct PowerfulTextEditorView: View {
             }
     }
 }
+
+#Preview(traits: .sampleData) {
+    @Previewable @State var text = """
+    version: \"3\"
+    services:
+      web:
+        image: nginx:latest
+    """
+    return PowerfulTextEditorView(
+        text: $text,
+        filePath: "/srv/app/docker-compose.yml",
+        onSave: {},
+        onClose: {}
+    )
+}
