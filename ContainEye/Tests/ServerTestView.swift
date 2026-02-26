@@ -76,29 +76,6 @@ struct ServerTestView: View {
         }
         .navigationTitle("Code")
         .navigationBarTitleDisplayMode(.large)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Menu {
-                    Button {
-                        openAgenticForTestCreation()
-                    } label: {
-                        Label("Create Test", systemImage: "testtube.2")
-                    }
-
-                    Button {
-                        openAgenticForSnippetCreation()
-                    } label: {
-                        Label("Create Snippet", systemImage: "terminal")
-                    }
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .accessibilityLabel("Create")
-#if os(iOS)
-                .buttonStyle(.glass)
-#endif
-            }
-        }
     }
 
     private var testsHeaderSection: some View {

@@ -1,0 +1,4 @@
+[      57ms] [ERROR] Failed to load resource: the server responded with a status of 404 (File not found) @ http://127.0.0.1:4173/screenshots/Simulator%20Screenshot%20-%20iPhone%2017%20Pro%20-%202026-02-25%20at%2017.00.03.png:0
+[      60ms] [ERROR] Failed to load resource: the server responded with a status of 404 (File not found) @ http://127.0.0.1:4173/screenshots/Simulator%20Screenshot%20-%20iPhone%2017%20Pro%20-%202026-02-25%20at%2017.00.25.png:0
+[      60ms] [ERROR] Failed to load resource: the server responded with a status of 404 (File not found) @ http://127.0.0.1:4173/screenshots/Simulator%20Screenshot%20-%20iPhone%2017%20Pro%20-%202026-02-25%20at%2017.00.49.png:0
+[      83ms] [ERROR] Failed to load resource: the server responded with a status of 404 (File not found) @ http://127.0.0.1:4173/favicon.ico:0

@@ -1,0 +1,19 @@
+- generic [ref=e2]:
+  - heading "Know Your Server" [level=1] [ref=e3]:
+    - text: Know Your
+    - text: Server
+  - paragraph [ref=e4]: Faster actions, less typing
+  - generic [ref=e5]:
+    - generic [ref=e6]: Smart command suggestions
+    - generic [ref=e7]: Agent with memory + tools
+    - generic [ref=e8]: Live container health updates
+    - generic [ref=e9]: Native edit flow from terminal
+  - img "terminal" [ref=e11]
+  - generic [ref=e12]: SMART TERMINAL
+  - generic [ref=e13]:
+    - generic [ref=e14]:
+      - img "agentic" [ref=e15]
+      - generic [ref=e16]: AGENTIC AI
+    - generic [ref=e17]:
+      - img "monitor" [ref=e18]
+      - generic [ref=e19]: LIVE MONITORING

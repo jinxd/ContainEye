@@ -1,0 +1,25 @@
+- generic [ref=e2]:
+  - heading "Know Your Server" [level=1] [ref=e3]:
+    - text: Know Your
+    - text: Server
+  - paragraph [ref=e4]: Smart terminal. AI assistant. Live monitoring.
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - img "Terminal" [ref=e7]
+      - generic [ref=e8]: SMART TERMINAL
+    - generic [ref=e9]:
+      - img "Agentic AI" [ref=e10]
+      - generic [ref=e11]: AGENTIC AI
+    - generic [ref=e12]:
+      - img "Live Monitoring" [ref=e13]
+      - generic [ref=e14]: LIVE MONITORING
+  - generic [ref=e15]:
+    - generic [ref=e16]:
+      - heading "Terminal" [level=3] [ref=e17]
+      - paragraph [ref=e18]: Context-aware suggestions and completions for faster command flow.
+    - generic [ref=e19]:
+      - heading "Assistant" [level=3] [ref=e20]
+      - paragraph [ref=e21]: Persistent memory, app context, and tool-driven actions in one place.
+    - generic [ref=e22]:
+      - heading "Monitoring" [level=3] [ref=e23]
+      - paragraph [ref=e24]: Live server and container stats with instant visibility into health.

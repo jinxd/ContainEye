@@ -1,0 +1,14 @@
+- generic [ref=e2]:
+  - heading "Know Your Server" [level=1] [ref=e3]:
+    - text: Know Your
+    - text: Server
+  - paragraph [ref=e4]: Faster actions, less typing
+  - generic [ref=e5]: Smart command suggestions
+  - generic [ref=e6]: Agent with memory + tool actions
+  - generic [ref=e7]: Live container health updates
+  - img "Terminal view" [ref=e9]
+  - img "Agentic AI tab" [ref=e11]
+  - img "Server monitoring detail" [ref=e13]
+  - generic [ref=e14]: SMART TERMINAL
+  - generic [ref=e15]: AGENTIC AI
+  - generic [ref=e16]: LIVE MONITORING

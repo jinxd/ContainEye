@@ -1,0 +1,11 @@
+- generic [ref=e2]:
+  - heading "Know Your Server" [level=1] [ref=e3]:
+    - text: Know Your
+    - text: Server
+  - paragraph [ref=e4]: Smart terminal. AI assistant. Live monitoring.
+  - generic [ref=e5]: SMART TERMINAL
+  - img "Smart Terminal" [ref=e7]
+  - generic [ref=e8]: AGENTIC AI
+  - img "Agentic AI" [ref=e10]
+  - generic [ref=e11]: LIVE MONITORING
+  - img "Live Monitoring" [ref=e13]

@@ -1,0 +1,12 @@
+- generic [ref=e2]:
+  - heading "Know Your Server" [level=1] [ref=e3]:
+    - text: Know Your
+    - text: Server
+  - paragraph [ref=e4]: Smart terminal. AI assistant. Live monitoring.
+  - generic [ref=e5]: SMART TERMINAL
+  - generic [ref=e6]: AGENTIC AI
+  - generic [ref=e7]: LIVE MONITORING
+  - img "Terminal" [ref=e9]
+  - img "Agentic AI" [ref=e11]
+  - img "Monitoring" [ref=e13]
+  - generic [ref=e14]: Context-aware terminal, agent memory, and live container health in one workflow

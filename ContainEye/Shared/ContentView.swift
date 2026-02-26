@@ -91,8 +91,26 @@ struct ContentView: View {
                             Image(systemName: "plus")
                         }
                         .accessibilityLabel("Add a server")
-                        .buttonStyle(.borderedProminent)
-                        .buttonBorderShape(.circle)
+                    }
+                }
+                if screen == .testList {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            Button {
+                                openAgenticForTestCreation()
+                            } label: {
+                                Label("Create Test", systemImage: "testtube.2")
+                            }
+
+                            Button {
+                                openAgenticForSnippetCreation()
+                            } label: {
+                                Label("Create Snippet", systemImage: "terminal")
+                            }
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        .accessibilityLabel("Create")
                     }
                 }
             }
@@ -411,6 +429,29 @@ struct ContentView: View {
             """
         )
     }
+
+    private func openAgenticForTestCreation() {
+        bridge.openAgentic(
+            chatTitle: "Create Test",
+            draftMessage: """
+            Create a new server test.
+            Use `list_servers` if needed to confirm server labels.
+            Then use `create_test` with `server`, `title`, `command`, and `expectedOutput`.
+            """
+        )
+    }
+
+    private func openAgenticForSnippetCreation() {
+        bridge.openAgentic(
+            chatTitle: "Create Snippet",
+            draftMessage: """
+            Create a new snippet.
+            Use `create_snippet` with `command` and optional `comment`.
+            Optionally provide `server` for a server-scoped snippet, or leave it global.
+            """
+        )
+    }
+
     func handleActivity(_ activity: NSUserActivity) {
         screen = .testList
         if let string = (activity.userInfo!["kCSSearchableItemActivityContentKey"] as? String) ?? (activity.userInfo!["kCSSearchableItemActivityIdentifier"] as? String),
