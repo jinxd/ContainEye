@@ -7,6 +7,7 @@ struct TerminalTabState: Identifiable, Codable, Hashable {
     var title: String
     var createdAt: Date
     var themeOverrideSelectionKey: String?
+    var shortcutColorHex: String?
 }
 
 struct TerminalPaneState: Identifiable, Codable, Hashable {
@@ -72,7 +73,12 @@ final class TerminalWorkspaceStore {
         restoreWorkspace()
     }
 
-    func openTab(credentialKey: String, inFocusedPane: Bool = true, themeOverrideSelectionKey: String? = nil) {
+    func openTab(
+        credentialKey: String,
+        inFocusedPane: Bool = true,
+        themeOverrideSelectionKey: String? = nil,
+        shortcutColorHex: String? = nil
+    ) {
         guard tabs.count < maxTabCount else {
             return
         }
@@ -109,7 +115,8 @@ final class TerminalWorkspaceStore {
             credentialKey: credentialKey,
             title: tabTitle,
             createdAt: .now,
-            themeOverrideSelectionKey: themeOverrideSelectionKey
+            themeOverrideSelectionKey: themeOverrideSelectionKey,
+            shortcutColorHex: shortcutColorHex
         )
 
         tabs[tab.id] = tab

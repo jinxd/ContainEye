@@ -1186,12 +1186,13 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
 
     func refreshFromWorkspace() {
         let focused = workspace.focusedPaneID == paneID
-        panelView.layer.borderColor = (focused ? TerminalUIColors.focusedPaneStroke : TerminalUIColors.paneStroke).cgColor
+        let activeTab = workspace.activeTab(in: paneID)
+        applyPaneBorderStyle(focused: focused, activeTab: activeTab)
 
         let tabNumber = (workspace.panes.firstIndex(where: { $0.id == paneID }) ?? 0) + 1
         tabTitleLabel.text = "Tab \(tabNumber)"
 
-        guard let activeTab = workspace.activeTab(in: paneID),
+        guard let activeTab,
               let controller = workspace.controller(for: activeTab.id)
         else {
             observedControllerID = nil
@@ -1309,7 +1310,8 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
             self.workspace.openTab(
                 credentialKey: shortcut.credentialKey,
                 inFocusedPane: true,
-                themeOverrideSelectionKey: shortcut.themeSelectionKey
+                themeOverrideSelectionKey: shortcut.themeSelectionKey,
+                shortcutColorHex: shortcut.colorHex
             )
             self.launchStartupScriptIfNeeded(shortcut.startupScript, credentialKey: shortcut.credentialKey)
         }
@@ -1384,6 +1386,19 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
             return settingsStore.resolvedTheme.payload
         }
         return settingsStore.resolvedTheme(for: selection).payload
+    }
+
+    private func applyPaneBorderStyle(focused: Bool, activeTab: TerminalTabState?) {
+        if let colorHex = activeTab?.shortcutColorHex,
+           let shortcutColor = UIColor(hex: colorHex)
+        {
+            panelView.layer.borderColor = shortcutColor.cgColor
+            panelView.layer.borderWidth = UIFloat(3)
+            return
+        }
+
+        panelView.layer.borderColor = (focused ? TerminalUIColors.focusedPaneStroke : TerminalUIColors.paneStroke).cgColor
+        panelView.layer.borderWidth = UIFloat(1)
     }
 
     // MARK: Prompt Handling
@@ -1564,6 +1579,8 @@ final class TerminalServerPickerViewController: UIViewController {
 
         collectionView.backgroundColor = .clear
         collectionView.alwaysBounceVertical = true
+        collectionView.alwaysBounceHorizontal = false
+        collectionView.showsHorizontalScrollIndicator = false
         collectionView.allowsSelection = true
         collectionView.register(TerminalServerCell.self, forCellWithReuseIdentifier: TerminalServerCell.reuseID)
         collectionView.delegate = self
@@ -1646,27 +1663,30 @@ final class TerminalServerPickerViewController: UIViewController {
     }
 
     private static func makeLayout() -> UICollectionViewCompositionalLayout {
-        UICollectionViewCompositionalLayout { _, _ -> NSCollectionLayoutSection? in
+        UICollectionViewCompositionalLayout { _, environment -> NSCollectionLayoutSection? in
+            let width = environment.container.effectiveContentSize.width
+            let sideInset = max(UIFloat(2), min(UIFloat(8), width * 0.03))
+
             let itemSize = NSCollectionLayoutSize(
-                widthDimension: .fractionalWidth(1),
+                widthDimension: .fractionalWidth(0.5),
                 heightDimension: .fractionalHeight(1)
             )
             let item = NSCollectionLayoutItem(layoutSize: itemSize)
-            item.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: UIFloat(4), bottom: 0, trailing: UIFloat(4))
+            item.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: UIFloat(3), bottom: 0, trailing: UIFloat(3))
 
             let groupSize = NSCollectionLayoutSize(
                 widthDimension: .fractionalWidth(1),
                 heightDimension: .absolute(UIFloat(98))
             )
-            let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, repeatingSubitem: item, count: 2)
+            let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item, item])
 
             let section = NSCollectionLayoutSection(group: group)
             section.interGroupSpacing = UIFloat(8)
             section.contentInsets = NSDirectionalEdgeInsets(
                 top: TerminalUIMetrics.sectionTopInset,
-                leading: UIFloat(4),
+                leading: sideInset,
                 bottom: TerminalUIMetrics.sectionBottomInset,
-                trailing: UIFloat(4)
+                trailing: sideInset
             )
             return section
         }
@@ -1873,6 +1893,8 @@ struct TerminalShortcutEditorScreen: View {
             Section("Startup Script (Optional)") {
                 TextEditor(text: $startupScript)
                     .font(.system(size: UIFloat(13), weight: .regular, design: .monospaced))
+                    .autocorrectionDisabled(true)
+                    .textInputAutocapitalization(.never)
                     .frame(minHeight: UIFloat(180))
             }
         }

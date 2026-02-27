@@ -1567,7 +1567,6 @@ Allowed tools:
 - list_snippets {"server":"optional server label", "query":"optional comment/command filter"}
 - create_snippet {"server":"optional server label", "command":"...", "comment":"optional"}
 - update_snippet {"id":"<snippet id>", "server":"optional server label or empty for global", "command":"optional", "comment":"optional"}
-- add_server {"label":"...", "host":"...", "port":22, "username":"...", "authMethod":"password|privateKey|privateKeyWithPassphrase", "password":"...", "privateKey":"...", "passphrase":"..."}
 - update_server {"server":"<server label>", "label":"optional", "host":"optional", "port":22, "username":"optional", "authMethod":"optional", "password":"optional", "privateKey":"optional", "passphrase":"optional"}
 - update_memory {"content":"<memory note>", "mode":"append|replace"}
 
@@ -1920,8 +1919,6 @@ struct AgenticToolExecutor {
                 return try await createSnippet(arguments: call.arguments)
             case "update_snippet":
                 return try await updateSnippet(arguments: call.arguments)
-            case "add_server":
-                return try await addServer(arguments: call.arguments)
             case "update_server":
                 return try await updateServer(arguments: call.arguments)
             case "update_memory":
@@ -2308,46 +2305,6 @@ struct AgenticToolExecutor {
             "undo": undoCall,
         ])
         return .init(userFacingSummary: "Updated snippet \(snippet.id).", jsonPayload: payload)
-    }
-
-    private func addServer(arguments: [String: Any]) async throws -> AgenticToolResult {
-        let label = stringArg("label", from: arguments)
-        let host = stringArg("host", from: arguments)
-        let username = stringArg("username", from: arguments)
-        let portValue = arguments["port"] as? Int ?? Int(arguments["port"] as? String ?? "22") ?? 22
-        let authMethodRaw = (arguments["authMethod"] as? String ?? "password").lowercased()
-
-        let authMethod: AuthenticationMethod
-        switch authMethodRaw {
-        case "privatekey":
-            authMethod = .privateKey
-        case "privatekeywithpassphrase":
-            authMethod = .privateKeyWithPassphrase
-        default:
-            authMethod = .password
-        }
-
-        let credential = Credential(
-            key: UUID().uuidString,
-            label: label,
-            host: host,
-            port: Int32(portValue),
-            username: username,
-            password: (arguments["password"] as? String) ?? "",
-            authMethod: authMethod,
-            privateKey: arguments["privateKey"] as? String,
-            passphrase: arguments["passphrase"] as? String
-        )
-
-        let data = try JSONEncoder().encode(credential)
-        try keychain().set(data, key: credential.key)
-        try await Server(credentialKey: credential.key).write(to: database)
-
-        let payload = serialize([
-            "label": credential.label,
-            "host": credential.host,
-        ])
-        return .init(userFacingSummary: "Added server '\(credential.label)' (\(credential.host)).", jsonPayload: payload)
     }
 
     private func updateServer(arguments: [String: Any]) async throws -> AgenticToolResult {

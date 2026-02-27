@@ -49,6 +49,7 @@ struct ServerFormInputsView: View {
                 .focused(isFieldFocused)
                 .keyboardType(currentStepKeyboardType(.URL))
                 .textFieldStyle(.roundedBorder)
+                .autocorrectionDisabled(true)
                 .textInputAutocapitalization(.never)
                 .submitLabel(.next)
         case .port:
@@ -61,6 +62,7 @@ struct ServerFormInputsView: View {
             TextField(currentStepPlaceholder("Username"), text: $credential.username)
                 .focused(isFieldFocused)
                 .textFieldStyle(.roundedBorder)
+                .autocorrectionDisabled(true)
                 .textInputAutocapitalization(.never)
                 .submitLabel(.next)
         case .authenticationMethod, .authenticationDetails:
