@@ -10,7 +10,6 @@ struct ServerAuthenticationInputs: View {
         case .password:
             SecureField("Enter your password", text: $credential.password)
                 .focused(isFieldFocused)
-                .textFieldStyle(.roundedBorder)
                 .submitLabel(.done)
 
         case .privateKey, .privateKeyWithPassphrase:
@@ -21,12 +20,10 @@ struct ServerAuthenticationInputs: View {
                 TextField("Paste your SSH private key here", text: privateKeyBinding, axis: .vertical)
                     .lineLimit(6...12)
                     .focused(isFieldFocused)
-                    .textFieldStyle(.roundedBorder)
                     .font(.system(.caption, design: .monospaced))
 
                 if credential.effectiveAuthMethod == .privateKeyWithPassphrase {
                     SecureField("Enter key passphrase", text: passphraseBinding)
-                        .textFieldStyle(.roundedBorder)
                 }
 
                 if showsKeyTips {

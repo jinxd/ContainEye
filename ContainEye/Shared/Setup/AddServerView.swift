@@ -84,61 +84,81 @@ struct AddServerView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading) {
-                ServerFormStepHeaderView(
+        Form {
+            Section {
+                ServerFormStepCardView(step: currentStepData, isPrimaryStep: currentStep == 0)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+            }
+
+            Section {
+                ServerFormInputsView(
+                    credential: $credential,
+                    steps: Self.steps,
                     currentStep: currentStep,
-                    stepCount: Self.steps.count,
-                    progress: progress,
-                    statusText: nil,
-                    canProceed: canProceed,
-                    isConnecting: isConnecting,
-                    onBack: goBack,
-                    onForward: advanceOrConnect,
-                    forwardTitle: isLastStep ? "Connect" : "Next"
+                    portText: $portText,
+                    isFieldFocused: $isFieldFocused,
+                    showsKeyTips: true
                 )
 
-                ServerFormStepCardView(step: currentStepData)
-
-                VStack(alignment: .leading) {
-                    ServerFormInputsView(
-                        credential: $credential,
-                        steps: Self.steps,
-                        currentStep: currentStep,
-                        portText: $portText,
-                        isFieldFocused: $isFieldFocused,
-                        showsKeyTips: true
-                    )
-
-                    ConnectionErrorInlineView(error: connectionError)
-                }
-                .padding(16)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-
+                ConnectionErrorInlineView(error: connectionError)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 10) {
                 AsyncButton {
                     await continueOrConnect()
                 } label: {
                     if isConnecting {
                         ProgressView()
+                            .frame(maxWidth: .infinity)
                     } else {
                         Text(isLastStep ? "Connect Server" : "Continue")
+                            .frame(maxWidth: .infinity)
                     }
                 }
-                .buttonStyle(.glassProminent)
-                .buttonBorderShape(.capsule)
+                .buttonStyle(.borderedProminent)
                 .disabled(!canProceed || isConnecting)
-                .frame(maxWidth: .infinity)
 
                 NavigationLink(value: URL.servers) {
                     Text("Learn about SSH servers")
-                        .font(.footnote)
+                        .font(.footnote.weight(.medium))
                         .underline()
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.accent)
-                .frame(maxWidth: .infinity)
             }
-            .padding()
+            .padding(.horizontal)
+            .padding(.top, 10)
+            .padding(.bottom, 10)
+            .background(.regularMaterial)
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                if currentStep > 0 {
+                    Button(action: goBack) {
+                        Image(systemName: "chevron.left")
+                            .font(.headline.weight(.semibold))
+                    }
+                }
+            }
+            ToolbarItem(placement: .principal) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Step \(currentStep + 1) of \(Self.steps.count)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    GeometryReader { proxy in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(Color.secondary.opacity(0.2))
+                            Capsule()
+                                .fill(.accent)
+                                .frame(width: max(18, proxy.size.width * progress))
+                        }
+                    }
+                    .frame(height: 6)
+                }
+                .frame(width: 170, alignment: .leading)
+            }
         }
         .onAppear {
             isFieldFocused = true
@@ -156,6 +176,12 @@ struct AddServerView: View {
         .onChange(of: credential.port) {
             syncPortTextFromCredential()
         }
+        .onSubmit {
+            guard canProceed, !isConnecting else { return }
+            Task {
+                await continueOrConnect()
+            }
+        }
     }
 }
 
@@ -164,12 +190,6 @@ private extension AddServerView {
         guard currentStep > 0 else { return }
         withAnimation(.spring()) {
             currentStep -= 1
-        }
-    }
-
-    func advanceOrConnect() {
-        Task {
-            await continueOrConnect()
         }
     }
 

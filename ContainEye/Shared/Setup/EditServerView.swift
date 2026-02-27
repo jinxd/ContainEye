@@ -47,34 +47,41 @@ struct EditServerView: View {
     }
 
     var body: some View {
-        VStack {
-            ServerFormStepHeaderView(
-                currentStep: currentStep,
-                stepCount: Self.steps.count,
-                progress: progress,
-                statusText: hasChanges ? "Modified" : nil,
-                canProceed: canProceed,
-                isConnecting: isConnecting,
-                onBack: goBack,
-                onForward: advanceOrSave,
-                forwardTitle: isLastStep ? "Save" : "Next"
-            )
+        Form {
+            Section {
+                ServerFormStepHeaderView(
+                    currentStep: currentStep,
+                    stepCount: Self.steps.count,
+                    progress: progress,
+                    statusText: hasChanges ? "Modified" : nil,
+                    canProceed: canProceed,
+                    isConnecting: isConnecting,
+                    onBack: goBack,
+                    onForward: advanceOrSave,
+                    forwardTitle: isLastStep ? "Save" : "Next",
+                    showsForwardButton: true
+                )
+                .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+            }
 
-            ServerFormStepCardView(step: currentStepData)
+            Section {
+                ServerFormStepCardView(step: currentStepData, isPrimaryStep: currentStep == 0)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+            }
 
-            ServerFormInputsView(
-                credential: $credential,
-                steps: Self.steps,
-                currentStep: currentStep,
-                portText: $portText,
-                isFieldFocused: $isFieldFocused,
-                showsKeyTips: false
-            )
+            Section {
+                ServerFormInputsView(
+                    credential: $credential,
+                    steps: Self.steps,
+                    currentStep: currentStep,
+                    portText: $portText,
+                    isFieldFocused: $isFieldFocused,
+                    showsKeyTips: false
+                )
 
-            ConnectionErrorInlineView(error: connectionError)
-            Spacer()
+                ConnectionErrorInlineView(error: connectionError)
+            }
         }
-        .padding()
         .navigationTitle("Edit Server")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -122,6 +129,10 @@ struct EditServerView: View {
             if portText != updated {
                 portText = updated
             }
+        }
+        .onSubmit {
+            guard canProceed, !isConnecting else { return }
+            advanceOrSave()
         }
     }
 }

@@ -10,34 +10,71 @@ struct ServerFormStepHeaderView: View {
     let onBack: () -> Void
     let onForward: () -> Void
     let forwardTitle: String
+    let showsForwardButton: Bool
+    
+    private var showsBackButton: Bool {
+        currentStep > 0
+    }
 
     var body: some View {
-        HStack {
-            Button(action: onBack) {
-                Image(systemName: "chevron.left")
-            }
-            .buttonStyle(.bordered)
-            .opacity(currentStep > 0 ? 1 : 0)
-            .disabled(currentStep == 0)
-
-            VStack(alignment: .leading) {
-                HStack {
-                    Text("Step \(currentStep + 1) of \(stepCount)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if let statusText {
-                        Text(statusText)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                if showsBackButton {
+                    Button(action: onBack) {
+                        Image(systemName: "chevron.left")
+                            .font(.headline.weight(.semibold))
+                            .frame(width: 40, height: 40)
                     }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.primary)
+                    .background(
+                        Circle()
+                            .fill(.thinMaterial)
+                    )
                 }
-                ProgressView(value: progress)
-                    .tint(.accent)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Step \(currentStep + 1) of \(stepCount)")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    GeometryReader { proxy in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(Color.secondary.opacity(0.18))
+                            Capsule()
+                                .fill(.accent)
+                                .frame(width: max(24, proxy.size.width * progress))
+                        }
+                    }
+                    .frame(height: 8)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if showsForwardButton {
+                    Button(action: onForward) {
+                        if isConnecting {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .frame(width: 24, height: 24)
+                        } else {
+                            Text(forwardTitle)
+                                .font(.headline)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(!canProceed || isConnecting)
+                    .fixedSize(horizontal: true, vertical: false)
+                }
             }
 
-            Button(forwardTitle, action: onForward)
-                .buttonStyle(.borderedProminent)
-                .disabled(!canProceed || isConnecting)
+            if let statusText {
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 2)
+            }
         }
     }
 }
@@ -52,7 +89,8 @@ struct ServerFormStepHeaderView: View {
         isConnecting: false,
         onBack: {},
         onForward: {},
-        forwardTitle: "Next"
+        forwardTitle: "Next",
+        showsForwardButton: true
     )
     .padding()
 }

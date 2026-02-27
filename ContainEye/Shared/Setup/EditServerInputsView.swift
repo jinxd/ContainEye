@@ -24,7 +24,6 @@ struct ServerFormInputsView: View {
                 if currentStepField == .hostAndPort {
                     TextField("Port", text: $portText)
                         .keyboardType(.numberPad)
-                        .textFieldStyle(.roundedBorder)
                         .submitLabel(.next)
                 }
             }
@@ -41,14 +40,12 @@ struct ServerFormInputsView: View {
         case .label:
             TextField(currentStepPlaceholder("Server name"), text: $credential.label)
                 .focused(isFieldFocused)
-                .textFieldStyle(.roundedBorder)
                 .submitLabel(.next)
                 .textInputAutocapitalization(.words)
         case .host, .hostAndPort:
             TextField(currentStepPlaceholder("Hostname or IP"), text: $credential.host)
                 .focused(isFieldFocused)
                 .keyboardType(currentStepKeyboardType(.URL))
-                .textFieldStyle(.roundedBorder)
                 .autocorrectionDisabled(true)
                 .textInputAutocapitalization(.never)
                 .submitLabel(.next)
@@ -56,12 +53,10 @@ struct ServerFormInputsView: View {
             TextField(currentStepPlaceholder("22"), text: $portText)
                 .focused(isFieldFocused)
                 .keyboardType(.numberPad)
-                .textFieldStyle(.roundedBorder)
                 .submitLabel(.next)
         case .username:
             TextField(currentStepPlaceholder("Username"), text: $credential.username)
                 .focused(isFieldFocused)
-                .textFieldStyle(.roundedBorder)
                 .autocorrectionDisabled(true)
                 .textInputAutocapitalization(.never)
                 .submitLabel(.next)
