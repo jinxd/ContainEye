@@ -7,8 +7,6 @@
 
 import SwiftUI
 import KeychainAccess
-import ButtonKit
-@preconcurrency import Citadel
 
 struct EditServerView: View {
     @Environment(\.dismiss) private var dismiss
@@ -19,7 +17,6 @@ struct EditServerView: View {
     @State private var currentStep = 0
     @State private var isConnecting = false
     @State private var connectionError: String?
-    @State private var showingDeleteConfirmation = false
     @State private var portText: String
     @FocusState private var isFieldFocused: Bool
 
@@ -84,33 +81,6 @@ struct EditServerView: View {
         }
         .navigationTitle("Edit Server")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button("Close", role: .cancel) {
-                    dismiss()
-                }
-            }
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Menu {
-                    AsyncButton("Test Connection") {
-                        await testConnection()
-                    }
-                    Button("Delete Server", role: .destructive) {
-                        showingDeleteConfirmation = true
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-            }
-        }
-        .alert("Delete Server", isPresented: $showingDeleteConfirmation) {
-            Button(role: .cancel) {}
-            Button("Delete", role: .destructive) {
-                deleteServer()
-            }
-        } message: {
-            Text("Are you sure you want to delete \"\(credential.label)\"? This action cannot be undone.")
-        }
         .onAppear {
             isFieldFocused = true
         }
@@ -163,20 +133,6 @@ private extension EditServerView {
         credential.port = Int32(Int(filtered) ?? 0)
     }
 
-    func testConnection() async {
-        isConnecting = true
-        connectionError = nil
-
-        do {
-            let client = try await SSHClient.connect(using: credential)
-            try await client.close()
-            isConnecting = false
-        } catch {
-            connectionError = "Connection test failed: \(error.localizedDescription)"
-            isConnecting = false
-        }
-    }
-
     func saveChanges() async {
         isConnecting = true
         connectionError = nil
@@ -194,23 +150,6 @@ private extension EditServerView {
             isConnecting = false
         }
     }
-
-    func deleteServer() {
-        Task {
-            do {
-                try keychain().remove(credential.key)
-
-                if let server = try? await Server.read(from: db!, id: credential.key) {
-                    try await server.delete(from: db!)
-                }
-                await Snippet.deleteForServer(credentialKey: credential.key, in: db!)
-                dismiss()
-            } catch {
-                connectionError = "Failed to delete server: \(error.localizedDescription)"
-            }
-        }
-    }
-
 }
 
 #Preview(traits: .sampleData) {
