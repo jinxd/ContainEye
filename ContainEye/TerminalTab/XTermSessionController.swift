@@ -63,9 +63,16 @@ final class XTermSessionController: Identifiable {
     private var suggestionTask: Task<Void, Never>?
     private var shellIntegrationProbeTask: Task<Void, Never>?
     private var didSendShellBootstrap = false
+    private var isAutoReloading = false
+    private var autoReloadWindowStart: Date?
+    private var autoReloadAttempts = 0
+    private var lastAutoReloadAt: Date?
     private var bypassSFTPEditPromptOnce = false
 
     private static let sftpEditPromptNeverShowKey = "terminal.sftpEditorPrompt.neverShow"
+    private static let autoReloadCooldown: TimeInterval = 2
+    private static let autoReloadWindow: TimeInterval = 15
+    private static let maxAutoReloadAttemptsPerWindow = 3
 
     var currentInputBuffer: String {
         inputBuffer
@@ -133,6 +140,7 @@ final class XTermSessionController: Identifiable {
             Task { @MainActor in
                 guard let self else { return }
                 self.connectionStatus = .connected
+                self.isAutoReloading = false
                 self.bootstrapShellIntegrationIfNeeded()
                 self.loadHistoryIfNeeded()
                 self.startShellIntegrationProbe()
@@ -146,6 +154,7 @@ final class XTermSessionController: Identifiable {
                 if let reason {
                     self.lastShellIntegrationWarning = reason
                 }
+                self.scheduleAutoReloadIfNeeded(reason: "disconnected")
             }
         }
 
@@ -394,6 +403,7 @@ final class XTermSessionController: Identifiable {
                 let details = event.payload["details"] as? String ?? ""
                 lastShellIntegrationWarning = details.isEmpty ? reason : "\(reason): \(details)"
             }
+            scheduleAutoReloadIfNeeded(reason: "shell_integration_error")
 
         case .selectionChanged:
             let text = event.payload["selection"] as? String ?? ""
@@ -452,7 +462,6 @@ final class XTermSessionController: Identifiable {
         stream?.write(ShellIntegrationBootstrap.encodedInstallCommand())
         stream?.write("\n")
         stream?.write("stty echo\n")
-        stream?.write("printf '\\r\\033[2K'\n")
     }
 
     private func startShellIntegrationProbe() {
@@ -467,8 +476,50 @@ final class XTermSessionController: Identifiable {
                 if lastShellIntegrationWarning == nil {
                     lastShellIntegrationWarning = "Shell integration not detected (running in degraded terminal mode)."
                 }
+                scheduleAutoReloadIfNeeded(reason: "shell_integration_timeout")
             }
         }
+    }
+
+    private func scheduleAutoReloadIfNeeded(reason: String) {
+        let now = Date()
+        if let last = lastAutoReloadAt,
+           now.timeIntervalSince(last) < Self.autoReloadCooldown {
+            return
+        }
+
+        if let windowStart = autoReloadWindowStart,
+           now.timeIntervalSince(windowStart) <= Self.autoReloadWindow {
+            if autoReloadAttempts >= Self.maxAutoReloadAttemptsPerWindow {
+                return
+            }
+        } else {
+            autoReloadWindowStart = now
+            autoReloadAttempts = 0
+        }
+
+        guard !isAutoReloading else {
+            return
+        }
+
+        isAutoReloading = true
+        autoReloadAttempts += 1
+        lastAutoReloadAt = now
+        terminalDebug("auto-reload scheduled (\(reason), attempt \(autoReloadAttempts))")
+
+        shellIntegrationProbeTask?.cancel()
+        shellIntegrationProbeTask = nil
+        didSendShellBootstrap = false
+        shellIntegrationStatus = .unknown
+
+        stream?.disconnect()
+        stream = nil
+        connect()
+    }
+
+    private func terminalDebug(_ message: String) {
+        let shortID = id.uuidString.prefix(6)
+        print("TerminalDebug[\(shortID)] \(message)")
     }
 
     private func loadHistoryIfNeeded() {
