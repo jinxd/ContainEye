@@ -75,6 +75,7 @@ final class TerminalWorkspaceStore {
 
     func openTab(
         credentialKey: String,
+        preferredTitle: String? = nil,
         inFocusedPane: Bool = true,
         themeOverrideSelectionKey: String? = nil,
         shortcutColorHex: String? = nil
@@ -83,7 +84,10 @@ final class TerminalWorkspaceStore {
             return
         }
 
-        let label = resolveCredentialLabel(credentialKey) ?? credentialKey
+        let trimmedPreferredTitle = preferredTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let label = (trimmedPreferredTitle?.isEmpty == false ? trimmedPreferredTitle! : nil)
+            ?? resolveCredentialLabel(credentialKey)
+            ?? credentialKey
         let tabTitle = makeTabTitle(baseLabel: label, credentialKey: credentialKey)
 
         if panes.isEmpty {

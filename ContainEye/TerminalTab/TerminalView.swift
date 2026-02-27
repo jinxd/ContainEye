@@ -316,7 +316,9 @@ final class TerminalWorkspaceViewController: UIViewController {
         navigationTitleMenuButton.setTitleColor(UIColor.label, for: .normal)
         navigationTitleMenuButton.titleLabel?.numberOfLines = 1
         navigationTitleMenuButton.titleLabel?.lineBreakMode = .byTruncatingTail
-        navigationTitleMenuButton.titleLabel?.adjustsFontSizeToFitWidth = false
+        navigationTitleMenuButton.titleLabel?.adjustsFontSizeToFitWidth = true
+        navigationTitleMenuButton.titleLabel?.minimumScaleFactor = 0.72
+        navigationTitleMenuButton.titleLabel?.allowsDefaultTighteningForTruncation = true
         var config = UIButton.Configuration.plain()
         config.baseForegroundColor = UIColor.label
         config.image = UIImage(systemName: "chevron.down")
@@ -466,10 +468,10 @@ final class TerminalWorkspaceViewController: UIViewController {
         }
 
         if let active = workspace.activeTab(in: focusedID) {
-            return "Tab \(index + 1) · \(active.title)"
+            return "\(index + 1): \(active.title)"
         }
 
-        return "Tab \(index + 1)"
+        return "\(index + 1)"
     }
 
     private func makeTitleMenu() -> UIMenu {
@@ -1309,6 +1311,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
             self.workspace.focusPane(paneID: self.paneID)
             self.workspace.openTab(
                 credentialKey: shortcut.credentialKey,
+                preferredTitle: shortcut.title,
                 inFocusedPane: true,
                 themeOverrideSelectionKey: shortcut.themeSelectionKey,
                 shortcutColorHex: shortcut.colorHex
