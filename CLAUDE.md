@@ -1,184 +1,187 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file defines how Claude Code should work in this repository.
 
-## Project Overview
+## Mission
 
-ContainEye is a comprehensive server monitoring solution consisting of:
+ContainEye is a SwiftUI iOS/macOS app for remote server operations. It combines server monitoring, Docker/process visibility, SFTP file management, test automation, and an SSH terminal (xterm.js in `WKWebView`) with an agentic assistant workflow.
 
-1. **iOS/macOS App**: SwiftUI-based client application for remote server monitoring
-2. **Backend API**: Vapor-based server for push notifications and centralized services
+Primary goal per change: ship reliable server tooling with clean SwiftUI architecture and strict concurrency-safe code.
 
-### Main Features
-- **Server Monitoring**: Real-time CPU, memory, disk, and network metrics via SSH
-- **Container Management**: Docker container oversight and control
-- **SFTP File Transfer**: Remote file system browsing, management, and file upload capabilities
-- **SSH Terminal Access**: xterm.js-based terminal emulation via WKWebView
-- **Automated Testing**: Configurable server health checks with background execution
-- **Widget Support**: iOS widgets for quick server status overview
-- **Push Notifications**: Backend-powered alerts for critical server events
+## Current Scope (Source of Truth)
 
-## Architecture
+This repository currently contains:
+- Main app: `ContainEye/`
+- Widget extension: `TestsWidget/`
+- Unit tests: `ContainEyeTests/`
+- UI tests: `ContainEyeUITests/`
+- Xcode project and schemes: `ContainEye.xcodeproj/`
 
-### Core Technologies
-**iOS/macOS App:**
-- **SwiftUI** with Swift 6.0 and strict concurrency
-- **Blackbird SQLite** for local data persistence with reactive UI updates
-- **Citadel/CSSH** for SSH and SFTP operations
-- **KeychainAccess** for secure credential storage with iCloud sync
-- **xterm.js + WKWebView** for terminal emulation with OSC shell integration
-- **TelemetryDeck** for analytics
+## Product Plan
 
-**Backend API:**
-- **Vapor 4** web framework with Swift 6.0
-- **PostgreSQL** with Fluent ORM
-- **Apple Push Notification Service (APNS)** integration
-- **Docker** containerization with multi-stage builds
+### Core Product Areas
+1. Server Operations
+- Maintain server inventory and connection metadata.
+- Show health/usage summaries and deeper detail screens.
 
-### Data Architecture
-**Core Data Models (Blackbird):**
-- `Server`: Core server entity with metrics, connection state, and hardware info
-- `Container`: Docker container representation with real-time usage stats
-- `Process`: System process information with CPU/memory tracking
-- `ServerTest`: Automated test definitions with regex pattern matching and status tracking
-- `Credential`: SSH credentials securely stored in Keychain (not database)
+2. Container and Process Operations
+- List Docker containers and compose stacks.
+- Show process data and container/process detail views.
 
-**Key Relationships:**
-- Server (1:N) Containers, Processes, ServerTests
-- Credentials referenced by key, stored separately in Keychain
-- App Group database sharing for widget extensions
+3. SFTP Workspace
+- Remote file browsing and operations via SSH/SFTP.
+- File editing/preview support via SFTP-related views.
 
-### Architectural Patterns
-- **Actor-based Concurrency**: `SSHClientActor` singleton for thread-safe SSH connection management
-- **Reactive Database**: `@BlackbirdLiveModels` for automatic SwiftUI updates
-- **Background Processing**: `BGTaskScheduler` for automated server testing
-- **Environment-based DI**: Database and namespace injection through SwiftUI environment
-- **App Intents Integration**: Siri shortcuts and system integration for ServerTests
+4. Terminal Workspace
+- Interactive SSH terminal with xterm.js web assets.
+- Terminal settings, snippets, and command suggestions.
 
-## Development Commands
+5. Automated Test Workspace ("Code" tab)
+- Define server tests, run them, inspect status history, and manage flows.
+- Integrate with App Intents and Spotlight handoff where present.
 
-### iOS/macOS App
+6. Agentic Workspace
+- Route current screen context into agentic workflows.
+- Keep context synced with navigation and selected resources.
+
+7. Widget + Notifications
+- Widget timelines reflect current testing/server state.
+- Push registration and background refresh/test execution paths.
+
+### UX Surface (from app entry)
+Root navigation is `NavigationStack` + `TabView` in `ContainEye/Shared/ContentView.swift` with tabs for:
+- `SFTP`
+- `Terminal`
+- `Servers`
+- `Code`
+- `Agentic`
+
+Setup flow is shown when onboarding state requires it.
+
+## Architecture Plan
+
+### Module Map
+- `ContainEye/App/`: app lifecycle, app delegate, background hooks.
+- `ContainEye/Data/`: models, errors, SSH actor, persistence helpers, defaults.
+- `ContainEye/Shared/`: cross-feature infrastructure, setup flow, dependencies, reusable views.
+- `ContainEye/Server/`: server/container/process and compose UI.
+- `ContainEye/SFTP/`: remote file system UX.
+- `ContainEye/TerminalTab/`: terminal runtime, bridge/events, snippets, suggestions, web assets.
+- `ContainEye/Tests/`: test management flows and detail screens.
+- `ContainEye/AppIntents/`: shortcuts/intents integration.
+- `ContainEye/URLs/`: URL/web wrappers.
+- `TestsWidget/`: widget extension.
+
+### Data and State
+- Persistence: Blackbird SQLite (`SharedDatabase`).
+- Security: credentials in Keychain, not in app DB models.
+- Concurrency: async/await + actors (notably SSH client actor).
+- Shared/global app context should be environment-driven and observable, not singleton-heavy.
+
+### Third-Party Dependencies (from `Package.resolved`)
+- Blackbird
+- Citadel
+- SwiftSH
+- KeychainAccess
+- ButtonKit
+- TelemetryDeck SwiftSDK
+- Supporting Swift packages (NIO, Crypto, Collections, etc.) pulled transitively/by feature
+
+## Build and Test Commands
+
+Use project-root commands:
+
 ```bash
-# Build for iOS Simulator (now supported!)
-xcodebuild -scheme ContainEye -destination 'platform=iOS Simulator,arch=arm64,id=SIMULATOR_ID' build
+# Build app for iOS Simulator
+xcodebuild -scheme ContainEye -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
 
-# Build for macOS
-xcodebuild -scheme ContainEye -destination 'platform=macOS' build
+# Run app test target on iOS Simulator
+xcodebuild -scheme ContainEye -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 
-# Run tests
-xcodebuild -scheme ContainEye -destination 'platform=iOS Simulator,arch=arm64,id=SIMULATOR_ID' test
+# Build widget extension scheme
+xcodebuild -scheme TestsWidgetExtension -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
 
-# Build widget extension
-xcodebuild -scheme TestsWidgetExtension -destination 'platform=iOS Simulator,arch=arm64,id=SIMULATOR_ID' build
-
-# Find available simulators
+# Discover available simulators
 xcrun simctl list devices available
 ```
 
-### Backend API
-```bash
-# Development (from containeye-backend directory)
-swift run App serve --hostname 0.0.0.0 --port 8080
+If a named simulator is unavailable, switch destination to any available iOS simulator from `simctl` output.
 
-# Run tests
-swift test
+## Engineering Instructions (Mandatory)
 
-# Docker development
-docker compose up app
+### SwiftUI Design Rules
+- Use as little explicit spacing/padding/font-weight tweaking as possible.
+- Prefer container-level modifiers (`VStack`/`Group`/wrapper) over repeating the same modifier on each child.
+- Prefer `.accent` styling over hard-coded fixed colors when appropriate.
+- Never nest two `NavigationStack`s.
+- Never use `NavigationView`; use `NavigationStack` or `NavigationSplitView`.
+- Only when using `NavigationSplitView`: a nested `NavigationStack` is allowed in the **detail** pane only.
+- In each sheet add a new NavigationStack and .confirmable() outside the views that actually use it.
+- Never add padding around List, Form or NavigationStack.
+- Try to stick to built-in styles and components.
+- For Buttons executing async actions use AsyncButton.
+- For all close, cancel or confirming toolbar buttons use button roles and do not add a symbol or title.
 
-# Production build
-docker compose build
-docker compose up -d
-```
+### State and Dependency Rules
+- Pass as little state as possible into child views.
+- For state shared across many views, use environment injection with an `@Observable` type.
+- Avoid singletons unless one process-wide instance is genuinely required.
 
-## Project Structure
+### View Composition and File Organization
+- Do not place multiple computed subviews inside one view struct.
+- Keep distinct view structs in separate files.
+- Organize view files in folders by feature purpose and usage location.
+- Keep files focused; split when one file starts handling unrelated responsibilities.
 
-### iOS/macOS App (`ContainEye/`)
-- `App/`: App lifecycle, delegate, and main app entry point
-- `Data/`: Core data models, database management, SSH client actor
-- `Shared/`: Reusable UI components, utilities, and setup flows
-- `Server/`: Server monitoring views and detail screens
-- `Tests/`: Server testing interface and configuration
-- `SFTP/`: File management and transfer views
-- `TerminalTab/`: xterm-based SSH terminal workspace (multi-tab/pane) with snippet management
-- `AppIntents/`: Siri shortcuts and app intents implementation
-- `Assets.xcassets/`: App icons and image assets
+### Coding Quality Rules
+- Keep strict Swift concurrency correctness in mind for every change.
+- Prefer explicit, typed models over ad-hoc dictionaries.
+- Keep side effects near boundary layers (network, storage, app lifecycle).
+- Do not add dead code, placeholder TODO blocks, or speculative abstractions.
 
-### Backend API (`containeye-backend/`)
-- `Sources/App/`: Vapor application source code
-  - `Controllers/`: API route handlers
-  - `Models/`: Database models (Fluent)
-  - `Migrations/`: Database schema migrations
-- `Tests/AppTests/`: Backend unit tests
-- `Public/`: Static assets served by Vapor
-- `Dockerfile`: Multi-stage production container build
-- `docker-compose.yml`: Development environment setup
+## Task Execution Playbook (What Claude Should Do)
 
-### Widget Extension (`TestsWidget/`)
-- iOS widget implementation for server test status overview
+For every coding task:
+1. Identify impacted feature area(s) and exact files.
+2. Apply a coherent change that results in the least amount of code necessary, but meets expectations. 
+3. Preserve architecture rules above (navigation/state/file boundaries).
+4. Build or test the touched surface whenever possible.
+5. Update docs (`CLAUDE.md`) if scope/commands/architecture changed.
+6. Summarize: changed files, behavioral effect, and what was validated.
 
-## Key Implementation Details
+When refactoring UI:
+1. First remove duplicated child-level modifiers by lifting to parent containers.
+2. Reduce explicit spacing/padding/font-weight overrides unless required.
+3. Verify navigation structure still follows `NavigationStack`/`NavigationSplitView` rules.
+4. Verify shared state is environment-driven where cross-feature usage exists.
 
-### SSH Connection Management
-- `SSHClientActor`: Singleton actor managing SSH connection pools
-- Automatic connection lifecycle management with proper cleanup
-- Citadel for command/SFTP operations, SwiftSH for interactive shell streaming
-- **SwiftSH**: Built from source for full simulator support (replaced binary framework)
-- Comprehensive error handling for network and authentication failures
+## Auto-Update Policy For This File
 
-### Server Metrics Collection
-- System commands executed via SSH: `sar`, `free`, `df`, `ps`, `docker stats`
-- Real-time parsing of Linux command output
-- Automatic hardware detection (CPU cores, total memory/disk)
-- Connection state tracking with automatic reconnection
+`CLAUDE.md` must be updated in the same task/PR when any of these change:
+- App module/folder structure.
+- User-facing feature surfaces (tabs, major screens, or flows).
+- Build/test commands or schemes.
+- Core dependencies or deployment/toolchain targets.
+- Architectural rules or team coding constraints.
 
-### Testing System Architecture
-- Tests defined with shell commands and regex expected output patterns
-- Background execution via `BGTaskScheduler` for iOS background processing
-- Default test templates loaded from embedded `DefaultTests.json`
-- Supports both server-specific tests and HTTP endpoint monitoring
-- App Intents integration for Siri/Shortcuts automation
-- Retry logic with exponential backoff for failed tests
+### Update Procedure
+1. Inspect changed files (`git diff --name-only`).
+2. If any trigger above matches, edit `CLAUDE.md` before finishing.
+3. Keep content factual and aligned to current repo state.
+4. Remove stale sections instead of appending contradictory text.
+5. Keep `AGENTS.md` pointing to `CLAUDE.md`.
 
-### Database Integration
-- **Blackbird SQLite**: Reactive ORM with automatic UI updates
-- **App Group Database**: Shared database in `group.com.nagel.ContainEye` for widget access
-- **Transaction-based Updates**: Bulk operations for process/container data
-- **Custom Enum Support**: `BlackbirdStringEnum` for typed database fields
+## Practical Guardrails
 
-### Security Implementation
-- **Keychain Storage**: All SSH credentials stored with iCloud sync capability
-- **App Group Keychain**: Shared keychain access for extensions
-- **No Credential Persistence**: Credentials never stored in SQLite database
-- **Secure Command Execution**: All remote commands executed through established SSH channels
+- Prefer editing existing files over creating new abstractions unless needed.
+- Do not change deployment targets or package versions unless task requires it.
+- Do not introduce a second navigation root architecture for the same flow.
+- Do not bypass environment-based dependency wiring with hidden globals.
 
-### Push Notification Backend
-- **Vapor + APNS**: Centralized notification service
-- **PostgreSQL Database**: Device registration and notification tracking
-- **Docker Deployment**: Production-ready containerization
+## Quick Project Snapshot
 
-## Development Notes
+- App target uses SwiftUI with modern Apple-platform APIs.
+- iOS deployment target in project file is `26.0`.
+- Widget extension is part of the same workspace and should stay compatible with shared data/state boundaries.
 
-### iOS/macOS App
-- **Swift 6.0** with strict concurrency checking enabled
-- **Deployment Targets**: iOS 18.0+ and macOS 15.0+
-- **Modern SwiftUI**: Uses `@Observable` macro and latest SwiftUI patterns
-- **Comprehensive Error Handling**: Custom `ServerError` and `DataStreamerError` types
-- **Telemetry Integration**: User opt-in analytics with TelemetryDeck
-
-### Backend API
-- **Swift 6.0** server-side development
-- **PostgreSQL** production database with Fluent ORM
-- **Multi-stage Docker**: Optimized production builds with static linking
-- **APNS Integration**: Production push notification support
-
-### Default Test Configuration
-The app includes predefined health checks in `DefaultTests.json`:
-- HTTP endpoint availability (curl-based)
-- Disk space monitoring (df command)
-- Memory usage validation (free command)
-- Service status verification (systemctl)
-- Docker container health checks
-- Security monitoring (failed login attempts)
-
-All tests support regex pattern matching for flexible output validation and custom success criteria.
+Keep this file precise and current. If code reality changes, update this document immediately.
