@@ -13,6 +13,7 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
     private let scriptHandler: XTermBridgeScriptHandler
     private var editMenuInteraction: UIEditMenuInteraction?
     private var hasActiveSelection = false
+    private var hasDisabledInputAssistant = false
     private var didPresentSelectionMenu = false
     private var selectionMenuPoint: CGPoint = .zero
     private var lastSelectionText = ""
@@ -115,6 +116,37 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
         enqueueOrRun(js: "window.terminalHost?.setTheme?.(\(json));")
     }
 
+    func getCommandLine() async -> String? {
+        guard isReady else { return nil }
+        let result: Any?
+        do {
+            result = try await webView.evaluateJavaScript("window.terminalHost?.getCommandLine?.()")
+        } catch {
+            return nil
+        }
+        return result as? String
+    }
+
+    func getCursorScreenPosition() async -> (point: CGPoint, cellHeight: CGFloat)? {
+        guard isReady else { return nil }
+        let result: Any?
+        do {
+            result = try await webView.evaluateJavaScript("window.terminalHost?.getCursorScreenPosition?.()")
+        } catch {
+            return nil
+        }
+        guard let dict = result as? [String: Any],
+              let x = dict["x"] as? Double,
+              let y = dict["y"] as? Double
+        else {
+            return nil
+        }
+        let cellHeight = (dict["cellHeight"] as? Double) ?? 0
+        let webViewPoint = CGPoint(x: x, y: y)
+        let converted = convert(webViewPoint, from: webView)
+        return (converted, CGFloat(cellHeight))
+    }
+
     private func loadTerminalPage() {
         let subdirectories = [
             "",
@@ -157,6 +189,8 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
 
         if event.type == .terminalReady {
             isReady = true
+            disableInputAssistantBar()
+            hasDisabledInputAssistant = true
             flushCommandQueue()
         }
 
@@ -246,6 +280,16 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
         super.layoutSubviews()
 
         webView.frame = bounds
+
+        if !hasDisabledInputAssistant {
+            for subview in webView.scrollView.subviews {
+                if String(describing: type(of: subview)).hasPrefix("WKContent") {
+                    hasDisabledInputAssistant = true
+                    disableInputAssistantBar()
+                    break
+                }
+            }
+        }
 
         guard let hintLabel else {
             return
