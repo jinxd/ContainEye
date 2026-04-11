@@ -6,6 +6,7 @@ struct SFTPConnectedContentView: View {
     @Binding var selectedCredential: Credential?
     let credential: Credential
     let sftp: SFTPClient?
+    let connectionError: Error?
     @Binding var openedFile: String?
     @Binding var fileContent: String
     let files: [SFTPItem]?
@@ -128,9 +129,26 @@ struct SFTPConnectedContentView: View {
                     }
                 }
             } else {
-                ProgressView()
-                    .controlSize(.large)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                SFTPBrowserHeaderView(
+                    selectedCredential: $selectedCredential,
+                    credential: credential,
+                    showHiddenFiles: showHiddenFiles,
+                    currentDirectory: currentDirectory,
+                    onGoHome: onGoHome,
+                    onToggleHiddenFiles: onToggleHiddenFiles,
+                    onStartPathEditing: onStartPathEditing
+                )
+                if let error = connectionError {
+                    ContentUnavailableView(
+                        "Connection Failed",
+                        systemImage: "wifi.exclamationmark",
+                        description: Text(error.localizedDescription)
+                    )
+                } else {
+                    ProgressView()
+                        .controlSize(.large)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
         }
         .redacted(reason: isLoading ? .invalidated : [])

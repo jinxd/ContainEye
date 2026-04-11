@@ -186,11 +186,14 @@ final class TerminalWorkspaceViewController: UIViewController {
     private let keyboardControlsContainer = UIView()
     private let keyboardStackView = UIStackView()
     private let messageLabel = UILabel()
+    private let completionOverlayView = TerminalCompletionOverlayView()
 
     private var paneControllers: [UUID: TerminalPaneViewController] = [:]
 
     private var keyboardVisible = false
     private var activeControllerIDForKeyboard: UUID?
+    private var pendingCursorAnchor: CGPoint?
+    private var pendingCursorCellHeight: CGFloat = 0
     private var messageHideTask: Task<Void, Never>?
     private lazy var addBarButtonItem = UIBarButtonItem(
         image: UIImage(systemName: "plus"),
@@ -308,6 +311,9 @@ final class TerminalWorkspaceViewController: UIViewController {
         messageLabel.clipsToBounds = true
         messageLabel.isHidden = true
         view.addSubview(messageLabel)
+
+        completionOverlayView.isHidden = true
+        view.addSubview(completionOverlayView)
     }
 
     private func configureNavigationItems() {
@@ -566,6 +572,55 @@ final class TerminalWorkspaceViewController: UIViewController {
 
         paneContainerView.frame = layoutRect
         layoutPaneControllers(in: paneContainerView.bounds)
+
+        if !completionOverlayView.isHidden {
+            let count = workspace.activeControllerInFocusedPane()?.suggestions.prefix(8).count ?? 0
+            let overlayHeight = TerminalCompletionOverlayView.preferredHeight(for: count)
+            let overlayWidth = TerminalCompletionOverlayView.preferredWidth
+
+            // Use the focused pane's frame for positioning, not the entire pane container.
+            let focusedPaneFrame: CGRect = {
+                if let focusedID = workspace.focusedPaneID,
+                   let paneVC = paneControllers[focusedID] {
+                    return paneVC.view.convert(paneVC.view.bounds, to: view)
+                }
+                return paneContainerView.frame
+            }()
+
+            if let anchor = pendingCursorAnchor {
+                let sourceView: UIView = {
+                    if let focusedID = workspace.focusedPaneID,
+                       let paneVC = paneControllers[focusedID],
+                       let hostView = paneVC.activeHostView {
+                        return hostView
+                    }
+                    return paneContainerView
+                }()
+                let anchorInView = sourceView.convert(anchor, to: view)
+                let gap = UIFloat(4)
+                let cellH = pendingCursorCellHeight > 0 ? pendingCursorCellHeight : TerminalCompletionOverlayView.itemHeight
+                var x = anchorInView.x
+                // Default: place below the cursor line
+                var y = anchorInView.y + gap
+                x = max(focusedPaneFrame.minX + TerminalUIMetrics.pageInset, min(x, focusedPaneFrame.maxX - overlayWidth - TerminalUIMetrics.pageInset))
+                // If overlay would go below the focused pane, flip above the cursor line
+                if y + overlayHeight > focusedPaneFrame.maxY - TerminalUIMetrics.pageInset {
+                    y = anchorInView.y - cellH - gap - overlayHeight
+                }
+                // If flipping above pushed it past the top, just place at the top of the pane
+                if y < focusedPaneFrame.minY + TerminalUIMetrics.pageInset {
+                    y = focusedPaneFrame.minY + TerminalUIMetrics.pageInset
+                }
+                completionOverlayView.frame = CGRect(x: x, y: y, width: overlayWidth, height: overlayHeight)
+            } else {
+                completionOverlayView.frame = CGRect(
+                    x: focusedPaneFrame.minX + TerminalUIMetrics.pageInset,
+                    y: focusedPaneFrame.maxY - overlayHeight - TerminalUIMetrics.pageInset,
+                    width: overlayWidth,
+                    height: overlayHeight
+                )
+            }
+        }
     }
 
     private func layoutPaneControllers(in bounds: CGRect) {
@@ -669,15 +724,77 @@ final class TerminalWorkspaceViewController: UIViewController {
 
     // MARK: Keyboard Bar
 
+    private var isRunningOnMac: Bool {
+        ProcessInfo.processInfo.isMacCatalystApp || ProcessInfo.processInfo.isiOSAppOnMac
+    }
+
     private var shouldShowKeyboardBar: Bool {
         keyboardVisible && workspace.activeControllerInFocusedPane() != nil
+    }
+
+    private var shouldShowCompletionOverlay: Bool {
+        let keyboardAbsent = isRunningOnMac || !keyboardVisible
+        guard keyboardAbsent, let controller = workspace.activeControllerInFocusedPane() else {
+            return false
+        }
+        return !controller.suggestions.isEmpty
     }
 
     private func updateKeyboardBarVisibility() {
         updateKeyboardSuggestionButtons()
         keyboardBarView.isHidden = !shouldShowKeyboardBar
         updateKeyboardButtonsState()
+        updateCompletionOverlay()
         view.setNeedsLayout()
+    }
+
+    private func updateCompletionOverlay() {
+        guard shouldShowCompletionOverlay, let controller = workspace.activeControllerInFocusedPane() else {
+            if !completionOverlayView.isHidden {
+                pendingCursorAnchor = nil
+                UIView.animate(withDuration: 0.15, animations: {
+                    self.completionOverlayView.alpha = 0
+                }, completion: { _ in
+                    self.completionOverlayView.isHidden = true
+                    self.completionOverlayView.alpha = 1
+                })
+            }
+            return
+        }
+
+        let suggestions = Array(controller.suggestions.prefix(8))
+        let typedInput = controller.currentInputBuffer
+        let selectedIndex = min(controller.selectedSuggestionIndex, max(0, suggestions.count - 1))
+        completionOverlayView.onSelectionChanged = { [weak controller] newIndex in
+            controller?.selectedSuggestionIndex = newIndex
+        }
+        completionOverlayView.update(
+            suggestions: suggestions,
+            typedInput: typedInput,
+            selectedIndex: selectedIndex
+        ) { [weak self, weak controller] suggestion in
+            controller?.applySuggestion(suggestion.text)
+            controller?.focus()
+            self?.view.setNeedsLayout()
+        }
+
+        if completionOverlayView.isHidden {
+            completionOverlayView.alpha = 0
+            completionOverlayView.isHidden = false
+            UIView.animate(withDuration: 0.15) { self.completionOverlayView.alpha = 1 }
+        }
+
+        // Fetch cursor position for Xcode-style popover positioning.
+        Task { [weak self, weak controller] in
+            guard let self, let controller else { return }
+            if let cursorInfo = await controller.cursorScreenPosition() {
+                self.pendingCursorAnchor = cursorInfo.point
+                self.pendingCursorCellHeight = cursorInfo.cellHeight
+            } else {
+                self.pendingCursorAnchor = nil
+            }
+            self.view.setNeedsLayout()
+        }
     }
 
     private func updateKeyboardSuggestionButtons() {
@@ -822,6 +939,27 @@ final class TerminalWorkspaceViewController: UIViewController {
         }
 
         controller.focus()
+    }
+
+    // MARK: Hardware Keyboard Arrow Navigation
+
+    override var keyCommands: [UIKeyCommand]? {
+        guard !completionOverlayView.isHidden else { return nil }
+        let up = UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [], action: #selector(completionArrowUp))
+        let down = UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: #selector(completionArrowDown))
+        up.wantsPriorityOverSystemBehavior = true
+        down.wantsPriorityOverSystemBehavior = true
+        return [up, down]
+    }
+
+    @objc private func completionArrowUp() {
+        guard let controller = workspace.activeControllerInFocusedPane() else { return }
+        completionOverlayView.moveSelection(by: -1, count: min(controller.suggestions.count, 8))
+    }
+
+    @objc private func completionArrowDown() {
+        guard let controller = workspace.activeControllerInFocusedPane() else { return }
+        completionOverlayView.moveSelection(by: 1, count: min(controller.suggestions.count, 8))
     }
 
     private func applySettingsToAllVisiblePanes() {
@@ -1096,10 +1234,10 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
     private let tabTitleLabel = UILabel()
     private let activeTitleLabel = UILabel()
     private let cwdLabel = UILabel()
-    private let warningImageView = UIImageView()
+    private let warningLabel = UILabel()
     private let closeButton = UIButton(type: .system)
 
-    private var activeHostView: XTermWebHostView?
+    private(set) var activeHostView: XTermWebHostView?
     private var serverPickerController: TerminalServerPickerViewController?
     private var observedControllerID: UUID?
     private var lastPresentedPromptID: UUID?
@@ -1172,11 +1310,11 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         cwdLabel.lineBreakMode = .byTruncatingMiddle
         headerView.addSubview(cwdLabel)
 
-        warningImageView.image = UIImage(systemName: "exclamationmark.triangle.fill")
-        warningImageView.tintColor = UIColor.systemYellow
-        warningImageView.contentMode = .scaleAspectFit
-        warningImageView.isHidden = true
-        headerView.addSubview(warningImageView)
+        warningLabel.font = UIFont.systemFont(ofSize: UIFloat(10), weight: .regular)
+        warningLabel.textColor = UIColor.systemRed
+        warningLabel.lineBreakMode = .byTruncatingTail
+        warningLabel.isHidden = true
+        headerView.addSubview(warningLabel)
 
         closeButton.setImage(UIImage(systemName: "xmark.circle"), for: .normal)
         closeButton.tintColor = UIColor.secondaryLabel
@@ -1200,7 +1338,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
             observedControllerID = nil
             activeTitleLabel.text = "Choose a server"
             cwdLabel.text = ""
-            warningImageView.isHidden = true
+            warningLabel.isHidden = true
             closeButton.isHidden = true
             showServerPicker()
             view.setNeedsLayout()
@@ -1210,7 +1348,12 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         closeButton.isHidden = false
         activeTitleLabel.text = activeTab.title
         cwdLabel.text = controller.cwd
-        warningImageView.isHidden = controller.shellIntegrationStatus != .warning
+        if controller.shellIntegrationStatus == .warning, let warning = controller.lastShellIntegrationWarning {
+            warningLabel.text = warning
+            warningLabel.isHidden = false
+        } else {
+            warningLabel.isHidden = true
+        }
 
         showTerminalHost(for: controller)
         observeControllerIfNeeded(controller)
@@ -1229,6 +1372,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
             guard let self else { return }
             _ = controller.cwd
             _ = controller.shellIntegrationStatus
+            _ = controller.lastShellIntegrationWarning
             _ = controller.suggestions
             _ = controller.pendingSFTPEditPrompt
             _ = self.workspace.focusedPaneID
@@ -1279,8 +1423,9 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         closeButton.frame = closeSplit.slice
         headerRect = closeSplit.remainder
 
-        let warningSplit = headerRect.split(at: UIFloat(22), from: .maxXEdge)
-        warningImageView.frame = warningSplit.slice.insetBy(dx: UIFloat(3), dy: UIFloat(5))
+        let warningWidth = warningLabel.isHidden ? UIFloat(0) : UIFloat(100)
+        let warningSplit = headerRect.split(at: warningWidth, from: .maxXEdge)
+        warningLabel.frame = warningSplit.slice
         headerRect = warningSplit.remainder
 
         let tabSplit = headerRect.split(at: UIFloat(56), from: .minXEdge)
@@ -1363,7 +1508,6 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
 
     private func launchStartupScriptIfNeeded(_ script: String, credentialKey: String) {
         let trimmed = script.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
 
         Task { [weak self] in
             for _ in 0..<80 {
@@ -1372,8 +1516,11 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
                 guard let controller = self.workspace.activeControllerInFocusedPane() else { continue }
                 guard controller.credentialKey == credentialKey else { continue }
                 guard controller.connectionStatus == .connected else { continue }
+                guard !controller.isBootstrapPending else { continue }
 
-                controller.sendInput(trimmed)
+                if !trimmed.isEmpty {
+                    controller.sendInput(trimmed)
+                }
                 controller.sendEnter()
                 controller.focus()
                 return

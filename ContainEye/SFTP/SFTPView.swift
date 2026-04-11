@@ -22,6 +22,7 @@ struct SFTPView: View {
         return nil
     }()
     @State private var sftp: SFTPClient?
+    @State private var connectionError: Error?
     @State private var openedFile: String?
     @State private var files: [SFTPItem]?
     @State private var showHiddenFiles = false
@@ -59,6 +60,7 @@ struct SFTPView: View {
                     selectedCredential: $credential,
                     credential: credential,
                     sftp: sftp,
+                    connectionError: connectionError,
                     openedFile: $openedFile,
                     fileContent: $fileContent,
                     files: files,
@@ -218,7 +220,13 @@ struct SFTPView: View {
     func goHome() async throws {
         guard let credential else { return }
         try? await sftp?.close()
-        sftp = try await SSHClient.connect(using: credential).openSFTP()
+        do {
+            sftp = try await SSHClient.connect(using: credential).openSFTP()
+            connectionError = nil
+        } catch {
+            connectionError = error
+            throw error
+        }
         do {
             currentDirectory = "/\(credential.username)"
             try await updateDirectories(appending: "")

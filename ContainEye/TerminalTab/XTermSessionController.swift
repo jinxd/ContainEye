@@ -61,13 +61,17 @@ final class XTermSessionController: Identifiable {
     private let suggestionEngine: CommandSuggestionProviding
     private let documentIndex: RemoteDocumentTreeIndex
     private var outputBacklog = ""
-    private var setupOutputBuffer: String?
     private let maxBacklogBytes = 256_000
 
     private var inputBuffer = ""
     private var suggestionTask: Task<Void, Never>?
     private var shellIntegrationProbeTask: Task<Void, Never>?
     private var didSendShellBootstrap = false
+    // Bootstrap output filter — active from preamble send until cwdChanged fires or 1 s after payload was sent.
+    private var isFilteringBootstrap = false
+    private var bootstrapLinePending = ""
+    // Set when the filter stops — unblocks startup scripts.
+    private var bootstrapPayloadSettled = false
     private var isAutoReloading = false
     private var autoReloadWindowStart: Date?
     private var autoReloadAttempts = 0
@@ -81,6 +85,12 @@ final class XTermSessionController: Identifiable {
 
     var currentInputBuffer: String {
         inputBuffer
+    }
+
+    /// True until 1 s after the bootstrap payload has been written to the shell.
+    /// Use this to delay startup commands without waiting for shell integration to respond.
+    var isBootstrapPending: Bool {
+        !bootstrapPayloadSettled
     }
 
     init(
@@ -376,7 +386,7 @@ final class XTermSessionController: Identifiable {
                 shellIntegrationStatus = .active
                 shellIntegrationProbeTask?.cancel()
                 shellIntegrationProbeTask = nil
-                finalizeSetupPhaseIfNeeded()
+                stopBootstrapFilter()
                 Task { [documentIndex, credentialKey, cwd, keychain] in
                     await documentIndex.bootstrap(credentialKey: credentialKey, cwd: cwd)
                     guard let credential = keychain().getCredential(for: credentialKey) else { return }
@@ -430,7 +440,7 @@ final class XTermSessionController: Identifiable {
             selectedText = text
             hasSelection = explicitFlag ?? !text.isEmpty
 
-        case .selectionHint:
+        case .selectionHint, .copySelection, .contextMenuRequested:
             break
 
         case .openExternalLink:
@@ -451,23 +461,69 @@ final class XTermSessionController: Identifiable {
     }
 
     private func handleShellOutput(_ output: String) {
-        if setupOutputBuffer != nil {
-            setupOutputBuffer! += output
-            if setupOutputBuffer!.utf8.count > maxBacklogBytes {
-                finalizeSetupPhaseIfNeeded()
-            }
-            return
-        }
-
+        let visible = isFilteringBootstrap ? applyBootstrapFilter(output) : output
+        guard !visible.isEmpty else { return }
         if let host {
-            host.write(output)
+            host.write(visible)
         } else {
-            outputBacklog += output
+            outputBacklog += visible
             if outputBacklog.utf8.count > maxBacklogBytes {
                 let cut = outputBacklog.index(outputBacklog.endIndex, offsetBy: -maxBacklogBytes)
                 outputBacklog = String(outputBacklog[cut...])
             }
         }
+    }
+
+    /// Line-based filter active during the bootstrap window.
+    /// Drops complete lines that contain bootstrap-injection patterns before they reach xterm.js.
+    private func applyBootstrapFilter(_ output: String) -> String {
+        bootstrapLinePending += output
+        var result = ""
+
+        // Process every complete line (terminated by \n).
+        while let nlIdx = bootstrapLinePending.firstIndex(of: "\n") {
+            let line = String(bootstrapLinePending[..<nlIdx])
+            bootstrapLinePending = String(bootstrapLinePending[bootstrapLinePending.index(after: nlIdx)...])
+
+            if line.contains("stty -echo") || line.contains("__ce_s=") {
+                continue // drop this bootstrap line
+            }
+            result += line + "\n"
+        }
+
+        // Pass through the incomplete tail unless it already contains a bootstrap marker —
+        // in that case hold it; the rest of the line (and its \n) will arrive in the next chunk.
+        if !bootstrapLinePending.isEmpty {
+            let tail = bootstrapLinePending
+            if !tail.contains("stty -echo") && !tail.contains("__ce_s=") {
+                result += tail
+                bootstrapLinePending = ""
+            }
+            // else: keep in bootstrapLinePending until \n arrives
+        }
+
+        return result
+    }
+
+    private func stopBootstrapFilter() {
+        guard isFilteringBootstrap else { return }
+        isFilteringBootstrap = false
+        bootstrapPayloadSettled = true
+        // Flush any buffered non-bootstrap content so real output is not lost.
+        guard !bootstrapLinePending.isEmpty else { return }
+        var flushed = ""
+        while let nlIdx = bootstrapLinePending.firstIndex(of: "\n") {
+            let line = String(bootstrapLinePending[..<nlIdx])
+            bootstrapLinePending = String(bootstrapLinePending[bootstrapLinePending.index(after: nlIdx)...])
+            if !line.contains("stty -echo") && !line.contains("__ce_s=") {
+                flushed += line + "\n"
+            }
+        }
+        if !bootstrapLinePending.isEmpty && !bootstrapLinePending.contains("stty -echo") && !bootstrapLinePending.contains("__ce_s=") {
+            flushed += bootstrapLinePending
+        }
+        bootstrapLinePending = ""
+        if !flushed.isEmpty { host?.write(flushed) }
     }
 
     private func flushBacklog() {
@@ -483,48 +539,19 @@ final class XTermSessionController: Identifiable {
         guard !didSendShellBootstrap else {
             return
         }
-
         didSendShellBootstrap = true
-        setupOutputBuffer = ""
-
-        // Send stty -echo as a short separate line first.
-        stream?.write("stty -echo\n")
-
-        // Brief delay so stty -echo takes effect before the payload is sent.
-        // Once echo is off the PTY won't echo subsequent input back to us.
-        Task {
-            try? await Task.sleep(for: .milliseconds(100))
-            self.sendBootstrapPayload()
-        }
-    }
-
-    private func sendBootstrapPayload() {
-        for line in ShellIntegrationBootstrap.bootstrapLines() {
-            stream?.write(line + "\n")
-        }
-        stream?.write("stty echo\n")
-
-        Task {
-            try? await Task.sleep(for: .milliseconds(500))
-            finalizeSetupPhaseIfNeeded()
-        }
-    }
-
-    private func finalizeSetupPhaseIfNeeded() {
-        guard let buffer = setupOutputBuffer else {
-            return
-        }
-        setupOutputBuffer = nil
-
-        let cleaned = ShellIntegrationBootstrap.cleanSetupArtifacts(from: buffer)
-        guard !cleaned.isEmpty else {
-            return
-        }
-
-        if let host {
-            host.write(cleaned)
-        } else {
-            outputBacklog += cleaned
+        isFilteringBootstrap = true
+        bootstrapLinePending = ""
+        stream?.write(ShellIntegrationBootstrap.installPreamble())
+        // Wait 150 ms for stty -echo to take effect, send the payload, then stop
+        // filtering 1 s later — enough time for any echo to arrive on the slowest link.
+        // cwdChanged (shell integration active) will stop the filter even sooner.
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard let self else { return }
+            self.stream?.write(ShellIntegrationBootstrap.installPayload())
+            try? await Task.sleep(for: .seconds(1))
+            await MainActor.run { self.stopBootstrapFilter() }
         }
     }
 
@@ -535,9 +562,7 @@ final class XTermSessionController: Identifiable {
             guard !Task.isCancelled else {
                 return
             }
-            if shellIntegrationStatus == .unknown {
-                scheduleAutoReloadIfNeeded(reason: "shell_integration_timeout")
-            }
+            // Timeout is not fatal — shell integration simply isn't available on this server.
         }
     }
 
@@ -570,7 +595,9 @@ final class XTermSessionController: Identifiable {
         shellIntegrationProbeTask?.cancel()
         shellIntegrationProbeTask = nil
         didSendShellBootstrap = false
+        bootstrapPayloadSettled = false
         shellIntegrationStatus = .unknown
+        stopBootstrapFilter()
 
         stream?.disconnect()
         stream = nil

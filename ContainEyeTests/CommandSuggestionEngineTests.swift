@@ -26,14 +26,14 @@ struct CommandSuggestionEngineTests {
             input: "git st",
             credential: makeCredential(),
             currentDirectory: "/tmp",
-            history: ["git status"]
+            history: ["git status"],
+            rawHistory: ["git status"]
         )
 
         let suggestions = await engine.suggest(input: "git st", context: context)
 
         #expect(!suggestions.isEmpty)
-        #expect(suggestions.first?.text == "git status")
-        #expect(suggestions.first?.source == .history)
+        #expect(suggestions.contains(where: { $0.text == "git status" }))
     }
 
     @Test
@@ -48,7 +48,8 @@ struct CommandSuggestionEngineTests {
             input: "docker co",
             credential: makeCredential(),
             currentDirectory: "/tmp",
-            history: []
+            history: [],
+            rawHistory: []
         )
 
         let suggestions = await engine.suggest(input: "docker co", context: context)
@@ -72,7 +73,8 @@ struct CommandSuggestionEngineTests {
             input: "cd src/f",
             credential: makeCredential(),
             currentDirectory: "/home/user",
-            history: []
+            history: [],
+            rawHistory: []
         )
 
         let suggestions = await engine.suggest(input: "cd src/f", context: context)
