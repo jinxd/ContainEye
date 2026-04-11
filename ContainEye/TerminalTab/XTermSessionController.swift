@@ -27,6 +27,8 @@ protocol XTermTerminalHost: AnyObject {
     func submitEnter()
     func setFontSize(_ size: Int)
     func setTheme(_ payload: [String: String])
+    func getCursorScreenPosition() async -> (point: CGPoint, cellHeight: CGFloat)?
+    func getCommandLine() async -> String?
 }
 
 @MainActor
@@ -43,7 +45,9 @@ final class XTermSessionController: Identifiable {
     var promptEnd: PromptPosition?
     var activeCommand: ActiveCommandLifecycle?
     var suggestions: [CommandSuggestion] = []
+    var selectedSuggestionIndex: Int = 0
     var history: [String] = []
+    private var rawHistory: [String] = []
     var lastShellIntegrationWarning: String?
     var selectedText: String = ""
     var hasSelection: Bool = false
@@ -63,6 +67,11 @@ final class XTermSessionController: Identifiable {
     private var suggestionTask: Task<Void, Never>?
     private var shellIntegrationProbeTask: Task<Void, Never>?
     private var didSendShellBootstrap = false
+    // Bootstrap output filter — active from preamble send until cwdChanged fires or 1 s after payload was sent.
+    private var isFilteringBootstrap = false
+    private var bootstrapLinePending = ""
+    // Set when the filter stops — unblocks startup scripts.
+    private var bootstrapPayloadSettled = false
     private var isAutoReloading = false
     private var autoReloadWindowStart: Date?
     private var autoReloadAttempts = 0
@@ -76,6 +85,12 @@ final class XTermSessionController: Identifiable {
 
     var currentInputBuffer: String {
         inputBuffer
+    }
+
+    /// True until 1 s after the bootstrap payload has been written to the shell.
+    /// Use this to delay startup commands without waiting for shell integration to respond.
+    var isBootstrapPending: Bool {
+        !bootstrapPayloadSettled
     }
 
     init(
@@ -183,9 +198,10 @@ final class XTermSessionController: Identifiable {
             return
         }
 
-        // Accept top suggestion on tab when available.
-        if data == "\t", let first = suggestions.first {
-            applySuggestion(first.text)
+        // Accept selected suggestion on tab when available.
+        if data == "\t", !suggestions.isEmpty {
+            let index = suggestions.indices.contains(selectedSuggestionIndex) ? selectedSuggestionIndex : 0
+            applySuggestion(suggestions[index].text)
             return
         }
 
@@ -226,6 +242,10 @@ final class XTermSessionController: Identifiable {
 
     func focus() {
         host?.focusTerminal()
+    }
+
+    func cursorScreenPosition() async -> (point: CGPoint, cellHeight: CGFloat)? {
+        await host?.getCursorScreenPosition()
     }
 
     func selectAll() {
@@ -366,8 +386,17 @@ final class XTermSessionController: Identifiable {
                 shellIntegrationStatus = .active
                 shellIntegrationProbeTask?.cancel()
                 shellIntegrationProbeTask = nil
-                Task { [documentIndex, credentialKey, cwd] in
+                stopBootstrapFilter()
+                Task { [documentIndex, credentialKey, cwd, keychain] in
                     await documentIndex.bootstrap(credentialKey: credentialKey, cwd: cwd)
+                    guard let credential = keychain().getCredential(for: credentialKey) else { return }
+                    let escapedDir = "'" + cwd.replacingOccurrences(of: "'", with: "'\\''") + "'"
+                    let command = "cd \(escapedDir) 2>/dev/null && ls -1Ap 2>/dev/null | head -n 200"
+                    guard let output = try? await SSHClientActor.shared.execute(command, on: credential) else { return }
+                    let entries = output.split(whereSeparator: \.isNewline)
+                        .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .filter { !$0.isEmpty && $0 != "." && $0 != ".." }
+                    await documentIndex.populate(credentialKey: credentialKey, directory: cwd, entries: entries)
                 }
             }
 
@@ -411,7 +440,7 @@ final class XTermSessionController: Identifiable {
             selectedText = text
             hasSelection = explicitFlag ?? !text.isEmpty
 
-        case .selectionHint:
+        case .selectionHint, .copySelection, .contextMenuRequested:
             break
 
         case .openExternalLink:
@@ -432,15 +461,69 @@ final class XTermSessionController: Identifiable {
     }
 
     private func handleShellOutput(_ output: String) {
+        let visible = isFilteringBootstrap ? applyBootstrapFilter(output) : output
+        guard !visible.isEmpty else { return }
         if let host {
-            host.write(output)
+            host.write(visible)
         } else {
-            outputBacklog += output
+            outputBacklog += visible
             if outputBacklog.utf8.count > maxBacklogBytes {
                 let cut = outputBacklog.index(outputBacklog.endIndex, offsetBy: -maxBacklogBytes)
                 outputBacklog = String(outputBacklog[cut...])
             }
         }
+    }
+
+    /// Line-based filter active during the bootstrap window.
+    /// Drops complete lines that contain bootstrap-injection patterns before they reach xterm.js.
+    private func applyBootstrapFilter(_ output: String) -> String {
+        bootstrapLinePending += output
+        var result = ""
+
+        // Process every complete line (terminated by \n).
+        while let nlIdx = bootstrapLinePending.firstIndex(of: "\n") {
+            let line = String(bootstrapLinePending[..<nlIdx])
+            bootstrapLinePending = String(bootstrapLinePending[bootstrapLinePending.index(after: nlIdx)...])
+
+            if line.contains("stty -echo") || line.contains("__ce_s=") {
+                continue // drop this bootstrap line
+            }
+            result += line + "\n"
+        }
+
+        // Pass through the incomplete tail unless it already contains a bootstrap marker —
+        // in that case hold it; the rest of the line (and its \n) will arrive in the next chunk.
+        if !bootstrapLinePending.isEmpty {
+            let tail = bootstrapLinePending
+            if !tail.contains("stty -echo") && !tail.contains("__ce_s=") {
+                result += tail
+                bootstrapLinePending = ""
+            }
+            // else: keep in bootstrapLinePending until \n arrives
+        }
+
+        return result
+    }
+
+    private func stopBootstrapFilter() {
+        guard isFilteringBootstrap else { return }
+        isFilteringBootstrap = false
+        bootstrapPayloadSettled = true
+        // Flush any buffered non-bootstrap content so real output is not lost.
+        guard !bootstrapLinePending.isEmpty else { return }
+        var flushed = ""
+        while let nlIdx = bootstrapLinePending.firstIndex(of: "\n") {
+            let line = String(bootstrapLinePending[..<nlIdx])
+            bootstrapLinePending = String(bootstrapLinePending[bootstrapLinePending.index(after: nlIdx)...])
+            if !line.contains("stty -echo") && !line.contains("__ce_s=") {
+                flushed += line + "\n"
+            }
+        }
+        if !bootstrapLinePending.isEmpty && !bootstrapLinePending.contains("stty -echo") && !bootstrapLinePending.contains("__ce_s=") {
+            flushed += bootstrapLinePending
+        }
+        bootstrapLinePending = ""
+        if !flushed.isEmpty { host?.write(flushed) }
     }
 
     private func flushBacklog() {
@@ -456,12 +539,20 @@ final class XTermSessionController: Identifiable {
         guard !didSendShellBootstrap else {
             return
         }
-
         didSendShellBootstrap = true
-        stream?.write("stty -echo\n")
-        stream?.write(ShellIntegrationBootstrap.encodedInstallCommand())
-        stream?.write("\n")
-        stream?.write("stty echo\n")
+        isFilteringBootstrap = true
+        bootstrapLinePending = ""
+        stream?.write(ShellIntegrationBootstrap.installPreamble())
+        // Wait 150 ms for stty -echo to take effect, send the payload, then stop
+        // filtering 1 s later — enough time for any echo to arrive on the slowest link.
+        // cwdChanged (shell integration active) will stop the filter even sooner.
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard let self else { return }
+            self.stream?.write(ShellIntegrationBootstrap.installPayload())
+            try? await Task.sleep(for: .seconds(1))
+            await MainActor.run { self.stopBootstrapFilter() }
+        }
     }
 
     private func startShellIntegrationProbe() {
@@ -471,13 +562,7 @@ final class XTermSessionController: Identifiable {
             guard !Task.isCancelled else {
                 return
             }
-            if shellIntegrationStatus == .unknown {
-                shellIntegrationStatus = .warning
-                if lastShellIntegrationWarning == nil {
-                    lastShellIntegrationWarning = "Shell integration not detected (running in degraded terminal mode)."
-                }
-                scheduleAutoReloadIfNeeded(reason: "shell_integration_timeout")
-            }
+            // Timeout is not fatal — shell integration simply isn't available on this server.
         }
     }
 
@@ -510,7 +595,9 @@ final class XTermSessionController: Identifiable {
         shellIntegrationProbeTask?.cancel()
         shellIntegrationProbeTask = nil
         didSendShellBootstrap = false
+        bootstrapPayloadSettled = false
         shellIntegrationStatus = .unknown
+        stopBootstrapFilter()
 
         stream?.disconnect()
         stream = nil
@@ -541,13 +628,25 @@ final class XTermSessionController: Identifiable {
             let deduped = Array(NSOrderedSet(array: parsed).array as? [String] ?? parsed)
 
             await MainActor.run {
+                self.rawHistory = parsed
                 self.history = deduped
             }
         }
     }
 
     private func updateInputBuffer(with data: String) {
-        for scalar in data.unicodeScalars {
+        let scalars = Array(data.unicodeScalars)
+        var i = 0
+        while i < scalars.count {
+            let scalar = scalars[i]
+            // Detect ESC + DEL (Option+Backspace = delete word)
+            if scalar.value == 0x1B,
+               i + 1 < scalars.count,
+               scalars[i + 1].value == 0x7F {
+                deleteWordBackward()
+                i += 2
+                continue
+            }
             switch scalar.value {
             case 0x7f, 0x08: // Backspace
                 if !inputBuffer.isEmpty {
@@ -555,15 +654,30 @@ final class XTermSessionController: Identifiable {
                 }
             case 0x0d, 0x0a: // Enter
                 inputBuffer.removeAll(keepingCapacity: true)
+                suggestions = []
+                selectedSuggestionIndex = 0
             case 0x15: // Ctrl+U
                 inputBuffer.removeAll(keepingCapacity: true)
+                suggestions = []
+                selectedSuggestionIndex = 0
             default:
                 if !CharacterSet.controlCharacters.contains(scalar) {
                     inputBuffer.unicodeScalars.append(scalar)
                 }
             }
+            i += 1
         }
         inputBuffer = sanitizeBracketedPasteArtifacts(in: inputBuffer)
+    }
+
+    private func deleteWordBackward() {
+        guard !inputBuffer.isEmpty else { return }
+        while inputBuffer.last?.isWhitespace == true {
+            inputBuffer.removeLast()
+        }
+        while !inputBuffer.isEmpty && inputBuffer.last?.isWhitespace != true {
+            inputBuffer.removeLast()
+        }
     }
 
     private func sendControlCharacter(_ code: UInt8, clearInputBuffer: Bool = false) {
@@ -834,7 +948,8 @@ final class XTermSessionController: Identifiable {
             input: input,
             credential: credential,
             currentDirectory: cwd,
-            history: history
+            history: history,
+            rawHistory: rawHistory
         )
 
         suggestionTask = Task { [suggestionEngine] in
@@ -843,6 +958,7 @@ final class XTermSessionController: Identifiable {
             let values = await suggestionEngine.suggest(input: input, context: context)
             await MainActor.run {
                 self.suggestions = values
+                self.selectedSuggestionIndex = 0
             }
         }
     }

@@ -36,6 +36,23 @@ actor RemoteDocumentTreeIndex {
         try? await model.write(to: SharedDatabase.db)
     }
 
+    func populate(credentialKey: String, directory: String, entries: [String]) async {
+        await loadIfNeeded(credentialKey: credentialKey)
+        let normalizedDir = normalize(path: directory)
+        let now = Date.now
+        var nodes = cache[credentialKey, default: [:]]
+        for entry in entries {
+            let isDir = entry.hasSuffix("/")
+            let name = isDir ? String(entry.dropLast()) : entry
+            guard !name.isEmpty, name != ".", name != ".." else { continue }
+            let path = normalizedDir == "/" ? "/\(name)" : "\(normalizedDir)/\(name)"
+            nodes[path] = IndexedRemotePath(path: path, isDirectory: isDir, lastSeen: now)
+            let model = RemotePathNode(credentialKey: credentialKey, path: path, isDirectory: isDir, lastSeen: now)
+            try? await model.write(to: SharedDatabase.db)
+        }
+        cache[credentialKey] = nodes
+    }
+
     func suggestChildren(credentialKey: String, directory: String, prefix: String, limit: Int) async -> [String] {
         await loadIfNeeded(credentialKey: credentialKey)
 

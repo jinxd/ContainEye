@@ -5,7 +5,7 @@ import UIKit
 import WebKit
 
 @MainActor
-final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditMenuInteractionDelegate {
+final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditMenuInteractionDelegate, WKUIDelegate {
     private let webView: WKWebView
     private weak var controller: XTermSessionController?
     private var isReady = false
@@ -13,6 +13,7 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
     private let scriptHandler: XTermBridgeScriptHandler
     private var editMenuInteraction: UIEditMenuInteraction?
     private var hasActiveSelection = false
+    private var hasEverFocused = false
     private var didPresentSelectionMenu = false
     private var selectionMenuPoint: CGPoint = .zero
     private var lastSelectionText = ""
@@ -41,6 +42,7 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
         webView.scrollView.backgroundColor = .clear
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
+        webView.uiDelegate = self
         disableInputAssistantBar()
 
         addSubview(webView)
@@ -86,6 +88,26 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
     func focusTerminal() {
         disableInputAssistantBar()
         enqueueOrRun(js: "window.terminalHost?.focus();")
+
+        // On macOS (Designed for iPad), the WKContentView is created lazily on first focus
+        // and the system shows an input accessory bar before our swizzle can catch it.
+        // Unfocus and refocus once so the now-swizzled view becomes first responder cleanly.
+        guard !hasEverFocused,
+              ProcessInfo.processInfo.isMacCatalystApp || ProcessInfo.processInfo.isiOSAppOnMac
+        else {
+            hasEverFocused = true
+            return
+        }
+        hasEverFocused = true
+        Task {
+            try? await Task.sleep(for: .milliseconds(80))
+            // Force the entire window to resign so WKContentView loses focus.
+            // Then swizzle and refocus so the bar is suppressed on re-entry.
+            self.window?.endEditing(true)
+            disableInputAssistantBar()
+            try? await Task.sleep(for: .milliseconds(30))
+            enqueueOrRun(js: "window.terminalHost?.focus();")
+        }
     }
 
     func selectAll() {
@@ -113,6 +135,37 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
             return
         }
         enqueueOrRun(js: "window.terminalHost?.setTheme?.(\(json));")
+    }
+
+    func getCommandLine() async -> String? {
+        guard isReady else { return nil }
+        let result: Any?
+        do {
+            result = try await webView.evaluateJavaScript("window.terminalHost?.getCommandLine?.()")
+        } catch {
+            return nil
+        }
+        return result as? String
+    }
+
+    func getCursorScreenPosition() async -> (point: CGPoint, cellHeight: CGFloat)? {
+        guard isReady else { return nil }
+        let result: Any?
+        do {
+            result = try await webView.evaluateJavaScript("window.terminalHost?.getCursorScreenPosition?.()")
+        } catch {
+            return nil
+        }
+        guard let dict = result as? [String: Any],
+              let x = dict["x"] as? Double,
+              let y = dict["y"] as? Double
+        else {
+            return nil
+        }
+        let cellHeight = (dict["cellHeight"] as? Double) ?? 0
+        let webViewPoint = CGPoint(x: x, y: y)
+        let converted = convert(webViewPoint, from: webView)
+        return (converted, CGFloat(cellHeight))
     }
 
     private func loadTerminalPage() {
@@ -154,9 +207,23 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
             let text = event.selectionHintMessage ?? "Press and hold, then move your finger to select"
             showSelectionHint(text)
         }
+        if event.type == .copySelection, let text = event.selectionText, !text.isEmpty {
+            UIPasteboard.general.string = text
+            lastSelectionText = text
+        }
+        if event.type == .contextMenuRequested {
+            let x = event.menuX ?? bounds.midX
+            let y = event.menuY ?? bounds.midY
+            let point = clampToBounds(CGPoint(x: x, y: y))
+            didPresentSelectionMenu = hasActiveSelection
+            guard let editMenuInteraction else { return }
+            let config = UIEditMenuConfiguration(identifier: nil, sourcePoint: point)
+            editMenuInteraction.presentEditMenu(with: config)
+        }
 
         if event.type == .terminalReady {
             isReady = true
+            disableInputAssistantBar()
             flushCommandQueue()
         }
 
@@ -397,31 +464,48 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
         menuFor configuration: UIEditMenuConfiguration,
         suggestedActions: [UIMenuElement]
     ) -> UIMenu? {
+        buildContextMenu()
+    }
+
+    // MARK: - WKUIDelegate
+
+    func webView(
+        _ webView: WKWebView,
+        contextMenuConfigurationForElement elementInfo: WKContextMenuElementInfo,
+        completionHandler: @escaping (UIContextMenuConfiguration?) -> Void
+    ) {
+        let config = UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+            self?.buildContextMenu() ?? UIMenu()
+        }
+        completionHandler(config)
+    }
+
+    // MARK: - Menu building
+
+    private func buildContextMenu() -> UIMenu {
         var actions: [UIMenuElement] = []
-        if hasActiveSelection || didPresentSelectionMenu {
-            let copyAction = UIAction(title: "Copy") { [weak self] _ in
+        let hasSelection = hasActiveSelection || didPresentSelectionMenu
+
+        if hasSelection {
+            actions.append(UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
                 self?.copy(nil)
-            }
-            actions.append(copyAction)
+            })
         }
 
         if !(UIPasteboard.general.string ?? "").isEmpty {
-            let pasteAction = UIAction(title: "Paste") { [weak self] _ in
+            actions.append(UIAction(title: "Paste", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
                 self?.paste(nil)
-            }
-            actions.append(pasteAction)
+            })
         }
 
-        let selectAllAction = UIAction(title: "Select All") { [weak self] _ in
+        actions.append(UIAction(title: "Select All", image: UIImage(systemName: "selection.pin.in.out")) { [weak self] _ in
             self?.selectAll(nil)
-        }
-        actions.append(selectAllAction)
+        })
 
-        if hasActiveSelection || didPresentSelectionMenu {
-            let askAIAction = UIAction(title: "Ask AI", image: UIImage(systemName: "sparkles")) { [weak self] _ in
+        if hasSelection {
+            actions.append(UIAction(title: "Ask AI", image: UIImage(systemName: "sparkles")) { [weak self] _ in
                 self?.askAIAboutSelection()
-            }
-            actions.append(askAIAction)
+            })
         }
 
         return UIMenu(children: actions)

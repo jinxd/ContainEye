@@ -36,8 +36,18 @@ fi
 """#
     }
 
-    static func encodedInstallCommand() -> String {
-        let payload = Data(script().utf8).base64EncodedString()
-        return #"__ce_osc4545_payload="$(printf '%s' '"# + payload + #"' | base64 --decode 2>/dev/null || printf '%s' '"# + payload + #"' | base64 -d 2>/dev/null)"; [ -n "$__ce_osc4545_payload" ] && eval "$__ce_osc4545_payload" >/dev/null 2>&1; unset __ce_osc4545_payload"#
+    /// Part 1: sent immediately — disables PTY echo so the payload is never printed.
+    /// This line IS echoed once (one short line: "stty -echo"), which part 2 erases.
+    static func installPreamble() -> String {
+        "stty -echo 2>/dev/null\n"
     }
+
+    /// Part 2: sent after 150 ms so stty has taken effect.
+    /// Runs silently (echo is off), installs shell integration, restores echo,
+    /// then moves up one line and erases it — removing the visible "stty -echo" line.
+    static func installPayload() -> String {
+        let payload = Data(script().utf8).base64EncodedString()
+        return "__ce_s=$(printf '%s' \(payload) | base64 --decode 2>/dev/null || printf '%s' \(payload) | base64 -d 2>/dev/null || printf '%s' \(payload) | base64 -D 2>/dev/null); [ -n \"$__ce_s\" ] && eval \"$__ce_s\" >/dev/null 2>&1; unset __ce_s; stty echo 2>/dev/null; printf '\\033[A\\033[2K'\n"
+    }
+
 }

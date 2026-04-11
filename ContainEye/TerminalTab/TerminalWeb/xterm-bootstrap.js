@@ -383,10 +383,28 @@
       emitSelectionChanged(terminal);
     });
 
+    // Intercept right-click (contextmenu) so the native layer can show our custom menu.
+    terminal.element && terminal.element.addEventListener("contextmenu", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      postBridge("context_menu_requested", { menuX: e.clientX, menuY: e.clientY });
+    }, true);
+
     terminal.attachCustomKeyEventHandler(function (event) {
       if (event.type !== "keydown") {
         return true;
       }
+
+      // Cmd+C: bridge selection copy to the native layer so it gets the xterm selection
+      if (event.key === "c" && event.metaKey && !event.ctrlKey && !event.altKey) {
+        const selection = terminal.getSelection();
+        if (selection && selection.length > 0) {
+          postBridge("copy_selection", { selection: selection });
+          return false;
+        }
+        return true;
+      }
+
       if (event.key !== "Enter") {
         return true;
       }
@@ -472,6 +490,38 @@
       serialize: function (scrollback) {
         const sc = typeof scrollback === "number" ? scrollback : 1200;
         return serializeAddon.serialize({ scrollback: sc });
+      },
+      getCommandLine: function () {
+        return getCurrentCommandLine(terminal);
+      },
+      getCursorScreenPosition: function () {
+        const active = terminal.buffer && terminal.buffer.active;
+        if (!active) {
+          return null;
+        }
+        const dims = terminal._core && terminal._core._renderService && terminal._core._renderService.dimensions
+          ? terminal._core._renderService.dimensions.css
+          : null;
+        const cellWidth = dims && dims.cell ? dims.cell.width : 0;
+        const cellHeight = dims && dims.cell ? dims.cell.height : 0;
+        if (!cellWidth || !cellHeight) {
+          return null;
+        }
+        const screen = terminal.element && terminal.element.querySelector
+          ? (terminal.element.querySelector(".xterm-screen") || terminal.element)
+          : null;
+        if (!screen) {
+          return null;
+        }
+        const rect = screen.getBoundingClientRect();
+        const viewportY = active.viewportY || 0;
+        const cursorCol = active.cursorX;
+        const cursorRow = active.cursorY;
+        return {
+          x: cursorCol * cellWidth + rect.left,
+          y: (cursorRow + 1) * cellHeight + rect.top,
+          cellHeight: cellHeight,
+        };
       },
     };
 

@@ -13,6 +13,8 @@ enum XTermBridgeEventType: String {
     case shellIntegrationError = "shell_integration_error"
     case selectionChanged = "selection_changed"
     case selectionHint = "selection_hint"
+    case copySelection = "copy_selection"
+    case contextMenuRequested = "context_menu_requested"
     case openExternalLink = "open_external_link"
     case editorCommandEntered = "editor_command_entered"
 }

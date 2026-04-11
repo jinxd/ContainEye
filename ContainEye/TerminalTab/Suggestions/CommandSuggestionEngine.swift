@@ -26,6 +26,8 @@ struct CommandSuggestionContext {
     let credential: Credential
     let currentDirectory: String
     let history: [String]
+    /// Raw history before deduplication, used to count command frequency.
+    let rawHistory: [String]
 }
 
 protocol CommandSuggestionProviding: AnyObject {
@@ -39,6 +41,24 @@ final class CommandSuggestionEngine: CommandSuggestionProviding {
     private let fetchSnippetCommands: SnippetCommandsProvider
     private let pathCommands: Set<String> = [
         "cd", "ls", "cat", "tail", "head", "less", "more", "nano", "vim", "emacs", "cp", "mv", "rm", "chmod", "chown", "grep", "find"
+    ]
+    private static let commonCommands: [String] = [
+        "ls -la", "cd ..", "pwd", "clear", "whoami",
+        "df -h", "du -sh *", "free -h", "top", "htop",
+        "docker ps", "docker ps -a", "docker images", "docker compose up -d", "docker compose down",
+        "docker compose logs -f", "docker stats", "docker system prune -f",
+        "git status", "git log --oneline", "git diff", "git pull", "git push",
+        "systemctl status", "systemctl restart", "journalctl -xe",
+        "tail -f /var/log/syslog", "uname -a", "uptime",
+        "apt update && apt upgrade -y", "apt list --upgradable",
+        "curl -I", "ping -c 4", "netstat -tlnp", "ss -tlnp",
+        "chmod +x", "chown -R", "ln -s",
+        "tar -xzf", "tar -czf",
+        "find . -name", "grep -rn",
+        "ps aux", "kill -9", "nohup",
+        "ssh-keygen -t ed25519", "scp",
+        "crontab -e", "crontab -l",
+        "cat /etc/os-release", "hostname",
     ]
 
     init(
@@ -83,28 +103,34 @@ final class CommandSuggestionEngine: CommandSuggestionProviding {
                 scored.append(CommandSuggestion(text: fullLine, source: .documentTree, score: scoreForPrefixMatch(prefix: prefix, candidate: child, sourceBoost: 0.95)))
             }
 
-            if scored.count < 3 {
-                let liveChildren = await livePathSuggestions(
-                    credential: context.credential,
-                    directory: directory,
-                    prefix: prefix,
-                    limit: 10
-                )
+            let liveChildren = await livePathSuggestions(
+                credential: context.credential,
+                directory: directory,
+                prefix: prefix,
+                limit: 10
+            )
 
-                for candidate in liveChildren {
-                    let fullLine = rebuildInput(baseCommand: baseCommand, replacementToken: replacementBase + candidate)
-                    scored.append(CommandSuggestion(text: fullLine, source: .live, score: scoreForPrefixMatch(prefix: prefix, candidate: candidate, sourceBoost: 0.85)))
+            for candidate in liveChildren {
+                let fullLine = rebuildInput(baseCommand: baseCommand, replacementToken: replacementBase + candidate)
+                scored.append(CommandSuggestion(text: fullLine, source: .live, score: scoreForPrefixMatch(prefix: prefix, candidate: candidate, sourceBoost: 0.85)))
 
-                    let path = joinPath(directory: directory, child: candidate)
-                    let isDirectory = candidate.hasSuffix("/")
-                    await index.upsert(credentialKey: context.credential.key, path: path, isDirectory: isDirectory)
-                }
+                let path = joinPath(directory: directory, child: candidate)
+                let isDirectory = candidate.hasSuffix("/")
+                await index.upsert(credentialKey: context.credential.key, path: path, isDirectory: isDirectory)
             }
         }
 
-        let historyMatches = await historySuggestions(
+        // Common commands (static curated list).
+        let commonMatches = Self.commonCommands
+            .filter { $0.hasPrefix(trimmedInput) && $0 != trimmedInput }
+            .prefix(6)
+            .map { CommandSuggestion(text: $0, source: .snippet, score: scoreForPrefixMatch(prefix: trimmedInput, candidate: $0, sourceBoost: 0.88)) }
+
+        scored.append(contentsOf: commonMatches)
+
+        // History suggestions, weighted by frequency.
+        let historyMatches = historySuggestions(
             for: context,
-            command: command,
             trimmedInput: trimmedInput
         )
 
@@ -127,7 +153,7 @@ final class CommandSuggestionEngine: CommandSuggestionProviding {
 
         return Array(deduped.values)
             .sorted(by: { $0.score > $1.score })
-            .prefix(3)
+            .prefix(8)
             .map { $0 }
     }
 
@@ -219,26 +245,33 @@ final class CommandSuggestionEngine: CommandSuggestionProviding {
 
     private func historySuggestions(
         for context: CommandSuggestionContext,
-        command: String,
         trimmedInput: String
-    ) async -> [CommandSuggestion] {
-        _ = command
-        let candidates = context.history
-            .filter { $0.hasPrefix(trimmedInput) }
-            .prefix(6)
-
-        return candidates.map {
-            CommandSuggestion(
-                text: $0,
-                source: .history,
-                score: scoreForPrefixMatch(prefix: trimmedInput, candidate: $0, sourceBoost: 0.8)
-            )
+    ) -> [CommandSuggestion] {
+        // Count frequency from raw (non-deduped) history.
+        var frequency: [String: Int] = [:]
+        for entry in context.rawHistory where entry.hasPrefix(trimmedInput) {
+            frequency[entry, default: 0] += 1
         }
+
+        let maxCount = max(frequency.values.max() ?? 1, 1)
+
+        return frequency.keys
+            .sorted { (frequency[$0] ?? 0) > (frequency[$1] ?? 0) }
+            .prefix(8)
+            .map { cmd in
+                // Frequency bonus: up to 0.1 for most-used commands.
+                let freqBonus = Double(frequency[cmd] ?? 1) / Double(maxCount) * 0.1
+                return CommandSuggestion(
+                    text: cmd,
+                    source: .history,
+                    score: scoreForPrefixMatch(prefix: trimmedInput, candidate: cmd, sourceBoost: 0.7 + freqBonus)
+                )
+            }
     }
 
     private func livePathSuggestions(credential: Credential, directory: String, prefix: String, limit: Int) async -> [String] {
-        let escapedDirectory = shellQuote(directory)
-        let command = "cd \(escapedDirectory) 2>/dev/null && ls -1Ap 2>/dev/null | head -n \(max(limit * 3, 24))"
+        let resolvedDir = directory.hasPrefix("~") ? "\"${HOME}\(directory.dropFirst())\"" : shellQuote(directory)
+        let command = "cd \(resolvedDir) 2>/dev/null && ls -1Ap 2>/dev/null | head -n \(max(limit * 3, 24))"
 
         let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
 
