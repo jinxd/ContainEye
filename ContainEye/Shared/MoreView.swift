@@ -1533,6 +1533,9 @@ struct AgenticMessage: Identifiable, Codable, Hashable {
 }
 
 enum AgenticLLMClient {
+    private static let baseURL = URL(string: "https://containeye.hannesnagel.com")!
+    private static let requestTimeout: TimeInterval = 90
+
     static func systemPrompt(memory: String, servers: String) -> String {
         #"""
 You are ContainEye Agent, an autonomous operations assistant for server management.
@@ -1609,13 +1612,21 @@ User memory:
 
     static func generate(systemPrompt: String, history: [[String: String]]) async throws -> AgenticLLMResponse {
         let conversation = [["role": "system", "content": systemPrompt]] + history
-        var request = URLRequest(url: URL(string: "https://containeye.hannesnagel.com/text-generation")!)
+        var request = URLRequest(url: baseURL.appending(path: "v2/text-generation"))
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = requestTimeout
         request.httpBody = try JSONSerialization.data(withJSONObject: conversation)
         let (data, response) = try await URLSession.shared.data(for: request)
         let rawText = String(data: data, encoding: .utf8) ?? ""
         let statusCode = (response as? HTTPURLResponse)?.statusCode
+        guard (200...299).contains(statusCode ?? -1) else {
+            throw NSError(
+                domain: "AgenticLLMClient",
+                code: statusCode ?? -1,
+                userInfo: [NSLocalizedDescriptionKey: "LLM request failed (status \(statusCode ?? -1)): \(rawText)"]
+            )
+        }
         return .init(rawText: rawText, statusCode: statusCode)
     }
 
@@ -1625,14 +1636,22 @@ User memory:
         onProgress: @escaping @Sendable (String) async -> Void
     ) async throws -> AgenticLLMResponse {
         let conversation = [["role": "system", "content": systemPrompt]] + history
-        var request = URLRequest(url: URL(string: "https://containeye.hannesnagel.com/text-generation/stream")!)
+        var request = URLRequest(url: baseURL.appending(path: "v2/text-generation/stream"))
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/x-ndjson", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = requestTimeout
         request.httpBody = try JSONSerialization.data(withJSONObject: conversation)
 
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
         let statusCode = (response as? HTTPURLResponse)?.statusCode
+        guard (200...299).contains(statusCode ?? -1) else {
+            throw NSError(
+                domain: "AgenticLLMClient",
+                code: statusCode ?? -1,
+                userInfo: [NSLocalizedDescriptionKey: "Streaming LLM request failed (status \(statusCode ?? -1))."]
+            )
+        }
         var accumulated = ""
 
         for try await rawLine in bytes.lines {
@@ -1656,6 +1675,14 @@ User memory:
             default:
                 continue
             }
+        }
+
+        guard !accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw NSError(
+                domain: "AgenticLLMClient",
+                code: statusCode ?? -1,
+                userInfo: [NSLocalizedDescriptionKey: "Streaming LLM returned no content."]
+            )
         }
 
         return .init(rawText: accumulated, statusCode: statusCode)
