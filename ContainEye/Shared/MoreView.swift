@@ -663,10 +663,19 @@ struct AgenticView: View {
             latestLLMRawResponses.append(llmResponse.rawText)
             AgenticDebugLogger.log("http_status=\(llmResponse.statusCode ?? -1)")
             AgenticDebugLogger.log("raw_response=\n\(llmResponse.rawText)")
-            let cleaned = LLM.cleanLLMOutputPreservingMarkdown(llmResponse.rawText)
-            AgenticDebugLogger.log("cleaned_response=\n\(cleaned)")
+            let cleaned = llmResponse.assistantText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !llmResponse.reasoningText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                await store.appendMessage(
+                    AgenticMessage(
+                        role: .system,
+                        content: "Thinking (raw):\n```\n\(llmResponse.reasoningText)\n```"
+                    ),
+                    to: chatID
+                )
+            }
 
-            if let toolCalls = AgenticToolCall.parseAll(from: cleaned), !toolCalls.isEmpty {
+            if !llmResponse.toolCalls.isEmpty {
+                let toolCalls = llmResponse.toolCalls
                 AgenticDebugLogger.log("parse=tool_calls count=\(toolCalls.count)")
                 let toolLabel = toolCalls.map(\.tool).joined(separator: ", ")
                 let toolBanner = toolCalls.count > 1 ? "Using tools: \(toolLabel)" : "Using tool: \(toolLabel)"
@@ -711,11 +720,11 @@ struct AgenticView: View {
                 continue
             }
 
-            if let final = AgenticFinalResponse.parse(from: cleaned) {
-                AgenticDebugLogger.log("parse=final")
-                await store.updateMessage(chatID: chatID, messageID: streamingMessageID, newContent: final.content)
-                workingHistory.append(["role": "assistant", "content": final.content])
-                let normalized = final.content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if !cleaned.isEmpty {
+                AgenticDebugLogger.log("parse=final_text")
+                await store.updateMessage(chatID: chatID, messageID: streamingMessageID, newContent: cleaned)
+                workingHistory.append(["role": "assistant", "content": cleaned])
+                let normalized = cleaned.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 if normalized == "something went wrong." || normalized == "something went wrong" {
                     await presentFailureDebugAlert(
                         chatID: chatID,
@@ -724,9 +733,8 @@ struct AgenticView: View {
                     )
                 }
             } else {
-                AgenticDebugLogger.log("parse=unstructured_final")
-                await store.updateMessage(chatID: chatID, messageID: streamingMessageID, newContent: cleaned)
-                workingHistory.append(["role": "assistant", "content": cleaned])
+                AgenticDebugLogger.log("parse=empty_final")
+                await store.updateMessage(chatID: chatID, messageID: streamingMessageID, newContent: "No response text returned.")
             }
             return
         }
@@ -1550,9 +1558,10 @@ struct AgenticMessage: Identifiable, Codable, Hashable {
 }
 
 enum AgenticLLMClient {
-    private static let baseURL = URL(string: "https://containeye.hannesnagel.com")!
+    private static let backendBaseURL = URL(string: "https://containeye.hannesnagel.com")!
     private static let requestTimeout: TimeInterval = 90
     private static let streamingRequestTimeout: TimeInterval = 600
+    private static let configKey = "agentic-openrouter-config-v1"
 
     static func systemPrompt(memory: String, servers: String) -> String {
         #"""
@@ -1629,12 +1638,22 @@ User memory:
     }
 
     static func generate(systemPrompt: String, history: [[String: String]]) async throws -> AgenticLLMResponse {
-        let conversation = [["role": "system", "content": systemPrompt]] + history
-        var request = URLRequest(url: baseURL.appending(path: "v2/text-generation"))
-        request.httpMethod = "PUT"
+        let cfg = try await resolveConfig()
+        let messages = buildOpenRouterMessages(systemPrompt: systemPrompt, history: history)
+        var request = URLRequest(url: URL(string: "\(cfg.baseURL)/chat/completions")!)
+        request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(cfg.apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("https://containeye.hannesnagel.com", forHTTPHeaderField: "HTTP-Referer")
+        request.setValue("ContainEye", forHTTPHeaderField: "X-Title")
         request.timeoutInterval = requestTimeout
-        request.httpBody = try JSONSerialization.data(withJSONObject: conversation)
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "model": cfg.model,
+            "messages": messages,
+            "tools": toolSpecs(),
+            "tool_choice": "auto",
+            "temperature": 0.4
+        ])
         let (data, response) = try await URLSession.shared.data(for: request)
         let rawText = String(data: data, encoding: .utf8) ?? ""
         let statusCode = (response as? HTTPURLResponse)?.statusCode
@@ -1645,7 +1664,14 @@ User memory:
                 userInfo: [NSLocalizedDescriptionKey: "LLM request failed (status \(statusCode ?? -1)): \(rawText)"]
             )
         }
-        return .init(rawText: rawText, statusCode: statusCode)
+        let parsed = parseNonStreamingOpenRouterResponse(data)
+        return .init(
+            rawText: rawText,
+            statusCode: statusCode,
+            assistantText: parsed.text,
+            toolCalls: parsed.toolCalls,
+            reasoningText: parsed.reasoning
+        )
     }
 
     static func generateStreaming(
@@ -1653,13 +1679,24 @@ User memory:
         history: [[String: String]],
         onProgress: @escaping @Sendable (String) async -> Void
     ) async throws -> AgenticLLMResponse {
-        let conversation = [["role": "system", "content": systemPrompt]] + history
-        var request = URLRequest(url: baseURL.appending(path: "v2/text-generation/stream"))
-        request.httpMethod = "PUT"
+        let cfg = try await resolveConfig()
+        let messages = buildOpenRouterMessages(systemPrompt: systemPrompt, history: history)
+        var request = URLRequest(url: URL(string: "\(cfg.baseURL)/chat/completions")!)
+        request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/x-ndjson", forHTTPHeaderField: "Accept")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(cfg.apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("https://containeye.hannesnagel.com", forHTTPHeaderField: "HTTP-Referer")
+        request.setValue("ContainEye", forHTTPHeaderField: "X-Title")
         request.timeoutInterval = streamingRequestTimeout
-        request.httpBody = try JSONSerialization.data(withJSONObject: conversation)
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "model": cfg.model,
+            "messages": messages,
+            "tools": toolSpecs(),
+            "tool_choice": "auto",
+            "temperature": 0.4,
+            "stream": true
+        ])
 
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
         let statusCode = (response as? HTTPURLResponse)?.statusCode
@@ -1670,32 +1707,63 @@ User memory:
                 userInfo: [NSLocalizedDescriptionKey: "Streaming LLM request failed (status \(statusCode ?? -1))."]
             )
         }
-        var accumulated = ""
+        var rawEvents: [String] = []
+        var assistantText = ""
+        var reasoningText = ""
+        var toolBuffers: [Int: AgenticToolCallBuffer] = [:]
 
         for try await rawLine in bytes.lines {
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !line.isEmpty else { continue }
-            guard let data = line.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let type = (json["type"] as? String)?.lowercased() else { continue }
-
-            switch type {
-            case "delta":
-                let delta = json["delta"] as? String ?? ""
-                guard !delta.isEmpty else { continue }
-                accumulated += delta
-                await onProgress(accumulated)
-            case "error":
-                let reason = json["reason"] as? String ?? "Streaming request failed."
-                throw NSError(domain: "AgenticLLMClient", code: statusCode ?? 500, userInfo: [NSLocalizedDescriptionKey: reason])
-            case "done":
-                break
-            default:
+            guard line.hasPrefix("data:") else { continue }
+            let payload = line.dropFirst(5).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard payload != "[DONE]" else { break }
+            rawEvents.append(String(payload))
+            guard let data = payload.data(using: .utf8),
+                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choice = (root["choices"] as? [[String: Any]])?.first,
+                  let delta = choice["delta"] as? [String: Any] else {
                 continue
+            }
+            if let content = delta["content"] as? String, !content.isEmpty {
+                assistantText += content
+                await onProgress(assistantText)
+            }
+            if let reasoning = delta["reasoning"] as? String, !reasoning.isEmpty {
+                reasoningText += reasoning
+            }
+            if let reasoningDetails = delta["reasoning_details"] as? [[String: Any]] {
+                for detail in reasoningDetails {
+                    if let text = detail["text"] as? String {
+                        reasoningText += text
+                    }
+                }
+            }
+            if let toolCalls = delta["tool_calls"] as? [[String: Any]] {
+                for rawCall in toolCalls {
+                    let index = rawCall["index"] as? Int ?? 0
+                    var buffer = toolBuffers[index] ?? AgenticToolCallBuffer()
+                    if let id = rawCall["id"] as? String { buffer.id = id }
+                    if let function = rawCall["function"] as? [String: Any] {
+                        if let name = function["name"] as? String { buffer.name = name }
+                        if let argsDelta = function["arguments"] as? String { buffer.arguments += argsDelta }
+                    }
+                    toolBuffers[index] = buffer
+                }
+                let names = toolBuffers.values.compactMap(\.name).filter { !$0.isEmpty }
+                if !names.isEmpty {
+                    await onProgress("Using tools: \(names.joined(separator: ", "))")
+                }
             }
         }
 
-        guard !accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let toolCalls = toolBuffers.keys.sorted().compactMap { idx -> AgenticToolCall? in
+            guard let buffer = toolBuffers[idx], let name = buffer.name, !name.isEmpty else { return nil }
+            let argsData = buffer.arguments.data(using: .utf8) ?? Data("{}".utf8)
+            let argsJson = (try? JSONSerialization.jsonObject(with: argsData) as? [String: Any]) ?? [:]
+            return AgenticToolCall(tool: name, arguments: argsJson)
+        }
+
+        if assistantText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && toolCalls.isEmpty {
             throw NSError(
                 domain: "AgenticLLMClient",
                 code: statusCode ?? -1,
@@ -1703,13 +1771,199 @@ User memory:
             )
         }
 
-        return .init(rawText: accumulated, statusCode: statusCode)
+        return .init(
+            rawText: rawEvents.joined(separator: "\n"),
+            statusCode: statusCode,
+            assistantText: assistantText,
+            toolCalls: toolCalls,
+            reasoningText: reasoningText
+        )
     }
+
+    private static func parseNonStreamingOpenRouterResponse(_ data: Data) -> (text: String, toolCalls: [AgenticToolCall], reasoning: String) {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choice = (root["choices"] as? [[String: Any]])?.first,
+              let message = choice["message"] as? [String: Any] else {
+            return ("", [], "")
+        }
+        let text = message["content"] as? String ?? ""
+        let reasoning = message["reasoning"] as? String ?? ""
+        let calls: [AgenticToolCall] = ((message["tool_calls"] as? [[String: Any]]) ?? []).compactMap { call in
+            guard let function = call["function"] as? [String: Any],
+                  let name = function["name"] as? String else { return nil }
+            let argsString = function["arguments"] as? String ?? "{}"
+            let argsData = argsString.data(using: .utf8) ?? Data("{}".utf8)
+            let args = (try? JSONSerialization.jsonObject(with: argsData) as? [String: Any]) ?? [:]
+            return AgenticToolCall(tool: name, arguments: args)
+        }
+        return (text, calls, reasoning)
+    }
+
+    private static func buildOpenRouterMessages(systemPrompt: String, history: [[String: String]]) -> [[String: Any]] {
+        var messages: [[String: Any]] = []
+        messages.append([
+            "role": "system",
+            "content": systemPrompt,
+            "cache_control": ["type": "ephemeral"]
+        ])
+        for message in history {
+            guard let role = message["role"], let content = message["content"] else { continue }
+            let normalizedRole: String
+            switch role.lowercased() {
+            case "system", "user", "assistant", "tool":
+                normalizedRole = role.lowercased()
+            case "model":
+                normalizedRole = "assistant"
+            default:
+                normalizedRole = "user"
+            }
+            messages.append(["role": normalizedRole, "content": content])
+        }
+        return messages
+    }
+
+    private static func toolSpecs() -> [[String: Any]] {
+        [
+            toolSpec("list_servers", description: "List configured servers", required: []),
+            toolSpec("run_command", description: "Run a shell command on a server", properties: [
+                "server": ["type": "string"],
+                "command": ["type": "string"]
+            ], required: ["server", "command"]),
+            toolSpec("read_file", description: "Read file contents from a server", properties: [
+                "server": ["type": "string"],
+                "path": ["type": "string"]
+            ], required: ["server", "path"]),
+            toolSpec("write_file", description: "Write full file contents on a server", properties: [
+                "server": ["type": "string"],
+                "path": ["type": "string"],
+                "content": ["type": "string"]
+            ], required: ["server", "path", "content"]),
+            toolSpec("list_tests", description: "List tests", properties: [
+                "server": ["type": "string"],
+                "status": ["type": "string"],
+                "query": ["type": "string"]
+            ], required: []),
+            toolSpec("create_test", description: "Create a test", properties: [
+                "server": ["type": "string"],
+                "title": ["type": "string"],
+                "command": ["type": "string"],
+                "expectedOutput": ["type": "string"],
+                "notes": ["type": "string"]
+            ], required: ["server", "title", "command", "expectedOutput"]),
+            toolSpec("update_test", description: "Update existing test", properties: [
+                "id": ["type": "integer"],
+                "server": ["type": "string"],
+                "title": ["type": "string"],
+                "command": ["type": "string"],
+                "expectedOutput": ["type": "string"],
+                "notes": ["type": "string"]
+            ], required: ["id"]),
+            toolSpec("list_snippets", description: "List snippets", properties: [
+                "server": ["type": "string"],
+                "query": ["type": "string"]
+            ], required: []),
+            toolSpec("create_snippet", description: "Create snippet", properties: [
+                "server": ["type": "string"],
+                "command": ["type": "string"],
+                "comment": ["type": "string"]
+            ], required: ["command"]),
+            toolSpec("update_snippet", description: "Update snippet", properties: [
+                "id": ["type": "string"],
+                "server": ["type": "string"],
+                "command": ["type": "string"],
+                "comment": ["type": "string"]
+            ], required: ["id"]),
+            toolSpec("update_server", description: "Update server metadata", properties: [
+                "server": ["type": "string"],
+                "label": ["type": "string"],
+                "host": ["type": "string"],
+                "port": ["type": "integer"],
+                "username": ["type": "string"],
+                "authMethod": ["type": "string"],
+                "password": ["type": "string"],
+                "privateKey": ["type": "string"],
+                "passphrase": ["type": "string"]
+            ], required: ["server"]),
+            toolSpec("update_memory", description: "Update durable memory notes", properties: [
+                "content": ["type": "string"],
+                "mode": ["type": "string", "enum": ["append", "replace"]]
+            ], required: ["content"])
+        ]
+    }
+
+    private static func toolSpec(_ name: String, description: String, properties: [String: [String: Any]] = [:], required: [String]) -> [String: Any] {
+        [
+            "type": "function",
+            "function": [
+                "name": name,
+                "description": description,
+                "parameters": [
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                    "additionalProperties": false
+                ]
+            ]
+        ]
+    }
+
+    private static func resolveConfig() async throws -> AgenticRuntimeConfig {
+        if let cachedData = try? keychain().getData(configKey),
+           let cached = try? JSONDecoder().decode(AgenticRuntimeConfig.self, from: cachedData),
+           cached.expiresAt > Date() {
+            return cached
+        }
+        var request = URLRequest(url: backendBaseURL.appending(path: "v2/agentic-config"))
+        request.httpMethod = "GET"
+        request.timeoutInterval = requestTimeout
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200...299).contains(statusCode) else {
+            throw NSError(domain: "AgenticLLMClient", code: statusCode, userInfo: [NSLocalizedDescriptionKey: "Failed to fetch agentic runtime config (status \(statusCode))."])
+        }
+        let decoded = try JSONDecoder().decode(AgenticRuntimeConfigResponse.self, from: data)
+        let runtime = AgenticRuntimeConfig(
+            provider: decoded.provider,
+            baseURL: decoded.baseURL,
+            model: decoded.model,
+            apiKey: decoded.apiKey,
+            fetchedAt: Date(),
+            expiresAt: Date().addingTimeInterval(60 * 60 * 6)
+        )
+        let encoded = try JSONEncoder().encode(runtime)
+        try keychain().set(encoded, key: configKey)
+        return runtime
+    }
+}
+
+private struct AgenticToolCallBuffer {
+    var id: String?
+    var name: String?
+    var arguments: String = ""
+}
+
+private struct AgenticRuntimeConfigResponse: Decodable {
+    let provider: String
+    let baseURL: String
+    let model: String
+    let apiKey: String
+}
+
+private struct AgenticRuntimeConfig: Codable {
+    let provider: String
+    let baseURL: String
+    let model: String
+    let apiKey: String
+    let fetchedAt: Date
+    let expiresAt: Date
 }
 
 struct AgenticLLMResponse {
     var rawText: String
     var statusCode: Int?
+    var assistantText: String
+    var toolCalls: [AgenticToolCall]
+    var reasoningText: String
 }
 
 struct AgenticToolCall {
