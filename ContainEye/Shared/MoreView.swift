@@ -628,18 +628,38 @@ struct AgenticView: View {
                 to: chatID
             )
 
-            let llmResponse = try await AgenticLLMClient.generateStreaming(
-                systemPrompt: AgenticLLMClient.systemPrompt(
-                    memory: memory,
-                    servers: AgenticLLMClient.serverInventorySummary()
-                ),
-                history: workingHistory,
-                onProgress: { [chatID, streamingMessageID] accumulated in
-                    let preview = AgenticStreamingPreviewParser.preview(from: accumulated)
-                    guard !preview.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                    await store.updateMessage(chatID: chatID, messageID: streamingMessageID, newContent: preview)
-                }
+            let systemPrompt = AgenticLLMClient.systemPrompt(
+                memory: memory,
+                servers: AgenticLLMClient.serverInventorySummary()
             )
+            let llmResponse: AgenticLLMResponse
+            do {
+                llmResponse = try await AgenticLLMClient.generateStreaming(
+                    systemPrompt: systemPrompt,
+                    history: workingHistory,
+                    onProgress: { [chatID, streamingMessageID] accumulated in
+                        let preview = AgenticStreamingPreviewParser.preview(from: accumulated)
+                        guard !preview.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                        await store.updateMessage(chatID: chatID, messageID: streamingMessageID, newContent: preview)
+                    }
+                )
+            } catch {
+                AgenticDebugLogger.log("streaming_failed_retry_streaming error=\(error.localizedDescription)")
+                await store.updateMessage(
+                    chatID: chatID,
+                    messageID: streamingMessageID,
+                    newContent: "Streaming interrupted. Retrying stream..."
+                )
+                llmResponse = try await AgenticLLMClient.generateStreaming(
+                    systemPrompt: systemPrompt,
+                    history: workingHistory,
+                    onProgress: { [chatID, streamingMessageID] accumulated in
+                        let preview = AgenticStreamingPreviewParser.preview(from: accumulated)
+                        guard !preview.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                        await store.updateMessage(chatID: chatID, messageID: streamingMessageID, newContent: preview)
+                    }
+                )
+            }
             latestLLMRawResponses.append(llmResponse.rawText)
             AgenticDebugLogger.log("http_status=\(llmResponse.statusCode ?? -1)")
             AgenticDebugLogger.log("raw_response=\n\(llmResponse.rawText)")
@@ -648,6 +668,9 @@ struct AgenticView: View {
 
             if let toolCalls = AgenticToolCall.parseAll(from: cleaned), !toolCalls.isEmpty {
                 AgenticDebugLogger.log("parse=tool_calls count=\(toolCalls.count)")
+                let toolLabel = toolCalls.map(\.tool).joined(separator: ", ")
+                let toolBanner = toolCalls.count > 1 ? "Using tools: \(toolLabel)" : "Using tool: \(toolLabel)"
+                await store.updateMessage(chatID: chatID, messageID: streamingMessageID, newContent: toolBanner)
                 for (index, callToExecute) in toolCalls.enumerated() {
                     AgenticDebugLogger.log("tool[\(index)] tool=\(callToExecute.tool) args=\(callToExecute.arguments)")
                     if callToExecute.tool == "run_command" {
@@ -668,13 +691,7 @@ struct AgenticView: View {
                         }
                     }
 
-                    if index == 0 {
-                        await store.updateMessage(
-                            chatID: chatID,
-                            messageID: streamingMessageID,
-                            newContent: "Using tool: \(callToExecute.tool)"
-                        )
-                    } else {
+                    if index > 0 {
                         await store.appendMessage(AgenticMessage(role: .assistant, content: "Using tool: \(callToExecute.tool)"), to: chatID)
                     }
 
@@ -687,7 +704,7 @@ struct AgenticView: View {
                         ),
                         to: chatID
                     )
-                    workingHistory.append(["role": "model", "content": "Using tool: \(callToExecute.tool)"])
+                    workingHistory.append(["role": "assistant", "content": "Using tool: \(callToExecute.tool)"])
                     workingHistory.append(["role": "user", "content": result.userFacingSummary])
                     workingHistory.append(["role": "user", "content": result.toolResultEnvelope(tool: callToExecute.tool)])
                 }
@@ -697,7 +714,7 @@ struct AgenticView: View {
             if let final = AgenticFinalResponse.parse(from: cleaned) {
                 AgenticDebugLogger.log("parse=final")
                 await store.updateMessage(chatID: chatID, messageID: streamingMessageID, newContent: final.content)
-                workingHistory.append(["role": "model", "content": final.content])
+                workingHistory.append(["role": "assistant", "content": final.content])
                 let normalized = final.content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 if normalized == "something went wrong." || normalized == "something went wrong" {
                     await presentFailureDebugAlert(
@@ -709,7 +726,7 @@ struct AgenticView: View {
             } else {
                 AgenticDebugLogger.log("parse=unstructured_final")
                 await store.updateMessage(chatID: chatID, messageID: streamingMessageID, newContent: cleaned)
-                workingHistory.append(["role": "model", "content": cleaned])
+                workingHistory.append(["role": "assistant", "content": cleaned])
             }
             return
         }
@@ -737,7 +754,7 @@ struct AgenticView: View {
                 AgenticMessage(role: .system, content: result.toolResultEnvelope(tool: approvedCall.tool)),
                 to: context.chatID
             )
-            history.append(["role": "model", "content": "Using tool: \(approvedCall.tool)"])
+            history.append(["role": "assistant", "content": "Using tool: \(approvedCall.tool)"])
             history.append(["role": "user", "content": result.userFacingSummary])
             history.append(["role": "user", "content": result.toolResultEnvelope(tool: approvedCall.tool)])
         } else {
@@ -1465,7 +1482,7 @@ final class AgenticChatStore {
                     || message.content == "Command cancelled." {
                     return nil
                 }
-                return ["role": "model", "content": message.content]
+                return ["role": "assistant", "content": message.content]
             case .tool, .system, .error:
                 return ["role": "user", "content": message.content]
             }
@@ -1535,6 +1552,7 @@ struct AgenticMessage: Identifiable, Codable, Hashable {
 enum AgenticLLMClient {
     private static let baseURL = URL(string: "https://containeye.hannesnagel.com")!
     private static let requestTimeout: TimeInterval = 90
+    private static let streamingRequestTimeout: TimeInterval = 600
 
     static func systemPrompt(memory: String, servers: String) -> String {
         #"""
@@ -1640,7 +1658,7 @@ User memory:
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/x-ndjson", forHTTPHeaderField: "Accept")
-        request.timeoutInterval = requestTimeout
+        request.timeoutInterval = streamingRequestTimeout
         request.httpBody = try JSONSerialization.data(withJSONObject: conversation)
 
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
@@ -1781,6 +1799,9 @@ enum AgenticStreamingPreviewParser {
             }
             return "Using tool: \(toolCall.tool)"
         }
+        if let partialToolPreview = extractPartialToolPreview(from: cleaned) {
+            return partialToolPreview
+        }
         if let final = AgenticFinalResponse.parse(from: cleaned) {
             return final.content
         }
@@ -1830,6 +1851,30 @@ enum AgenticStreamingPreviewParser {
         }
 
         return output.isEmpty ? nil : output
+    }
+
+    private static func extractPartialToolPreview(from text: String) -> String? {
+        guard text.contains(#""type""#), text.contains(#""tool""#) else {
+            return nil
+        }
+        let pattern = #""tool"\s*:\s*"([^"]+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let nsRange = Range(NSRange(location: 0, length: text.utf16.count), in: text) else {
+            return nil
+        }
+        let matches = regex.matches(in: text, range: NSRange(nsRange, in: text))
+        let toolNames: [String] = matches.compactMap { match in
+            guard match.numberOfRanges > 1,
+                  let range = Range(match.range(at: 1), in: text) else {
+                return nil
+            }
+            return String(text[range])
+        }
+        guard !toolNames.isEmpty else { return nil }
+        if toolNames.count == 1 {
+            return "Using tool: \(toolNames[0])"
+        }
+        return "Using tools: \(toolNames.joined(separator: ", "))"
     }
 }
 
