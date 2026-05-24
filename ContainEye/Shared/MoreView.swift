@@ -667,15 +667,18 @@ struct AgenticView: View {
             if !llmResponse.reasoningText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await store.appendMessage(
                     AgenticMessage(
-                        role: .system,
+                        role: .assistant,
                         content: "Thinking (raw):\n```\n\(llmResponse.reasoningText)\n```"
                     ),
                     to: chatID
                 )
             }
 
-            if !llmResponse.toolCalls.isEmpty {
-                let toolCalls = llmResponse.toolCalls
+            let parsedFallbackCalls = llmResponse.toolCalls.isEmpty ? (AgenticToolCall.parseAll(from: cleaned) ?? []) : []
+            let effectiveToolCalls = llmResponse.toolCalls.isEmpty ? parsedFallbackCalls : llmResponse.toolCalls
+
+            if !effectiveToolCalls.isEmpty {
+                let toolCalls = effectiveToolCalls
                 AgenticDebugLogger.log("parse=tool_calls count=\(toolCalls.count)")
                 let toolLabel = toolCalls.map(\.tool).joined(separator: ", ")
                 let toolBanner = toolCalls.count > 1 ? "Using tools: \(toolLabel)" : "Using tool: \(toolLabel)"
@@ -1729,12 +1732,12 @@ User memory:
                 await onProgress(assistantText)
             }
             if let reasoning = delta["reasoning"] as? String, !reasoning.isEmpty {
-                reasoningText += reasoning
+                reasoningText = mergeReasoningChunk(existing: reasoningText, incoming: reasoning)
             }
             if let reasoningDetails = delta["reasoning_details"] as? [[String: Any]] {
                 for detail in reasoningDetails {
                     if let text = detail["text"] as? String {
-                        reasoningText += text
+                        reasoningText = mergeReasoningChunk(existing: reasoningText, incoming: text)
                     }
                 }
             }
@@ -1933,6 +1936,18 @@ User memory:
         let encoded = try JSONEncoder().encode(runtime)
         try keychain().set(encoded, key: configKey)
         return runtime
+    }
+
+    private static func mergeReasoningChunk(existing: String, incoming: String) -> String {
+        guard !incoming.isEmpty else { return existing }
+        if existing.isEmpty { return incoming }
+        if incoming.hasPrefix(existing) {
+            return incoming
+        }
+        if existing.hasSuffix(incoming) {
+            return existing
+        }
+        return existing + incoming
     }
 }
 
