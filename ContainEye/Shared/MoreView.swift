@@ -314,39 +314,57 @@ struct AgenticView: View {
 
     @ViewBuilder
     private func renderedMessageContent(_ message: AgenticMessage) -> some View {
-        let segments = parseCodeFencedSegments(message.content)
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
-                switch segment {
-                case let .text(text):
-                    Text(.init(text))
+        if message.role == .assistant,
+           message.content.hasPrefix("Thinking (raw):\n```"),
+           message.content.hasSuffix("\n```") {
+            let start = message.content.index(message.content.startIndex, offsetBy: "Thinking (raw):\n```".count)
+            let end = message.content.index(message.content.endIndex, offsetBy: -4)
+            let body = String(message.content[start..<end])
+            DisclosureGroup("Thinking (raw)") {
+                ScrollView(.horizontal) {
+                    Text(body)
                         .textSelection(.enabled)
-                        .font(message.role == .tool ? .system(.footnote, design: .monospaced) : .body)
+                        .font(.system(.footnote, design: .monospaced))
                         .frame(maxWidth: .infinity, alignment: .leading)
-                case let .code(language, code):
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text(language?.isEmpty == false ? language!.uppercased() : "CODE")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Button {
-                                copyToClipboard(code)
-                            } label: {
-                                Label("Copy", systemImage: "doc.on.doc")
-                                    .font(.caption2)
-                            }
-                            .buttonStyle(.bordered)
-                        }
-
-                        ScrollView(.horizontal) {
-                            Text(code)
-                                .textSelection(.enabled)
-                                .font(.system(.footnote, design: .monospaced))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
                         .padding(8)
                         .background(.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+                }
+            }
+        } else {
+            let segments = parseCodeFencedSegments(message.content)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                    switch segment {
+                    case let .text(text):
+                        Text(.init(text))
+                            .textSelection(.enabled)
+                            .font(message.role == .tool ? .system(.footnote, design: .monospaced) : .body)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    case let .code(language, code):
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(language?.isEmpty == false ? language!.uppercased() : "CODE")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Button {
+                                    copyToClipboard(code)
+                                } label: {
+                                    Label("Copy", systemImage: "doc.on.doc")
+                                        .font(.caption2)
+                                }
+                                .buttonStyle(.bordered)
+                            }
+
+                            ScrollView(.horizontal) {
+                                Text(code)
+                                    .textSelection(.enabled)
+                                    .font(.system(.footnote, design: .monospaced))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(8)
+                            .background(.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+                        }
                     }
                 }
             }
@@ -632,37 +650,13 @@ struct AgenticView: View {
                 memory: memory,
                 servers: AgenticLLMClient.serverInventorySummary()
             )
-            let llmResponse: AgenticLLMResponse
-            do {
-                llmResponse = try await AgenticLLMClient.generateStreaming(
-                    systemPrompt: systemPrompt,
-                    history: workingHistory,
-                    onProgress: { [chatID, streamingMessageID] accumulated in
-                        let preview = AgenticStreamingPreviewParser.preview(from: accumulated)
-                        guard !preview.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                        await store.updateMessage(chatID: chatID, messageID: streamingMessageID, newContent: preview)
-                    }
-                )
-            } catch {
-                AgenticDebugLogger.log("streaming_failed_retry_streaming error=\(error.localizedDescription)")
-                await store.updateMessage(
-                    chatID: chatID,
-                    messageID: streamingMessageID,
-                    newContent: "Streaming interrupted. Retrying stream..."
-                )
-                llmResponse = try await AgenticLLMClient.generateStreaming(
-                    systemPrompt: systemPrompt,
-                    history: workingHistory,
-                    onProgress: { [chatID, streamingMessageID] accumulated in
-                        let preview = AgenticStreamingPreviewParser.preview(from: accumulated)
-                        guard !preview.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                        await store.updateMessage(chatID: chatID, messageID: streamingMessageID, newContent: preview)
-                    }
-                )
-            }
-            latestLLMRawResponses.append(llmResponse.rawText)
+            let llmResponse = try await AgenticLLMClient.generate(
+                systemPrompt: systemPrompt,
+                history: workingHistory
+            )
+            latestLLMRawResponses.append(String(llmResponse.rawText.prefix(12_000)))
             AgenticDebugLogger.log("http_status=\(llmResponse.statusCode ?? -1)")
-            AgenticDebugLogger.log("raw_response=\n\(llmResponse.rawText)")
+            AgenticDebugLogger.log("raw_response=\n\(String(llmResponse.rawText.prefix(6_000)))")
             let cleaned = llmResponse.assistantText.trimmingCharacters(in: .whitespacesAndNewlines)
             if !llmResponse.reasoningText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await store.appendMessage(
@@ -906,7 +900,8 @@ struct AgenticView: View {
         }
 
         let rawText = latestLLMRawResponses.enumerated().map { index, value in
-            "=== Raw Response \(index + 1) ===\n\(value)"
+            let trimmed = value.count > 8_000 ? String(value.prefix(8_000)) + "\n… [truncated]" : value
+            return "=== Raw Response \(index + 1) ===\n\(trimmed)"
         }.joined(separator: "\n\n")
 
         return """
