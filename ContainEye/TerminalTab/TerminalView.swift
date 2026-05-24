@@ -2244,6 +2244,7 @@ extension TerminalServerPickerViewController: UICollectionViewDelegate {
         guard let credential = keychain().getCredential(for: credentialKey) else { return }
         let normalizedSessionName = XTermSessionController.normalizeTmuxSessionName(sessionName)
         guard !normalizedSessionName.isEmpty else { return }
+        removeDisplayedTmuxSession(credentialKey: credentialKey, sessionName: normalizedSessionName)
         TerminalWorkspaceStore.shared.closeTabsBoundToTmuxSession(
             credentialKey: credentialKey,
             sessionName: normalizedSessionName
@@ -2267,13 +2268,32 @@ fi
         Task {
             let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
             await MainActor.run {
+                self.reloadCredentials()
                 if output.contains("__CE_TMUX_OK__") {
-                    self.reloadCredentials()
+                    return
                 } else {
                     self.showTmuxCloseError(output: output, sessionName: normalizedSessionName)
                 }
             }
         }
+    }
+
+    private func removeDisplayedTmuxSession(credentialKey: String, sessionName: String) {
+        items.removeAll { item in
+            guard case let .tmuxSession(itemCredentialKey, itemSessionName) = item.kind else {
+                return false
+            }
+            if itemCredentialKey != credentialKey {
+                return false
+            }
+            return XTermSessionController.normalizeTmuxSessionName(itemSessionName) == sessionName
+        }
+
+        var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
+        snapshot.appendSections([.main])
+        snapshot.appendItems(items, toSection: .main)
+        dataSource.apply(snapshot, animatingDifferences: true)
+        emptyStateLabel.isHidden = !items.isEmpty
     }
 
     private func showTmuxCloseError(output: String, sessionName: String) {
