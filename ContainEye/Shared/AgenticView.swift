@@ -44,10 +44,21 @@ struct AgenticView: View {
         .onChange(of: bridge.pendingContext?.id) {
             Task { await model.consumePendingContextIfNeeded(bridge: bridge) }
         }
-        .alert("Allow Command?", isPresented: $model.showCommandApprovalAlert, presenting: model.pendingApproval) { pending in
-            Button("Allow") {
+        .confirmationDialog("Allow command execution?", isPresented: $model.showCommandApprovalAlert, titleVisibility: .visible, presenting: model.pendingApproval) { pending in
+            Button("Allow Once") {
                 Task { await model.resolveCommandApproval(allow: true, pending: pending) }
             }
+
+            if let prefix = pending.commandPrefix {
+                Button("Always Allow \"\(prefix)\" Commands") {
+                    Task { await model.resolveCommandApprovalAlwaysPrefix(pending: pending) }
+                }
+            }
+
+            Button("Always Allow All Commands") {
+                Task { await model.resolveCommandApprovalAlwaysAll(pending: pending) }
+            }
+
             Button("Deny", role: .destructive) {
                 Task { await model.resolveCommandApproval(allow: false, pending: pending) }
             }
@@ -191,6 +202,7 @@ final class AgenticViewModel: ObservableObject {
     private var llmHistory: [[String: Any]] = []
     private var waitingApprovalState: AgenticApprovalState?
     private let sessionStore = AgenticSessionStore()
+    private var approvalPreferences = AgenticCommandApprovalPreferences.load()
 
     func configure(database: Blackbird.Database?) async {
         self.database = database
@@ -296,6 +308,20 @@ final class AgenticViewModel: ObservableObject {
         }
     }
 
+    func resolveCommandApprovalAlwaysPrefix(pending: AgenticCommandApprovalContext) async {
+        if let prefix = pending.commandPrefix, !prefix.isEmpty {
+            approvalPreferences.allowedCommandPrefixes.insert(prefix)
+            approvalPreferences.save()
+        }
+        await resolveCommandApproval(allow: true, pending: pending)
+    }
+
+    func resolveCommandApprovalAlwaysAll(pending: AgenticCommandApprovalContext) async {
+        approvalPreferences.allowAllCommands = true
+        approvalPreferences.save()
+        await resolveCommandApproval(allow: true, pending: pending)
+    }
+
     private func runAgentLoop() async {
         guard !isRunning else { return }
         guard let database else {
@@ -376,7 +402,7 @@ final class AgenticViewModel: ObservableObject {
 
                     if call.tool == "run_command" {
                         let command = (call.arguments["command"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                        if commandRequiresApproval(command) {
+                        if shouldRequireApproval(for: command) {
                             let serverLabel = ((call.arguments["server"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? "default server"
                             let token = UUID()
                             waitingApprovalState = AgenticApprovalState(
@@ -450,6 +476,18 @@ final class AgenticViewModel: ObservableObject {
         let disallowed = [";", "|", "&", ">", "<", "`", "$(", "\n", "\r"]
         return disallowed.contains { command.contains($0) }
     }
+
+    private func shouldRequireApproval(for command: String) -> Bool {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+        if approvalPreferences.allowAllCommands {
+            return false
+        }
+        if approvalPreferences.allowedCommandPrefixes.contains(where: { trimmed.hasPrefix($0) }) {
+            return false
+        }
+        return commandRequiresApproval(trimmed)
+    }
 }
 
 private struct AgenticApprovalState {
@@ -465,6 +503,12 @@ struct AgenticCommandApprovalContext: Identifiable {
     let command: String
 
     var id: UUID { token }
+
+    var commandPrefix: String? {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true).first.map(String.init)
+    }
 }
 
 struct AgenticTimelineMessage: Identifiable, Codable, Hashable {
@@ -568,5 +612,25 @@ private final class AgenticSessionStore {
         let dir = base.appendingPathComponent("ContainEye", isDirectory: true)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent(fileName, isDirectory: false)
+    }
+}
+
+private struct AgenticCommandApprovalPreferences: Codable {
+    var allowAllCommands: Bool
+    var allowedCommandPrefixes: Set<String>
+
+    static let defaultsKey = "agentic_command_approval_preferences_v1"
+
+    static func load() -> AgenticCommandApprovalPreferences {
+        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+              let decoded = try? JSONDecoder().decode(AgenticCommandApprovalPreferences.self, from: data) else {
+            return AgenticCommandApprovalPreferences(allowAllCommands: false, allowedCommandPrefixes: [])
+        }
+        return decoded
+    }
+
+    func save() {
+        guard let data = try? JSONEncoder().encode(self) else { return }
+        UserDefaults.standard.set(data, forKey: Self.defaultsKey)
     }
 }
