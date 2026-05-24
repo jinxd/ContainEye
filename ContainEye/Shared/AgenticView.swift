@@ -7,6 +7,11 @@
 
 import SwiftUI
 import Blackbird
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 struct AgenticView: View {
     @Environment(\.blackbirdDatabase) private var db
@@ -22,6 +27,9 @@ struct AgenticView: View {
                     .listRowBackground(Color.clear)
             }
             .listStyle(.plain)
+#if os(iOS)
+            .scrollDismissesKeyboard(.immediately)
+#endif
 
             Divider()
 
@@ -49,10 +57,20 @@ struct AgenticView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button {
-                    model.startNewSession()
+                Menu {
+                    Button {
+                        model.startNewSession()
+                    } label: {
+                        Label("New Session", systemImage: "plus.bubble")
+                    }
+
+                    Button {
+                        model.copyChatHistory()
+                    } label: {
+                        Label("Copy Chat History", systemImage: "doc.on.doc")
+                    }
                 } label: {
-                    Label("New Session", systemImage: "plus.bubble")
+                    Image(systemName: "ellipsis.circle")
                 }
             }
         }
@@ -60,6 +78,16 @@ struct AgenticView: View {
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if model.isRunning {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Agent is working…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             if let context = model.pendingComposerContext, !context.isEmpty {
                 HStack(spacing: 8) {
                     Text("Context attached")
@@ -111,8 +139,15 @@ private struct AgenticMessageRow: View {
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                } else if message.role == .tool {
+                    DisclosureGroup(toolPreviewLabel) {
+                        Text(message.content)
+                            .font(.system(.footnote, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 } else {
-                    Text(message.content)
+                    Text(.init(message.content))
                         .font(message.role == .tool ? .system(.footnote, design: .monospaced) : .body)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -133,6 +168,13 @@ private struct AgenticMessageRow: View {
         case .thinking: return .orange.opacity(0.10)
         case .status: return .gray.opacity(0.10)
         }
+    }
+
+    private var toolPreviewLabel: String {
+        let firstLine = message.content.split(separator: "\n", omittingEmptySubsequences: false).first.map(String.init) ?? "Tool output"
+        let trimmed = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Tool output" }
+        return trimmed.count > 80 ? String(trimmed.prefix(80)) + "…" : trimmed
     }
 }
 
@@ -173,6 +215,18 @@ final class AgenticViewModel: ObservableObject {
 
     func clearComposerContext() {
         pendingComposerContext = nil
+    }
+
+    func copyChatHistory() {
+        let transcript = messages
+            .map { "[\($0.role.label)]\n\($0.content)" }
+            .joined(separator: "\n\n")
+#if canImport(UIKit)
+        UIPasteboard.general.string = transcript
+#elseif canImport(AppKit)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(transcript, forType: .string)
+#endif
     }
 
     func consumePendingContextIfNeeded(bridge: AgenticContextBridge) async {
