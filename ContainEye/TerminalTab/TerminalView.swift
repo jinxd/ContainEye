@@ -1457,13 +1457,19 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
             switch selection {
             case let .shortcut(shortcut):
                 let hasStartupScript = !shortcut.startupScript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                let useTmuxPersistence = self.settingsStore.state.session.persistenceMode == .tmuxPerTab
+                let tmuxSessionName = useTmuxPersistence
+                    ? TerminalServerPickerViewController.persistentTmuxSessionName(for: shortcut)
+                    : nil
                 self.workspace.openTab(
                     credentialKey: shortcut.credentialKey,
                     preferredTitle: shortcut.title,
                     inFocusedPane: true,
                     themeOverrideSelectionKey: shortcut.themeSelectionKey,
                     shortcutColorHex: shortcut.colorHex,
-                    disableAutoPersistentSession: hasStartupScript
+                    tmuxSessionName: tmuxSessionName,
+                    tmuxAttachOnly: false,
+                    disableAutoPersistentSession: hasStartupScript && !useTmuxPersistence
                 )
                 self.launchStartupScriptIfNeeded(shortcut.startupScript, credentialKey: shortcut.credentialKey)
             case let .tmuxSession(target):
@@ -1473,7 +1479,8 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
                     inFocusedPane: true,
                     themeOverrideSelectionKey: nil,
                     shortcutColorHex: "#10B981",
-                    tmuxSessionName: target.sessionName
+                    tmuxSessionName: target.sessionName,
+                    tmuxAttachOnly: true
                 )
             }
         }
@@ -1967,6 +1974,12 @@ if command -v tmux >/dev/null 2>&1; then tmux list-sessions -F '#{session_name}\
         return parts.joined(separator: " • ")
     }
 
+    nonisolated static func persistentTmuxSessionName(for shortcut: TerminalLaunchShortcut) -> String {
+        let normalized = shortcut.id.lowercased().filter { $0.isLetter || $0.isNumber }
+        let suffix = normalized.isEmpty ? "default" : normalized
+        return "containeye-shortcut-\(suffix)"
+    }
+
     @objc
     private func didTapAddShortcut() {
         let editor = TerminalShortcutEditorViewController()
@@ -2104,16 +2117,56 @@ extension TerminalServerPickerViewController: UICollectionViewDelegate {
 
     private func closeTmuxSession(credentialKey: String, sessionName: String) {
         guard let credential = keychain().getCredential(for: credentialKey) else { return }
+        TerminalWorkspaceStore.shared.closeTabsBoundToTmuxSession(
+            credentialKey: credentialKey,
+            sessionName: sessionName
+        )
 
         let escapedSessionName = sessionName.replacingOccurrences(of: "'", with: "'\"'\"'")
-        let command = "tmux kill-session -t '\(escapedSessionName)' 2>/dev/null || true"
+        let command = """
+if ! command -v tmux >/dev/null 2>&1; then
+  echo "__CE_TMUX_ERROR__: tmux is not installed"
+elif tmux has-session -t '\(escapedSessionName)' 2>/dev/null; then
+  if tmux kill-session -t '\(escapedSessionName)' 2>/dev/null; then
+    echo "__CE_TMUX_OK__"
+  else
+    echo "__CE_TMUX_ERROR__: failed to kill session"
+  fi
+else
+  echo "__CE_TMUX_ERROR__: session not found"
+fi
+"""
 
         Task {
-            _ = try? await SSHClientActor.shared.execute(command, on: credential)
+            let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
             await MainActor.run {
-                self.reloadCredentials()
+                if output.contains("__CE_TMUX_OK__") {
+                    self.reloadCredentials()
+                } else {
+                    self.showTmuxCloseError(output: output, sessionName: sessionName)
+                }
             }
         }
+    }
+
+    private func showTmuxCloseError(output: String, sessionName: String) {
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        let message: String
+        if let line = trimmed.split(whereSeparator: \.isNewline).map(String.init).first(where: { $0.contains("__CE_TMUX_ERROR__:") }) {
+            message = line.replacingOccurrences(of: "__CE_TMUX_ERROR__:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        } else if trimmed.isEmpty {
+            message = "Unknown error"
+        } else {
+            message = trimmed
+        }
+
+        let alert = UIAlertController(
+            title: "Couldn’t close \(sessionName)",
+            message: message,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
     }
 }
 

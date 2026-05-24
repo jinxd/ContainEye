@@ -9,6 +9,7 @@ struct TerminalTabState: Identifiable, Codable, Hashable {
     var themeOverrideSelectionKey: String?
     var shortcutColorHex: String?
     var tmuxSessionName: String?
+    var tmuxAttachOnly: Bool? = nil
     var disableAutoPersistentSession: Bool
 }
 
@@ -82,9 +83,22 @@ final class TerminalWorkspaceStore {
         themeOverrideSelectionKey: String? = nil,
         shortcutColorHex: String? = nil,
         tmuxSessionName: String? = nil,
+        tmuxAttachOnly: Bool = false,
         disableAutoPersistentSession: Bool = false
     ) {
         guard tabs.count < maxTabCount else {
+            return
+        }
+
+        let trimmedTmuxSessionName = tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let tmuxName = trimmedTmuxSessionName, !tmuxName.isEmpty,
+           let existing = tabs.values.first(where: {
+               $0.credentialKey == credentialKey &&
+               ($0.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines) == tmuxName)
+           }),
+           let pane = panes.first(where: { $0.activeTabID == existing.id }) {
+            focusedPaneID = pane.id
+            persistWorkspace()
             return
         }
 
@@ -126,6 +140,7 @@ final class TerminalWorkspaceStore {
             themeOverrideSelectionKey: themeOverrideSelectionKey,
             shortcutColorHex: shortcutColorHex,
             tmuxSessionName: tmuxSessionName,
+            tmuxAttachOnly: tmuxAttachOnly,
             disableAutoPersistentSession: disableAutoPersistentSession
         )
 
@@ -143,6 +158,7 @@ final class TerminalWorkspaceStore {
             credentialKey: credentialKey,
             title: tab.title,
             tmuxSessionName: tab.tmuxSessionName,
+            tmuxAttachOnly: tab.tmuxAttachOnly ?? false,
             disableAutoPersistentSession: tab.disableAutoPersistentSession,
             suggestionEngine: suggestionEngine,
             documentIndex: suggestionIndex
@@ -335,6 +351,7 @@ final class TerminalWorkspaceStore {
                 credentialKey: tab.credentialKey,
                 title: tab.title,
                 tmuxSessionName: tab.tmuxSessionName,
+                tmuxAttachOnly: tab.tmuxAttachOnly ?? false,
                 disableAutoPersistentSession: tab.disableAutoPersistentSession,
                 suggestionEngine: suggestionEngine,
                 documentIndex: suggestionIndex
@@ -398,6 +415,32 @@ final class TerminalWorkspaceStore {
 
         if focusedPaneID == nil || !panes.contains(where: { $0.id == focusedPaneID }) {
             focusedPaneID = panes.first?.id
+        }
+    }
+
+    func closeTabsBoundToTmuxSession(credentialKey: String, sessionName: String) {
+        let trimmedTarget = sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTarget.isEmpty else { return }
+
+        let targetTabIDs = tabs.values.compactMap { tab -> UUID? in
+            guard tab.credentialKey == credentialKey else { return nil }
+            if let explicit = tab.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !explicit.isEmpty,
+               explicit == trimmedTarget {
+                return tab.id
+            }
+            guard trimmedTarget.hasPrefix(XTermSessionController.autoTmuxSessionPrefix),
+                  !tab.disableAutoPersistentSession,
+                  XTermSessionController.persistentTmuxSessionName(forTabID: tab.id) == trimmedTarget
+            else {
+                return nil
+            }
+            return tab.id
+        }
+
+        guard !targetTabIDs.isEmpty else { return }
+        for tabID in targetTabIDs {
+            closeTab(tabID: tabID)
         }
     }
 }

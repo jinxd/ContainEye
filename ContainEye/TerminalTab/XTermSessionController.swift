@@ -38,6 +38,7 @@ final class XTermSessionController: Identifiable {
     let credentialKey: String
     var title: String
     private let tmuxSessionName: String?
+    private let tmuxAttachOnly: Bool
     private let disableAutoPersistentSession: Bool
 
     var connectionStatus: TerminalConnectionStatus = .idle
@@ -84,7 +85,7 @@ final class XTermSessionController: Identifiable {
     private static let autoReloadCooldown: TimeInterval = 2
     private static let autoReloadWindow: TimeInterval = 15
     private static let maxAutoReloadAttemptsPerWindow = 3
-    private static let tmuxSessionPrefix = "containeye-tab-"
+    static let autoTmuxSessionPrefix = "containeye-tab-"
 
     var currentInputBuffer: String {
         inputBuffer
@@ -101,6 +102,7 @@ final class XTermSessionController: Identifiable {
         credentialKey: String,
         title: String,
         tmuxSessionName: String? = nil,
+        tmuxAttachOnly: Bool = false,
         disableAutoPersistentSession: Bool = false,
         suggestionEngine: CommandSuggestionProviding,
         documentIndex: RemoteDocumentTreeIndex
@@ -109,6 +111,7 @@ final class XTermSessionController: Identifiable {
         self.credentialKey = credentialKey
         self.title = title
         self.tmuxSessionName = tmuxSessionName
+        self.tmuxAttachOnly = tmuxAttachOnly
         self.disableAutoPersistentSession = disableAutoPersistentSession
         self.suggestionEngine = suggestionEngine
         self.documentIndex = documentIndex
@@ -201,26 +204,34 @@ final class XTermSessionController: Identifiable {
 
     private func makeSessionStartupCommand() -> String? {
         let configuredSessionName: String
+        let attachOnly: Bool
 
         if let explicit = tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
            !explicit.isEmpty {
             configuredSessionName = explicit
+            attachOnly = tmuxAttachOnly
         } else {
             guard !disableAutoPersistentSession else { return nil }
             let mode = TerminalSettingsStore.shared.state.session.persistenceMode
             guard mode == .tmuxPerTab else { return nil }
-            configuredSessionName = Self.tmuxSessionPrefix + id.uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+            configuredSessionName = Self.persistentTmuxSessionName(forTabID: id)
+            attachOnly = false
         }
 
         let quotedSessionName = Self.shellSingleQuoted(configuredSessionName)
-        return """
-if command -v tmux >/dev/null 2>&1; then __ce_tmux_session=\(quotedSessionName); if tmux has-session -t "$__ce_tmux_session" 2>/dev/null; then tmux attach-session -t "$__ce_tmux_session"; else tmux new-session -s "$__ce_tmux_session"; fi; fi\r
-"""
+        if attachOnly {
+            return "if command -v tmux >/dev/null 2>&1; then tmux attach-session -t \(quotedSessionName); fi\r"
+        }
+        return "if command -v tmux >/dev/null 2>&1; then tmux new-session -A -s \(quotedSessionName); fi\r"
     }
 
     private static func shellSingleQuoted(_ value: String) -> String {
         let escaped = value.replacingOccurrences(of: "'", with: "'\"'\"'")
         return "'\(escaped)'"
+    }
+
+    static func persistentTmuxSessionName(forTabID id: UUID) -> String {
+        autoTmuxSessionPrefix + id.uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     }
 
     func sendInput(_ data: String) {
@@ -570,6 +581,12 @@ if command -v tmux >/dev/null 2>&1; then __ce_tmux_session=\(quotedSessionName);
     }
 
     private func bootstrapShellIntegrationIfNeeded() {
+        if launchesIntoTmux {
+            // Keep tmux sessions untouched so existing pane output is not disturbed by bootstrap commands.
+            bootstrapPayloadSettled = true
+            return
+        }
+
         guard !didSendShellBootstrap else {
             return
         }
@@ -587,6 +604,14 @@ if command -v tmux >/dev/null 2>&1; then __ce_tmux_session=\(quotedSessionName);
             try? await Task.sleep(for: .seconds(1))
             await MainActor.run { self.stopBootstrapFilter() }
         }
+    }
+
+    private var launchesIntoTmux: Bool {
+        if let explicit = tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines), !explicit.isEmpty {
+            return true
+        }
+        guard !disableAutoPersistentSession else { return false }
+        return TerminalSettingsStore.shared.state.session.persistenceMode == .tmuxPerTab
     }
 
     private func startShellIntegrationProbe() {
