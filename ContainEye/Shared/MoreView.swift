@@ -14,7 +14,7 @@ import UIKit
 import AppKit
 #endif
 
-struct AgenticView: View {
+struct LegacyAgenticView: View {
     @Environment(\.blackbirdDatabase) private var db
     @Environment(\.agenticBridge) private var bridge
     @State private var store = AgenticChatStore()
@@ -2650,6 +2650,6 @@ struct AgenticToolExecutor {
 
 #Preview(traits: .sampleData) {
     NavigationStack {
-        AgenticView()
+        LegacyAgenticView()
     }
 }
