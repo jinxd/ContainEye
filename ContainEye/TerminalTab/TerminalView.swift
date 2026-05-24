@@ -2674,8 +2674,6 @@ struct TerminalShortcutEditorScreen: View {
     @State private var name: String
     @State private var startupScript: String
     @State private var color: Color
-    @State private var pendingSaveAfterQuoteAlert = false
-    @State private var showSmartQuoteAlert = false
     private let settingsStore = TerminalSettingsStore.shared
 
     init(existingShortcut: TerminalLaunchShortcut?, onSaved: (() -> Void)?, onRequestClose: (() -> Void)?) {
@@ -2737,10 +2735,7 @@ struct TerminalShortcutEditorScreen: View {
             }
 
             Section("Startup Script (Optional)") {
-                TextEditor(text: $startupScript)
-                    .font(.system(size: UIFloat(13), weight: .regular, design: .monospaced))
-                    .autocorrectionDisabled(true)
-                    .textInputAutocapitalization(.never)
+                TerminalPlainTextEditor(text: $startupScript)
                     .frame(minHeight: UIFloat(180))
             }
         }
@@ -2765,21 +2760,6 @@ struct TerminalShortcutEditorScreen: View {
                 .disabled(selectedCredential == nil)
             }
         }
-        .alert("Convert Smart Quotes?", isPresented: $showSmartQuoteAlert) {
-            Button("Convert & Save") {
-                name = Self.replacingSmartQuotes(in: name)
-                startupScript = Self.replacingSmartQuotes(in: startupScript)
-                pendingSaveAfterQuoteAlert = true
-                save()
-            }
-            Button("Save Anyway") {
-                pendingSaveAfterQuoteAlert = true
-                save()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Detected smart quotes (\u{201C} \u{201D}). These often break shell commands.")
-        }
     }
 
     private var selectedCredential: Credential? {
@@ -2788,13 +2768,6 @@ struct TerminalShortcutEditorScreen: View {
     }
 
     private func save() {
-        if !pendingSaveAfterQuoteAlert,
-           Self.containsSmartQuotes(name) || Self.containsSmartQuotes(startupScript) {
-            showSmartQuoteAlert = true
-            return
-        }
-        pendingSaveAfterQuoteAlert = false
-
         guard let credential = selectedCredential else { return }
         let resolvedTitle = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? credential.label : name.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedScript = startupScript.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2821,15 +2794,45 @@ struct TerminalShortcutEditorScreen: View {
             }
         }
     }
+}
 
-    private static func containsSmartQuotes(_ text: String) -> Bool {
-        text.contains("\u{201C}") || text.contains("\u{201D}")
+private struct TerminalPlainTextEditor: UIViewRepresentable {
+    @Binding var text: String
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.delegate = context.coordinator
+        view.font = UIFont.monospacedSystemFont(ofSize: UIFloat(13), weight: .regular)
+        view.backgroundColor = .clear
+        view.autocorrectionType = .no
+        view.autocapitalizationType = .none
+        view.smartQuotesType = .no
+        view.smartDashesType = .no
+        view.smartInsertDeleteType = .no
+        view.keyboardType = .asciiCapable
+        return view
     }
 
-    private static func replacingSmartQuotes(in text: String) -> String {
-        text
-            .replacingOccurrences(of: "\u{201C}", with: "\"")
-            .replacingOccurrences(of: "\u{201D}", with: "\"")
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        if uiView.text != text {
+            uiView.text = text
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        private let parent: TerminalPlainTextEditor
+
+        init(_ parent: TerminalPlainTextEditor) {
+            self.parent = parent
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text ?? ""
+        }
     }
 }
 
