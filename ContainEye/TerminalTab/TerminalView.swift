@@ -1908,6 +1908,7 @@ final class TerminalServerPickerViewController: UIViewController {
     private enum ItemKind: Hashable {
         case shortcut(shortcutID: String)
         case tmuxSession(credentialKey: String, sessionName: String)
+        case divider
     }
 
     private struct Item: Hashable {
@@ -1972,6 +1973,7 @@ final class TerminalServerPickerViewController: UIViewController {
         collectionView.showsHorizontalScrollIndicator = false
         collectionView.allowsSelection = true
         collectionView.register(TerminalServerCell.self, forCellWithReuseIdentifier: TerminalServerCell.reuseID)
+        collectionView.register(TerminalSectionDividerCell.self, forCellWithReuseIdentifier: TerminalSectionDividerCell.reuseID)
         collectionView.delegate = self
         view.addSubview(collectionView)
 
@@ -2028,7 +2030,7 @@ final class TerminalServerPickerViewController: UIViewController {
                 self.items = shortcutItems
                 var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
                 snapshot.appendSections([.main])
-                snapshot.appendItems(self.items, toSection: .main)
+                snapshot.appendItems(self.buildOrderedItems(sessions: [], shortcuts: self.items), toSection: .main)
                 self.dataSource.apply(snapshot, animatingDifferences: true)
                 self.emptyStateLabel.isHidden = !self.items.isEmpty
             }
@@ -2062,7 +2064,7 @@ final class TerminalServerPickerViewController: UIViewController {
                         return $0.host.localizedCaseInsensitiveCompare($1.host) == .orderedAscending
                     }
                     await MainActor.run {
-                        self.items = sortedSessions + shortcutItems
+                        self.items = self.buildOrderedItems(sessions: sortedSessions, shortcuts: shortcutItems)
                         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
                         snapshot.appendSections([.main])
                         snapshot.appendItems(self.items, toSection: .main)
@@ -2076,6 +2078,15 @@ final class TerminalServerPickerViewController: UIViewController {
 
     private func makeDataSource() -> UICollectionViewDiffableDataSource<Section, Item> {
         UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
+            if case .divider = item.kind {
+                guard let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: TerminalSectionDividerCell.reuseID,
+                    for: indexPath
+                ) as? TerminalSectionDividerCell else {
+                    return UICollectionViewCell()
+                }
+                return cell
+            }
             guard let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: TerminalServerCell.reuseID,
                 for: indexPath
@@ -2091,6 +2102,19 @@ final class TerminalServerPickerViewController: UIViewController {
             )
             return cell
         }
+    }
+
+    private func buildOrderedItems(sessions: [Item], shortcuts: [Item]) -> [Item] {
+        guard !sessions.isEmpty, !shortcuts.isEmpty else { return sessions + shortcuts }
+        let divider = Item(
+            kind: .divider,
+            credentialKey: "",
+            title: "",
+            host: "",
+            detailText: "",
+            colorHex: "#000000"
+        )
+        return sessions + [divider] + shortcuts
     }
 
     private static func makeLayout() -> UICollectionViewCompositionalLayout {
@@ -2206,6 +2230,8 @@ extension TerminalServerPickerViewController: UICollectionViewDelegate {
         guard indexPath.item < items.count else { return }
         let item = items[indexPath.item]
         switch item.kind {
+        case .divider:
+            return
         case let .shortcut(shortcutID):
             Task {
                 let shortcuts = await TerminalLaunchShortcut.all(in: SharedDatabase.db)
@@ -2238,6 +2264,8 @@ extension TerminalServerPickerViewController: UICollectionViewDelegate {
             guard let self else { return UIMenu() }
 
             switch item.kind {
+            case .divider:
+                return UIMenu()
             case let .shortcut(shortcutID):
                 let edit = UIAction(title: "Edit Shortcut", image: UIImage(systemName: "pencil")) { _ in
                     self.presentShortcutEditor(for: shortcutID)
@@ -2446,6 +2474,16 @@ fi
             }
             return XTermSessionController.normalizeTmuxSessionName(itemSessionName) == sessionName
         }
+
+        let sessions = items.filter {
+            if case .tmuxSession = $0.kind { return true }
+            return false
+        }
+        let shortcuts = items.filter {
+            if case .shortcut = $0.kind { return true }
+            return false
+        }
+        items = buildOrderedItems(sessions: sessions, shortcuts: shortcuts)
 
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         snapshot.appendSections([.main])
@@ -3522,6 +3560,40 @@ final class TerminalServerCell: UICollectionViewCell {
         backgroundCard.backgroundColor = accent.withAlphaComponent(0.20)
         backgroundCard.layer.borderWidth = UIFloat(1)
         backgroundCard.layer.borderColor = accent.withAlphaComponent(0.45).cgColor
+    }
+}
+
+@MainActor
+final class TerminalSectionDividerCell: UICollectionViewCell {
+    static let reuseID = "TerminalSectionDividerCell"
+
+    private let lineView = UIView()
+    private let label = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        contentView.backgroundColor = .clear
+        lineView.backgroundColor = UIColor.separator.withAlphaComponent(0.45)
+        contentView.addSubview(lineView)
+
+        label.text = "Shortcuts"
+        label.font = UIFont.systemFont(ofSize: UIFloat(11), weight: .semibold)
+        label.textColor = UIColor.secondaryLabel
+        label.textAlignment = .center
+        contentView.addSubview(label)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let y = bounds.midY
+        lineView.frame = CGRect(x: UIFloat(10), y: y, width: max(UIFloat(0), bounds.width - UIFloat(20)), height: 1)
+        label.frame = CGRect(x: UIFloat(12), y: y - UIFloat(10), width: max(UIFloat(0), bounds.width - UIFloat(24)), height: UIFloat(20))
+        label.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.78)
     }
 }
 
