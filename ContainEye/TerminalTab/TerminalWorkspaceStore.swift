@@ -442,6 +442,25 @@ final class TerminalWorkspaceStore {
         }
     }
 
+    func renameTabsBoundToTmuxSession(credentialKey: String, oldSessionName: String, newSessionName: String) {
+        let normalizedOld = XTermSessionController.normalizeTmuxSessionName(oldSessionName)
+        let normalizedNew = XTermSessionController.normalizeTmuxSessionName(newSessionName)
+        guard !normalizedOld.isEmpty, !normalizedNew.isEmpty, normalizedOld != normalizedNew else { return }
+
+        var changed = false
+        for tabID in tabs.keys {
+            guard var tab = tabs[tabID], tab.credentialKey == credentialKey else { continue }
+            let explicit = XTermSessionController.normalizeTmuxSessionName(tab.tmuxSessionName ?? "")
+            guard !explicit.isEmpty, explicit == normalizedOld else { continue }
+            tab.tmuxSessionName = normalizedNew
+            tabs[tabID] = tab
+            changed = true
+        }
+
+        guard changed else { return }
+        persistWorkspace()
+    }
+
     private func migrateLegacyTabTmuxBinding(_ tab: TerminalTabState) -> TerminalTabState {
         guard let raw = tab.tmuxSessionName else { return tab }
         let normalized = XTermSessionController.normalizeTmuxSessionName(raw)

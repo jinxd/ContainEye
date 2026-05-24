@@ -1300,7 +1300,7 @@ protocol TerminalPaneViewControllerDelegate: AnyObject {
 }
 
 @MainActor
-final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDelegate {
+final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDelegate, UIContextMenuInteractionDelegate {
     weak var delegate: TerminalPaneViewControllerDelegate?
 
     private let paneID: UUID
@@ -1316,7 +1316,8 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
     private let activeTitleLabel = UILabel()
     private let cwdLabel = UILabel()
     private let warningLabel = UILabel()
-    private let closeButton = UIButton(type: .system)
+    private let backButton = UIButton(type: .system)
+    private let addButton = UIButton(type: .system)
 
     private(set) var activeHostView: XTermWebHostView?
     private var serverPickerController: TerminalServerPickerViewController?
@@ -1405,10 +1406,25 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         warningLabel.isHidden = true
         headerView.addSubview(warningLabel)
 
-        closeButton.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
-        closeButton.tintColor = UIColor.secondaryLabel
-        closeButton.addTarget(self, action: #selector(didTapClose), for: .touchUpInside)
-        compactTabBarView.contentView.addSubview(closeButton)
+        backButton.setImage(UIImage(systemName: "chevron.left"), for: .normal)
+        backButton.tintColor = UIColor.secondaryLabel
+        backButton.addTarget(self, action: #selector(didTapBack), for: .touchUpInside)
+        compactTabBarView.contentView.addSubview(backButton)
+
+        addButton.setImage(UIImage(systemName: "plus"), for: .normal)
+        addButton.tintColor = UIColor.secondaryLabel
+        addButton.addTarget(self, action: #selector(didTapAddFromPane), for: .touchUpInside)
+        compactTabBarView.contentView.addSubview(addButton)
+
+        let swipeLeft = UISwipeGestureRecognizer(target: self, action: #selector(didSwipeCompactBar(_:)))
+        swipeLeft.direction = .left
+        compactTabBarView.addGestureRecognizer(swipeLeft)
+        let swipeRight = UISwipeGestureRecognizer(target: self, action: #selector(didSwipeCompactBar(_:)))
+        swipeRight.direction = .right
+        compactTabBarView.addGestureRecognizer(swipeRight)
+
+        let contextInteraction = UIContextMenuInteraction(delegate: self)
+        compactTabBarView.addInteraction(contextInteraction)
     }
 
     // MARK: Refresh
@@ -1429,13 +1445,13 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
             tabTitleLabel.text = "Choose a server"
             cwdLabel.text = ""
             warningLabel.isHidden = true
-            closeButton.isHidden = true
+            backButton.isHidden = true
             showServerPicker()
             view.setNeedsLayout()
             return
         }
 
-        closeButton.isHidden = false
+        backButton.isHidden = false
         tabTitleLabel.text = activeTab.title
         cwdLabel.text = controller.cwd
         if controller.shellIntegrationStatus == .warning, let warning = controller.lastShellIntegrationWarning {
@@ -1494,7 +1510,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
             right: UIFloat(8)
         ))
 
-        let headerSplit = inner.split(at: TerminalUIMetrics.paneHeaderHeight, from: .minYEdge)
+        let headerSplit = inner.split(at: TerminalUIMetrics.paneHeaderHeight, from: .maxYEdge)
         headerView.frame = headerSplit.slice
         inner = headerSplit.remainder
 
@@ -1506,47 +1522,38 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
     }
 
     private func layoutHeaderViews(in bounds: CGRect) {
-        let chromeTrailingInset = warningLabel.isHidden ? UIFloat(96) : UIFloat(182)
-        let chromeWidth = max(UIFloat(160), bounds.width - chromeTrailingInset)
+        let chromeWidth = bounds.width
         compactTabBarView.frame = CGRect(
             x: 0,
             y: (bounds.height - UIFloat(28)) / 2,
-            width: min(chromeWidth, bounds.width),
+            width: chromeWidth,
             height: UIFloat(28)
         )
 
         let chromeBounds = compactTabBarView.bounds.insetBy(dx: UIFloat(8), dy: UIFloat(4))
-        let closeSide = closeButton.isHidden ? UIFloat(0) : UIFloat(18)
-        let leadingWidth = UIFloat(46)
-        activeTitleLabel.frame = CGRect(
+        let sideWidth = UIFloat(18)
+        backButton.frame = CGRect(
             x: chromeBounds.minX,
             y: chromeBounds.minY,
-            width: leadingWidth,
+            width: sideWidth,
             height: chromeBounds.height
         )
-        tabTitleLabel.frame = CGRect(
-            x: activeTitleLabel.frame.maxX + UIFloat(6),
+        addButton.frame = CGRect(
+            x: chromeBounds.maxX - sideWidth,
             y: chromeBounds.minY,
-            width: max(UIFloat(0), chromeBounds.width - leadingWidth - closeSide - UIFloat(12)),
+            width: sideWidth,
             height: chromeBounds.height
         )
-        closeButton.frame = CGRect(
-            x: compactTabBarView.bounds.maxX - UIFloat(24),
-            y: (compactTabBarView.bounds.height - UIFloat(18)) / 2,
-            width: UIFloat(18),
-            height: UIFloat(18)
+        activeTitleLabel.frame = .zero
+        tabTitleLabel.textAlignment = .center
+        tabTitleLabel.frame = CGRect(
+            x: backButton.frame.maxX + UIFloat(8),
+            y: chromeBounds.minY,
+            width: max(UIFloat(0), addButton.frame.minX - backButton.frame.maxX - UIFloat(16)),
+            height: chromeBounds.height
         )
-
-        let trailingAreaX = compactTabBarView.frame.maxX + UIFloat(8)
-        let trailingWidth = max(UIFloat(0), bounds.maxX - trailingAreaX)
-        if warningLabel.isHidden {
-            cwdLabel.frame = CGRect(x: trailingAreaX, y: 0, width: trailingWidth, height: bounds.height)
-            warningLabel.frame = .zero
-        } else {
-            let warningWidth = min(UIFloat(100), trailingWidth * 0.54)
-            warningLabel.frame = CGRect(x: trailingAreaX + trailingWidth - warningWidth, y: 0, width: warningWidth, height: bounds.height)
-            cwdLabel.frame = CGRect(x: trailingAreaX, y: 0, width: max(UIFloat(0), trailingWidth - warningWidth - UIFloat(6)), height: bounds.height)
-        }
+        cwdLabel.frame = .zero
+        warningLabel.frame = .zero
     }
 
     private func updateCompactTabChrome(isFocused: Bool, activeTab: TerminalTabState?) {
@@ -1739,9 +1746,76 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
     }
 
     @objc
-    private func didTapClose() {
+    private func didTapBack() {
         guard let active = workspace.activeTab(in: paneID) else { return }
         workspace.closeTab(tabID: active.id)
+    }
+
+    @objc
+    private func didTapAddFromPane() {
+        workspace.focusOrCreateEmptyPane()
+    }
+
+    @objc
+    private func didSwipeCompactBar(_ recognizer: UISwipeGestureRecognizer) {
+        let orderedPaneIDs = workspace.panes.map(\.id)
+        guard orderedPaneIDs.count > 1 else { return }
+        guard let focused = workspace.focusedPaneID,
+              let currentIndex = orderedPaneIDs.firstIndex(of: focused) else {
+            workspace.focusPane(paneID: orderedPaneIDs[0])
+            return
+        }
+
+        let nextIndex: Int
+        if recognizer.direction == .left {
+            guard currentIndex < orderedPaneIDs.count - 1 else { return }
+            nextIndex = currentIndex + 1
+        } else if recognizer.direction == .right {
+            guard currentIndex > 0 else { return }
+            nextIndex = currentIndex - 1
+        } else {
+            return
+        }
+        workspace.focusPane(paneID: orderedPaneIDs[nextIndex])
+    }
+
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        configurationForMenuAtLocation location: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+            guard let self else { return UIMenu() }
+            var actions: [UIAction] = []
+
+            actions.append(UIAction(title: "View All Tabs", image: UIImage(systemName: "square.grid.2x2")) { _ in
+                self.presentAllTabs()
+            })
+            actions.append(UIAction(title: "New Tab", image: UIImage(systemName: "plus")) { _ in
+                self.workspace.focusOrCreateEmptyPane()
+            })
+            actions.append(UIAction(title: "Choose Server", image: UIImage(systemName: "chevron.left")) { _ in
+                self.didTapBack()
+            })
+            if self.workspace.activeTab(in: self.paneID) != nil {
+                actions.append(UIAction(title: "Close Tab", image: UIImage(systemName: "xmark"), attributes: .destructive) { _ in
+                    self.didTapBack()
+                })
+            }
+            return UIMenu(children: actions)
+        }
+    }
+
+    private func presentAllTabs() {
+        let overview = TerminalTabOverviewViewController(workspace: workspace)
+        overview.onSelectPane = { [weak self] paneID in
+            self?.workspace.focusPane(paneID: paneID)
+        }
+        let nav = UINavigationController(rootViewController: overview)
+        nav.modalPresentationStyle = .pageSheet
+        if let sheet = nav.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+        }
+        present(nav, animated: true)
     }
 
     @objc
@@ -2174,6 +2248,15 @@ extension TerminalServerPickerViewController: UICollectionViewDelegate {
                 return UIMenu(children: [edit, delete])
 
             case let .tmuxSession(credentialKey, sessionName):
+                let rename = UIAction(
+                    title: "Rename Session",
+                    image: UIImage(systemName: "pencil")
+                ) { _ in
+                    self.promptRenameTmuxSession(
+                        credentialKey: credentialKey,
+                        sessionName: sessionName
+                    )
+                }
                 let close = UIAction(
                     title: "Close Session",
                     image: UIImage(systemName: "xmark.circle"),
@@ -2184,7 +2267,7 @@ extension TerminalServerPickerViewController: UICollectionViewDelegate {
                         sessionName: sessionName
                     )
                 }
-                return UIMenu(children: [close])
+                return UIMenu(children: [rename, close])
             }
         }
     }
@@ -2239,6 +2322,74 @@ extension TerminalServerPickerViewController: UICollectionViewDelegate {
             self?.closeTmuxSession(credentialKey: credentialKey, sessionName: sessionName)
         }))
         present(alert, animated: true)
+    }
+
+    private func promptRenameTmuxSession(credentialKey: String, sessionName: String) {
+        let alert = UIAlertController(
+            title: "Rename tmux session",
+            message: "Current name: \(sessionName)",
+            preferredStyle: .alert
+        )
+        alert.addTextField { field in
+            field.text = sessionName
+            field.clearButtonMode = .whileEditing
+            field.autocapitalizationType = .none
+            field.autocorrectionType = .no
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Rename", style: .default, handler: { [weak self, weak alert] _ in
+            guard let self,
+                  let raw = alert?.textFields?.first?.text
+            else { return }
+            let newName = XTermSessionController.normalizeTmuxSessionName(raw)
+            guard !newName.isEmpty else { return }
+            self.renameTmuxSession(
+                credentialKey: credentialKey,
+                oldSessionName: sessionName,
+                newSessionName: newName
+            )
+        }))
+        present(alert, animated: true)
+    }
+
+    private func renameTmuxSession(credentialKey: String, oldSessionName: String, newSessionName: String) {
+        guard let credential = keychain().getCredential(for: credentialKey) else { return }
+        let oldNormalized = XTermSessionController.normalizeTmuxSessionName(oldSessionName)
+        let newNormalized = XTermSessionController.normalizeTmuxSessionName(newSessionName)
+        guard !oldNormalized.isEmpty, !newNormalized.isEmpty else { return }
+        guard oldNormalized != newNormalized else { return }
+
+        let oldEscaped = oldNormalized.replacingOccurrences(of: "'", with: "'\"'\"'")
+        let newEscaped = newNormalized.replacingOccurrences(of: "'", with: "'\"'\"'")
+        let command = """
+if ! command -v tmux >/dev/null 2>&1; then
+  echo "__CE_TMUX_ERROR__: tmux is not installed"
+elif tmux has-session -t '\(oldEscaped)' 2>/dev/null; then
+  if tmux rename-session -t '\(oldEscaped)' '\(newEscaped)' 2>/dev/null; then
+    echo "__CE_TMUX_OK__"
+  else
+    echo "__CE_TMUX_ERROR__: failed to rename session"
+  fi
+else
+  echo "__CE_TMUX_ERROR__: session not found"
+fi
+"""
+
+        Task {
+            let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
+            await MainActor.run {
+                if output.contains("__CE_TMUX_OK__") {
+                    TerminalWorkspaceStore.shared.renameTabsBoundToTmuxSession(
+                        credentialKey: credentialKey,
+                        oldSessionName: oldNormalized,
+                        newSessionName: newNormalized
+                    )
+                    self.reloadCredentials()
+                } else {
+                    self.showTmuxCloseError(output: output, sessionName: oldNormalized)
+                }
+            }
+        }
     }
 
     private func closeTmuxSession(credentialKey: String, sessionName: String) {
@@ -2315,6 +2466,126 @@ fi
         )
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
+    }
+}
+
+@MainActor
+final class TerminalTabOverviewViewController: UIViewController {
+    struct Item: Hashable {
+        let paneID: UUID
+        let title: String
+        let subtitle: String
+    }
+
+    var onSelectPane: ((UUID) -> Void)?
+
+    private let workspace: TerminalWorkspaceStore
+    private var items: [Item] = []
+
+    private enum Section: Int, CaseIterable {
+        case main
+    }
+
+    private let collectionView: UICollectionView
+    private lazy var dataSource = makeDataSource()
+
+    init(workspace: TerminalWorkspaceStore) {
+        self.workspace = workspace
+        let layout = UICollectionViewCompositionalLayout { _, environment -> NSCollectionLayoutSection? in
+            let width = environment.container.effectiveContentSize.width
+            let sideInset = max(UIFloat(2), min(UIFloat(8), width * 0.03))
+
+            let itemSize = NSCollectionLayoutSize(
+                widthDimension: .fractionalWidth(0.5),
+                heightDimension: .fractionalHeight(1)
+            )
+            let item = NSCollectionLayoutItem(layoutSize: itemSize)
+            item.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: UIFloat(3), bottom: 0, trailing: UIFloat(3))
+
+            let groupSize = NSCollectionLayoutSize(
+                widthDimension: .fractionalWidth(1),
+                heightDimension: .absolute(UIFloat(98))
+            )
+            let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item, item])
+
+            let section = NSCollectionLayoutSection(group: group)
+            section.interGroupSpacing = UIFloat(8)
+            section.contentInsets = NSDirectionalEdgeInsets(
+                top: TerminalUIMetrics.sectionTopInset,
+                leading: sideInset,
+                bottom: TerminalUIMetrics.sectionBottomInset,
+                trailing: sideInset
+            )
+            return section
+        }
+        collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+        navigationItem.title = "All Tabs"
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .done,
+            target: self,
+            action: #selector(didTapDone)
+        )
+        collectionView.backgroundColor = .clear
+        collectionView.delegate = self
+        collectionView.register(TerminalServerCell.self, forCellWithReuseIdentifier: TerminalServerCell.reuseID)
+        view.addSubview(collectionView)
+        reload()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        collectionView.frame = view.bounds
+    }
+
+    private func makeDataSource() -> UICollectionViewDiffableDataSource<Section, Item> {
+        UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
+            guard let cell = collectionView.dequeueReusableCell(
+                withReuseIdentifier: TerminalServerCell.reuseID,
+                for: indexPath
+            ) as? TerminalServerCell else {
+                return UICollectionViewCell()
+            }
+            cell.apply(title: item.title, host: item.subtitle, detailText: "Terminal tab", colorHex: "#3B82F6")
+            return cell
+        }
+    }
+
+    private func reload() {
+        items = workspace.panes.enumerated().map { index, pane in
+            if let tab = workspace.activeTab(in: pane.id) {
+                return Item(paneID: pane.id, title: "Tab \(index + 1): \(tab.title)", subtitle: tab.credentialKey)
+            }
+            return Item(paneID: pane.id, title: "Tab \(index + 1): Choose a server", subtitle: "Empty")
+        }
+        var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
+        snapshot.appendSections([.main])
+        snapshot.appendItems(items, toSection: .main)
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    @objc
+    private func didTapDone() {
+        dismiss(animated: true)
+    }
+}
+
+extension TerminalTabOverviewViewController: UICollectionViewDelegate {
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        guard indexPath.item < items.count else { return }
+        let paneID = items[indexPath.item].paneID
+        onSelectPane?(paneID)
+        dismiss(animated: true)
     }
 }
 

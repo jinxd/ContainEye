@@ -112,7 +112,11 @@ final class XTermSessionController: Identifiable {
         self.title = title
         if let tmuxSessionName {
             let normalized = Self.normalizeTmuxSessionName(tmuxSessionName)
-            self.tmuxSessionName = normalized.isEmpty ? nil : normalized
+            if normalized.isEmpty || normalized.hasPrefix(Self.autoTmuxSessionPrefix) {
+                self.tmuxSessionName = nil
+            } else {
+                self.tmuxSessionName = normalized
+            }
         } else {
             self.tmuxSessionName = nil
         }
