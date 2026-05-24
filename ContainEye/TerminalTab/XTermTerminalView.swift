@@ -40,7 +40,10 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
         webView.backgroundColor = .clear
         webView.isOpaque = false
         webView.scrollView.backgroundColor = .clear
-        webView.scrollView.isScrollEnabled = false
+        // Keep WKWebView scrolling enabled so xterm viewport receives touch scroll gestures.
+        webView.scrollView.isScrollEnabled = true
+        webView.scrollView.showsVerticalScrollIndicator = false
+        webView.scrollView.showsHorizontalScrollIndicator = false
         webView.scrollView.bounces = false
         webView.uiDelegate = self
         disableInputAssistantBar()
