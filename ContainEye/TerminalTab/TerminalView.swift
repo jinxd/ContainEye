@@ -2674,6 +2674,8 @@ struct TerminalShortcutEditorScreen: View {
     @State private var name: String
     @State private var startupScript: String
     @State private var color: Color
+    @State private var pendingSaveAfterQuoteAlert = false
+    @State private var showSmartQuoteAlert = false
     private let settingsStore = TerminalSettingsStore.shared
 
     init(existingShortcut: TerminalLaunchShortcut?, onSaved: (() -> Void)?, onRequestClose: (() -> Void)?) {
@@ -2763,6 +2765,21 @@ struct TerminalShortcutEditorScreen: View {
                 .disabled(selectedCredential == nil)
             }
         }
+        .alert("Convert Smart Quotes?", isPresented: $showSmartQuoteAlert) {
+            Button("Convert & Save") {
+                name = Self.replacingSmartQuotes(in: name)
+                startupScript = Self.replacingSmartQuotes(in: startupScript)
+                pendingSaveAfterQuoteAlert = true
+                save()
+            }
+            Button("Save Anyway") {
+                pendingSaveAfterQuoteAlert = true
+                save()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Detected smart quotes (\u{201C} \u{201D}). These often break shell commands.")
+        }
     }
 
     private var selectedCredential: Credential? {
@@ -2771,6 +2788,13 @@ struct TerminalShortcutEditorScreen: View {
     }
 
     private func save() {
+        if !pendingSaveAfterQuoteAlert,
+           Self.containsSmartQuotes(name) || Self.containsSmartQuotes(startupScript) {
+            showSmartQuoteAlert = true
+            return
+        }
+        pendingSaveAfterQuoteAlert = false
+
         guard let credential = selectedCredential else { return }
         let resolvedTitle = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? credential.label : name.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedScript = startupScript.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2796,6 +2820,16 @@ struct TerminalShortcutEditorScreen: View {
                 }
             }
         }
+    }
+
+    private static func containsSmartQuotes(_ text: String) -> Bool {
+        text.contains("\u{201C}") || text.contains("\u{201D}")
+    }
+
+    private static func replacingSmartQuotes(in text: String) -> String {
+        text
+            .replacingOccurrences(of: "\u{201C}", with: "\"")
+            .replacingOccurrences(of: "\u{201D}", with: "\"")
     }
 }
 
