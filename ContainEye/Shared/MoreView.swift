@@ -674,17 +674,21 @@ struct AgenticView: View {
                 )
             }
 
-            let parsedFallbackCalls = llmResponse.toolCalls.isEmpty ? (AgenticToolCall.parseAll(from: cleaned) ?? []) : []
-            let effectiveToolCalls = llmResponse.toolCalls.isEmpty ? parsedFallbackCalls : llmResponse.toolCalls
-
-            if !effectiveToolCalls.isEmpty {
-                let toolCalls = effectiveToolCalls
+            if !llmResponse.toolCalls.isEmpty {
+                let toolCalls = llmResponse.toolCalls
                 AgenticDebugLogger.log("parse=tool_calls count=\(toolCalls.count)")
                 let toolLabel = toolCalls.map(\.tool).joined(separator: ", ")
                 let toolBanner = toolCalls.count > 1 ? "Using tools: \(toolLabel)" : "Using tool: \(toolLabel)"
                 await store.updateMessage(chatID: chatID, messageID: streamingMessageID, newContent: toolBanner)
                 for (index, callToExecute) in toolCalls.enumerated() {
                     AgenticDebugLogger.log("tool[\(index)] tool=\(callToExecute.tool) args=\(callToExecute.arguments)")
+                    if callToExecute.tool == "finalize_response" {
+                        let finalMessage = (callToExecute.arguments["message"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? cleaned
+                        let safeMessage = finalMessage.isEmpty ? "Done." : finalMessage
+                        await store.updateMessage(chatID: chatID, messageID: streamingMessageID, newContent: safeMessage)
+                        workingHistory.append(["role": "assistant", "content": safeMessage])
+                        return
+                    }
                     if callToExecute.tool == "run_command" {
                         let command = (callToExecute.arguments["command"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                         if commandRequiresApproval(command) {
@@ -723,23 +727,20 @@ struct AgenticView: View {
                 continue
             }
 
-            if !cleaned.isEmpty {
-                AgenticDebugLogger.log("parse=final_text")
-                await store.updateMessage(chatID: chatID, messageID: streamingMessageID, newContent: cleaned)
-                workingHistory.append(["role": "assistant", "content": cleaned])
-                let normalized = cleaned.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                if normalized == "something went wrong." || normalized == "something went wrong" {
-                    await presentFailureDebugAlert(
-                        chatID: chatID,
-                        reason: "Model returned failure response",
-                        retryHistory: workingHistory
-                    )
-                }
-            } else {
-                AgenticDebugLogger.log("parse=empty_final")
-                await store.updateMessage(chatID: chatID, messageID: streamingMessageID, newContent: "No response text returned.")
+            AgenticDebugLogger.log("parse=no_tool_calls_waiting_for_finalize")
+            await store.updateMessage(
+                chatID: chatID,
+                messageID: streamingMessageID,
+                newContent: "Waiting for finalize_response tool call..."
+            )
+            workingHistory.append(["role": "user", "content": """
+            {
+              "type":"tool_result",
+              "tool":"finalize_response",
+              "payload":{"error":"No tool call returned. You must call finalize_response with {\"message\":\"...\"} to finish this turn."}
             }
-            return
+            """])
+            continue
         }
 
         let reason = "Stopped after too many tool steps. Please refine your request."
@@ -1571,23 +1572,11 @@ enum AgenticLLMClient {
 You are ContainEye Agent, an autonomous operations assistant for server management.
 You can use tools to inspect servers, inspect indexed file paths, manage test definitions, and edit memory.
 
-Always return either:
-1) A tool call JSON object:
-{
-  "type":"tool",
-  "tool":"<tool_name>",
-  "arguments": { ... }
-}
-You may also return an array of tool call objects when multiple independent steps are needed:
-[
-  {"type":"tool","tool":"<tool_name>","arguments":{...}},
-  {"type":"tool","tool":"<tool_name>","arguments":{...}}
-]
-2) A final response JSON object:
-{
-  "type":"final",
-  "content":"<markdown response for the user>"
-}
+Important:
+- Use native tool calling only.
+- When you need data or actions, emit tool calls through the API tools interface.
+- To end a turn, you MUST call `finalize_response` with a final user-facing message.
+- Do not end a turn with plain assistant text; always use `finalize_response`.
 
 Allowed tools:
 - list_servers {}
@@ -1890,7 +1879,10 @@ User memory:
             toolSpec("update_memory", description: "Update durable memory notes", properties: [
                 "content": ["type": "string"],
                 "mode": ["type": "string", "enum": ["append", "replace"]]
-            ], required: ["content"])
+            ], required: ["content"]),
+            toolSpec("finalize_response", description: "Finish this turn with a user-facing message", properties: [
+                "message": ["type": "string"]
+            ], required: ["message"])
         ]
     }
 
