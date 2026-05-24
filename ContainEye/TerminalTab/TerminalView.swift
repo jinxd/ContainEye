@@ -1830,6 +1830,7 @@ final class TerminalServerPickerViewController: UIViewController {
 
     private struct TmuxSessionSummary: Hashable {
         let sessionName: String
+        let displayName: String
         let windowsCount: Int?
         let isAttached: Bool?
     }
@@ -1963,7 +1964,7 @@ final class TerminalServerPickerViewController: UIViewController {
                             return Item(
                                 kind: .tmuxSession(credentialKey: credential.key, sessionName: session.sessionName),
                                 credentialKey: credential.key,
-                                title: session.sessionName,
+                                title: session.displayName,
                                 host: credential.host,
                                 detailText: detail,
                                 colorHex: "#10B981"
@@ -2057,11 +2058,13 @@ if command -v tmux >/dev/null 2>&1; then tmux list-sessions -F '#{session_name}|
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
+        var seenSessionNames = Set<String>()
         return lines.compactMap { line in
             let components = line.components(separatedBy: "|")
             guard let first = components.first else { return nil }
             let session = XTermSessionController.normalizeTmuxSessionName(first)
             guard !session.isEmpty else { return nil }
+            guard seenSessionNames.insert(session).inserted else { return nil }
 
             let windowsCount: Int?
             if components.count > 1 {
@@ -2080,6 +2083,7 @@ if command -v tmux >/dev/null 2>&1; then tmux list-sessions -F '#{session_name}|
 
             return TmuxSessionSummary(
                 sessionName: session,
+                displayName: session.count > 96 ? String(session.prefix(96)) : session,
                 windowsCount: windowsCount,
                 isAttached: isAttached
             )
