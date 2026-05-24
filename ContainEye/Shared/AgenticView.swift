@@ -18,6 +18,7 @@ struct AgenticView: View {
     @Environment(\.agenticBridge) private var bridge
     @StateObject private var model = AgenticViewModel()
     @State private var showApprovalSettings = false
+    @State private var tipIndex = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,6 +27,20 @@ struct AgenticView: View {
                     .listRowInsets(.init(top: 8, leading: 12, bottom: 8, trailing: 12))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
+            }
+            .safeAreaInset(edge: .top) {
+                HStack(spacing: 6) {
+                    Image(systemName: "lightbulb")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(rotatingTips[tipIndex])
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial)
             }
             .listStyle(.plain)
 #if os(iOS)
@@ -44,6 +59,12 @@ struct AgenticView: View {
         }
         .onChange(of: bridge.pendingContext?.id) {
             Task { await model.consumePendingContextIfNeeded(bridge: bridge) }
+        }
+        .task {
+            while true {
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                tipIndex = (tipIndex + 1) % rotatingTips.count
+            }
         }
         .confirmationDialog("Allow command execution?", isPresented: $model.showCommandApprovalAlert, titleVisibility: .visible, presenting: model.pendingApproval) { pending in
             Button("Allow Once") {
@@ -97,6 +118,18 @@ struct AgenticView: View {
         }
     }
 
+    private var rotatingTips: [String] {
+        [
+            "Type /help to list available commands.",
+            "Type /clear to reset the current chat session.",
+            "Type /compact to trim old chat context.",
+            "Type /permissions to view command approval rules.",
+            "Type /allow-all to allow all run_command calls.",
+            "Type /allow-prefix docker to trust docker commands.",
+            "Type /reset-permissions to clear saved approvals.",
+        ]
+    }
+
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
             if model.isRunning {
@@ -117,6 +150,27 @@ struct AgenticView: View {
                     Spacer()
                     Button("Remove") { model.clearComposerContext() }
                         .font(.caption)
+                }
+            }
+
+            if model.input.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/"),
+               !model.commandSuggestions.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(model.commandSuggestions, id: \.self) { suggestion in
+                            Button {
+                                model.applySuggestion(suggestion)
+                            } label: {
+                                Text(suggestion)
+                                    .font(.caption.monospaced())
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(.secondary.opacity(0.15), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 2)
                 }
             }
 
@@ -267,6 +321,19 @@ final class AgenticViewModel: ObservableObject {
     private var waitingApprovalState: AgenticApprovalState?
     private let sessionStore = AgenticSessionStore()
     private var approvalPreferences = AgenticCommandApprovalPreferences.load()
+    private let slashCommands: [String] = [
+        "/help",
+        "/commands",
+        "/clear",
+        "/compact",
+        "/permissions",
+        "/allow-all",
+        "/disallow-all",
+        "/allow-prefix",
+        "/unallow-prefix",
+        "/reset-permissions",
+        "/reset-approvals",
+    ]
 
     func configure(database: Blackbird.Database?) async {
         self.database = database
@@ -282,6 +349,13 @@ final class AgenticViewModel: ObservableObject {
         return !typed.isEmpty || !context.isEmpty
     }
 
+    var commandSuggestions: [String] {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard trimmed.hasPrefix("/") else { return [] }
+        if trimmed == "/" { return Array(slashCommands.prefix(8)) }
+        return slashCommands.filter { $0.hasPrefix(trimmed) }.prefix(8).map { $0 }
+    }
+
     func startNewSession() {
         messages = []
         llmHistory = []
@@ -292,6 +366,10 @@ final class AgenticViewModel: ObservableObject {
 
     func clearComposerContext() {
         pendingComposerContext = nil
+    }
+
+    func applySuggestion(_ suggestion: String) {
+        input = suggestion + (suggestion == "/allow-prefix" || suggestion == "/unallow-prefix" ? " " : "")
     }
 
     func copyChatHistory() {
