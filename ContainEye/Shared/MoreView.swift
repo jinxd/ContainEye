@@ -1373,6 +1373,7 @@ final class AgenticChatStore {
     var chats: [AgenticChat] = []
     var selectedChatID: UUID?
     @ObservationIgnored private var contextSeededChatIDs: Set<UUID> = []
+    @ObservationIgnored private var pendingSaveTask: Task<Void, Never>?
 
     private var configured = false
 
@@ -1506,9 +1507,7 @@ final class AgenticChatStore {
         chat.messages[messageIndex].content = newContent
         chat.updatedAt = .now
         chats[chatIndex] = chat
-        chats.sort { $0.updatedAt > $1.updatedAt }
-        selectedChatID = chatID
-        save()
+        scheduleSave()
     }
 
     func llmHistory(for chatID: UUID) -> [[String: Any]] {
@@ -1560,6 +1559,22 @@ final class AgenticChatStore {
         let dir = base.appendingPathComponent("ContainEye", isDirectory: true)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("agentic_chats.json", isDirectory: false)
+    }
+
+    private func scheduleSave() {
+        pendingSaveTask?.cancel()
+        let payload = AgenticChatStorePayload(chats: chats, selectedChatID: selectedChatID)
+        guard let url = chatsFileURL else { return }
+        pendingSaveTask = Task.detached(priority: .utility) {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            do {
+                let data = try JSONEncoder().encode(payload)
+                try data.write(to: url, options: .atomic)
+            } catch {
+                print("Failed to persist agentic chats: \(error)")
+            }
+        }
     }
 }
 
