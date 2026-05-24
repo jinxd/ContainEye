@@ -4,6 +4,11 @@ enum ShellIntegrationBootstrap {
     static func script() -> String {
         #"""
 # ---- ContainEye OSC 4545 integration (session-scoped) ----
+if [ -n "${__CE_OSC4545_INSTALLED:-}" ]; then
+  :
+else
+  __CE_OSC4545_INSTALLED=1
+  export __CE_OSC4545_INSTALLED
 _ce_osc4545_encode() { printf "%s" "$1" | base64 | tr -d '\n'; }
 _ce_osc4545_cwd() { printf "\033]4545;SetCwd;%s\a" "$(_ce_osc4545_encode "$PWD")"; }
 _ce_osc4545_prompt_begins() { printf "\033]4545;ShellPromptBegins\a"; }
@@ -32,22 +37,16 @@ elif [ -n "$BASH_VERSION" ]; then
   fi
   trap '_ce_osc4545_preexec_invoke_exec' DEBUG
 fi
+fi
 # ---- end ContainEye OSC integration ----
 """#
     }
 
-    /// Part 1: sent immediately — disables PTY echo so the payload is never printed.
-    /// This line IS echoed once (one short line: "stty -echo"), which part 2 erases.
-    static func installPreamble() -> String {
-        "stty -echo 2>/dev/null\n"
-    }
-
-    /// Part 2: sent after 150 ms so stty has taken effect.
-    /// Runs silently (echo is off), installs shell integration, restores echo,
-    /// then moves up one line and erases it — removing the visible "stty -echo" line.
-    static func installPayload() -> String {
+    /// Single-pass bootstrap command.
+    /// Uses a base64 payload to avoid fragile shell escaping and keeps stdout/stderr quiet.
+    static func installCommand() -> String {
         let payload = Data(script().utf8).base64EncodedString()
-        return "__ce_s=$(printf '%s' \(payload) | base64 --decode 2>/dev/null || printf '%s' \(payload) | base64 -d 2>/dev/null || printf '%s' \(payload) | base64 -D 2>/dev/null); [ -n \"$__ce_s\" ] && eval \"$__ce_s\" >/dev/null 2>&1; unset __ce_s; stty echo 2>/dev/null; printf '\\033[A\\033[2K'\n"
+        return "__ce_shell_integration_payload=$(printf '%s' \(payload) | base64 --decode 2>/dev/null || printf '%s' \(payload) | base64 -d 2>/dev/null || printf '%s' \(payload) | base64 -D 2>/dev/null); [ -n \"$__ce_shell_integration_payload\" ] && eval \"$__ce_shell_integration_payload\" >/dev/null 2>&1; unset __ce_shell_integration_payload\n"
     }
 
 }

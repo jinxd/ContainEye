@@ -91,7 +91,7 @@ final class XTermSessionController: Identifiable {
         inputBuffer
     }
 
-    /// True until 1 s after the bootstrap payload has been written to the shell.
+    /// True until bootstrap payload has settled.
     /// Use this to delay startup commands without waiting for shell integration to respond.
     var isBootstrapPending: Bool {
         !bootstrapPayloadSettled
@@ -530,7 +530,7 @@ final class XTermSessionController: Identifiable {
             let line = String(bootstrapLinePending[..<nlIdx])
             bootstrapLinePending = String(bootstrapLinePending[bootstrapLinePending.index(after: nlIdx)...])
 
-            if line.contains("stty -echo") || line.contains("__ce_s=") {
+            if isBootstrapNoise(line) {
                 continue // drop this bootstrap line
             }
             result += line + "\n"
@@ -540,7 +540,7 @@ final class XTermSessionController: Identifiable {
         // in that case hold it; the rest of the line (and its \n) will arrive in the next chunk.
         if !bootstrapLinePending.isEmpty {
             let tail = bootstrapLinePending
-            if !tail.contains("stty -echo") && !tail.contains("__ce_s=") {
+            if !isBootstrapNoise(tail) {
                 result += tail
                 bootstrapLinePending = ""
             }
@@ -560,15 +560,20 @@ final class XTermSessionController: Identifiable {
         while let nlIdx = bootstrapLinePending.firstIndex(of: "\n") {
             let line = String(bootstrapLinePending[..<nlIdx])
             bootstrapLinePending = String(bootstrapLinePending[bootstrapLinePending.index(after: nlIdx)...])
-            if !line.contains("stty -echo") && !line.contains("__ce_s=") {
+            if !isBootstrapNoise(line) {
                 flushed += line + "\n"
             }
         }
-        if !bootstrapLinePending.isEmpty && !bootstrapLinePending.contains("stty -echo") && !bootstrapLinePending.contains("__ce_s=") {
+        if !bootstrapLinePending.isEmpty && !isBootstrapNoise(bootstrapLinePending) {
             flushed += bootstrapLinePending
         }
         bootstrapLinePending = ""
         if !flushed.isEmpty { host?.write(flushed) }
+    }
+
+    private func isBootstrapNoise(_ text: String) -> Bool {
+        text.contains("__ce_shell_integration_payload=")
+            || text.contains("__CE_OSC4545_INSTALLED")
     }
 
     private func flushBacklog() {
@@ -593,15 +598,12 @@ final class XTermSessionController: Identifiable {
         didSendShellBootstrap = true
         isFilteringBootstrap = true
         bootstrapLinePending = ""
-        stream?.write(ShellIntegrationBootstrap.installPreamble())
-        // Wait 150 ms for stty -echo to take effect, send the payload, then stop
-        // filtering 1 s later — enough time for any echo to arrive on the slowest link.
+        stream?.write(ShellIntegrationBootstrap.installCommand())
+        // Stop filtering shortly after the payload write.
         // cwdChanged (shell integration active) will stop the filter even sooner.
         Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(150))
+            try? await Task.sleep(for: .milliseconds(400))
             guard let self else { return }
-            self.stream?.write(ShellIntegrationBootstrap.installPayload())
-            try? await Task.sleep(for: .seconds(1))
             await MainActor.run { self.stopBootstrapFilter() }
         }
     }
