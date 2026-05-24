@@ -1581,11 +1581,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
             self.workspace.focusPane(paneID: self.paneID)
             switch selection {
             case let .shortcut(shortcut):
-                let hasStartupScript = !shortcut.startupScript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                let useTmuxPersistence = self.settingsStore.state.session.persistenceMode == .tmuxPerTab
-                let tmuxSessionName = useTmuxPersistence
-                    ? TerminalServerPickerViewController.persistentTmuxSessionName(for: shortcut)
-                    : nil
+                let tmuxSessionName = TerminalServerPickerViewController.newTmuxSessionName(for: shortcut)
                 self.workspace.openTab(
                     credentialKey: shortcut.credentialKey,
                     preferredTitle: shortcut.title,
@@ -1594,7 +1590,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
                     shortcutColorHex: shortcut.colorHex,
                     tmuxSessionName: tmuxSessionName,
                     tmuxAttachOnly: false,
-                    disableAutoPersistentSession: hasStartupScript && !useTmuxPersistence
+                    disableAutoPersistentSession: true
                 )
                 self.launchStartupScriptIfNeeded(shortcut.startupScript, credentialKey: shortcut.credentialKey)
             case let .tmuxSession(target):
@@ -2103,10 +2099,11 @@ if command -v tmux >/dev/null 2>&1; then tmux list-sessions -F '#{session_name}|
         return parts.joined(separator: " • ")
     }
 
-    nonisolated static func persistentTmuxSessionName(for shortcut: TerminalLaunchShortcut) -> String {
+    nonisolated static func newTmuxSessionName(for shortcut: TerminalLaunchShortcut) -> String {
         let normalized = shortcut.id.lowercased().filter { $0.isLetter || $0.isNumber }
         let suffix = normalized.isEmpty ? "default" : normalized
-        return "containeye-shortcut-\(suffix)"
+        let unique = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        return "containeye-shortcut-\(suffix)-\(unique)"
     }
 
     @objc
