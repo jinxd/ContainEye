@@ -2024,7 +2024,16 @@ final class TerminalServerPickerViewController: UIViewController {
                 )
             }
 
-            let sessionItems = await withTaskGroup(of: [Item].self, returning: [Item].self) { group in
+            await MainActor.run {
+                self.items = shortcutItems
+                var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
+                snapshot.appendSections([.main])
+                snapshot.appendItems(self.items, toSection: .main)
+                self.dataSource.apply(snapshot, animatingDifferences: true)
+                self.emptyStateLabel.isHidden = !self.items.isEmpty
+            }
+
+            await withTaskGroup(of: [Item].self, returning: Void.self) { group in
                 for credential in credentials {
                     group.addTask {
                         let sessions = await Self.discoverTmuxSessions(for: credential)
@@ -2046,24 +2055,21 @@ final class TerminalServerPickerViewController: UIViewController {
                 var all: [Item] = []
                 for await partial in group {
                     all.append(contentsOf: partial)
-                }
-                return all.sorted {
-                    if $0.host == $1.host {
-                        return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+                    let sortedSessions = all.sorted {
+                        if $0.host == $1.host {
+                            return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+                        }
+                        return $0.host.localizedCaseInsensitiveCompare($1.host) == .orderedAscending
                     }
-                    return $0.host.localizedCaseInsensitiveCompare($1.host) == .orderedAscending
+                    await MainActor.run {
+                        self.items = sortedSessions + shortcutItems
+                        var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
+                        snapshot.appendSections([.main])
+                        snapshot.appendItems(self.items, toSection: .main)
+                        self.dataSource.apply(snapshot, animatingDifferences: true)
+                        self.emptyStateLabel.isHidden = !self.items.isEmpty
+                    }
                 }
-            }
-
-            let mappedItems = shortcutItems + sessionItems
-
-            await MainActor.run {
-                self.items = mappedItems
-                var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-                snapshot.appendSections([.main])
-                snapshot.appendItems(mappedItems, toSection: .main)
-                self.dataSource.apply(snapshot, animatingDifferences: true)
-                self.emptyStateLabel.isHidden = !mappedItems.isEmpty
             }
         }
     }
