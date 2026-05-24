@@ -208,20 +208,12 @@ final class XTermSessionController: Identifiable {
     }
 
     private func makeSessionStartupCommand() -> String? {
-        let configuredSessionName: String
-        let attachOnly: Bool
-
-        if let explicit = tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !explicit.isEmpty {
-            configuredSessionName = explicit
-            attachOnly = tmuxAttachOnly
-        } else {
-            guard !disableAutoPersistentSession else { return nil }
-            let mode = TerminalSettingsStore.shared.state.session.persistenceMode
-            guard mode == .tmuxPerTab else { return nil }
-            configuredSessionName = Self.persistentTmuxSessionName(forTabID: id)
-            attachOnly = false
+        guard let configuredSessionName = tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !configuredSessionName.isEmpty
+        else {
+            return nil
         }
+        let attachOnly = tmuxAttachOnly
 
         let normalizedSessionName = Self.normalizeTmuxSessionName(configuredSessionName)
         guard !normalizedSessionName.isEmpty else { return nil }
@@ -641,8 +633,7 @@ final class XTermSessionController: Identifiable {
         if let explicit = tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines), !explicit.isEmpty {
             return true
         }
-        guard !disableAutoPersistentSession else { return false }
-        return TerminalSettingsStore.shared.state.session.persistenceMode == .tmuxPerTab
+        return false
     }
 
     private func startShellIntegrationProbe() {

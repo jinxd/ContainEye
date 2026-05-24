@@ -342,10 +342,13 @@ final class TerminalWorkspaceStore {
 
         panes = snapshot.panes
         focusedPaneID = snapshot.focusedPaneID
-        tabs = Dictionary(uniqueKeysWithValues: snapshot.tabs.map { ($0.id, $0) })
+        let migratedTabs = snapshot.tabs.map { tab in
+            migrateLegacyTabTmuxBinding(tab)
+        }
+        tabs = Dictionary(uniqueKeysWithValues: migratedTabs.map { ($0.id, $0) })
 
         controllers = [:]
-        for tab in snapshot.tabs {
+        for tab in migratedTabs {
             let controller = XTermSessionController(
                 id: tab.id,
                 credentialKey: tab.credentialKey,
@@ -430,18 +433,26 @@ final class TerminalWorkspaceStore {
                     return tab.id
                 }
             }
-            guard normalizedTarget.hasPrefix(XTermSessionController.autoTmuxSessionPrefix),
-                  !tab.disableAutoPersistentSession,
-                  XTermSessionController.persistentTmuxSessionName(forTabID: tab.id) == normalizedTarget
-            else {
-                return nil
-            }
-            return tab.id
+            return nil
         }
 
         guard !targetTabIDs.isEmpty else { return }
         for tabID in targetTabIDs {
             closeTab(tabID: tabID)
         }
+    }
+
+    private func migrateLegacyTabTmuxBinding(_ tab: TerminalTabState) -> TerminalTabState {
+        guard let raw = tab.tmuxSessionName else { return tab }
+        let normalized = XTermSessionController.normalizeTmuxSessionName(raw)
+        guard normalized.hasPrefix(XTermSessionController.autoTmuxSessionPrefix) else {
+            return tab
+        }
+
+        var migrated = tab
+        migrated.tmuxSessionName = nil
+        migrated.tmuxAttachOnly = false
+        migrated.disableAutoPersistentSession = true
+        return migrated
     }
 }
