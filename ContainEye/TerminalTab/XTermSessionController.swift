@@ -85,7 +85,7 @@ final class XTermSessionController: Identifiable {
     private static let autoReloadCooldown: TimeInterval = 2
     private static let autoReloadWindow: TimeInterval = 15
     private static let maxAutoReloadAttemptsPerWindow = 3
-    static let autoTmuxSessionPrefix = "containeye-tab-"
+    nonisolated static let autoTmuxSessionPrefix = "containeye-tab-"
 
     var currentInputBuffer: String {
         inputBuffer
@@ -110,7 +110,12 @@ final class XTermSessionController: Identifiable {
         self.id = id
         self.credentialKey = credentialKey
         self.title = title
-        self.tmuxSessionName = tmuxSessionName
+        if let tmuxSessionName {
+            let normalized = Self.normalizeTmuxSessionName(tmuxSessionName)
+            self.tmuxSessionName = normalized.isEmpty ? nil : normalized
+        } else {
+            self.tmuxSessionName = nil
+        }
         self.tmuxAttachOnly = tmuxAttachOnly
         self.disableAutoPersistentSession = disableAutoPersistentSession
         self.suggestionEngine = suggestionEngine
@@ -218,7 +223,9 @@ final class XTermSessionController: Identifiable {
             attachOnly = false
         }
 
-        let quotedSessionName = Self.shellSingleQuoted(configuredSessionName)
+        let normalizedSessionName = Self.normalizeTmuxSessionName(configuredSessionName)
+        guard !normalizedSessionName.isEmpty else { return nil }
+        let quotedSessionName = Self.shellSingleQuoted(normalizedSessionName)
         if attachOnly {
             return "if command -v tmux >/dev/null 2>&1; then tmux attach-session -t \(quotedSessionName); fi\r"
         }
@@ -232,6 +239,28 @@ final class XTermSessionController: Identifiable {
 
     static func persistentTmuxSessionName(forTabID id: UUID) -> String {
         autoTmuxSessionPrefix + id.uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+    }
+
+    nonisolated static func normalizeTmuxSessionName(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        let markers = ["\t", "\\t"]
+        var cutIndex = trimmed.endIndex
+        for marker in markers {
+            if let idx = trimmed.range(of: marker)?.lowerBound, idx < cutIndex {
+                cutIndex = idx
+            }
+        }
+
+        var normalized = String(trimmed[..<cutIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return "" }
+
+        if normalized.hasPrefix(autoTmuxSessionPrefix) || normalized.hasPrefix("containeye-shortcut-") {
+            normalized = normalized.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == "." }
+        }
+
+        return normalized
     }
 
     func sendInput(_ data: String) {

@@ -2048,7 +2048,7 @@ final class TerminalServerPickerViewController: UIViewController {
 
     nonisolated private static func discoverTmuxSessions(for credential: Credential) async -> [TmuxSessionSummary] {
         let command = """
-if command -v tmux >/dev/null 2>&1; then tmux list-sessions -F '#{session_name}\\t#{session_windows}\\t#{?session_attached,1,0}' 2>/dev/null || true; fi
+if command -v tmux >/dev/null 2>&1; then tmux list-sessions -F '#{session_name}|#{session_windows}|#{?session_attached,1,0}' 2>/dev/null || true; fi
 """
         let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
         let lines = output
@@ -2058,9 +2058,9 @@ if command -v tmux >/dev/null 2>&1; then tmux list-sessions -F '#{session_name}\
             .filter { !$0.isEmpty }
 
         return lines.compactMap { line in
-            let components = line.components(separatedBy: "\t")
+            let components = line.components(separatedBy: "|")
             guard let first = components.first else { return nil }
-            let session = first.trimmingCharacters(in: .whitespacesAndNewlines)
+            let session = XTermSessionController.normalizeTmuxSessionName(first)
             guard !session.isEmpty else { return nil }
 
             let windowsCount: Int?
@@ -2242,12 +2242,14 @@ extension TerminalServerPickerViewController: UICollectionViewDelegate {
 
     private func closeTmuxSession(credentialKey: String, sessionName: String) {
         guard let credential = keychain().getCredential(for: credentialKey) else { return }
+        let normalizedSessionName = XTermSessionController.normalizeTmuxSessionName(sessionName)
+        guard !normalizedSessionName.isEmpty else { return }
         TerminalWorkspaceStore.shared.closeTabsBoundToTmuxSession(
             credentialKey: credentialKey,
-            sessionName: sessionName
+            sessionName: normalizedSessionName
         )
 
-        let escapedSessionName = sessionName.replacingOccurrences(of: "'", with: "'\"'\"'")
+        let escapedSessionName = normalizedSessionName.replacingOccurrences(of: "'", with: "'\"'\"'")
         let command = """
 if ! command -v tmux >/dev/null 2>&1; then
   echo "__CE_TMUX_ERROR__: tmux is not installed"
@@ -2268,7 +2270,7 @@ fi
                 if output.contains("__CE_TMUX_OK__") {
                     self.reloadCredentials()
                 } else {
-                    self.showTmuxCloseError(output: output, sessionName: sessionName)
+                    self.showTmuxCloseError(output: output, sessionName: normalizedSessionName)
                 }
             }
         }

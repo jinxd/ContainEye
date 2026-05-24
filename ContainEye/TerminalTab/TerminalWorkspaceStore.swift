@@ -90,11 +90,11 @@ final class TerminalWorkspaceStore {
             return
         }
 
-        let trimmedTmuxSessionName = tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let tmuxName = trimmedTmuxSessionName, !tmuxName.isEmpty,
+        let normalizedTmuxSessionName = tmuxSessionName.map { XTermSessionController.normalizeTmuxSessionName($0) }
+        if let tmuxName = normalizedTmuxSessionName, !tmuxName.isEmpty,
            let existing = tabs.values.first(where: {
                $0.credentialKey == credentialKey &&
-               ($0.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines) == tmuxName)
+               ($0.tmuxSessionName.map { XTermSessionController.normalizeTmuxSessionName($0) } == tmuxName)
            }),
            let pane = panes.first(where: { $0.activeTabID == existing.id }) {
             focusedPaneID = pane.id
@@ -139,7 +139,7 @@ final class TerminalWorkspaceStore {
             createdAt: .now,
             themeOverrideSelectionKey: themeOverrideSelectionKey,
             shortcutColorHex: shortcutColorHex,
-            tmuxSessionName: tmuxSessionName,
+            tmuxSessionName: normalizedTmuxSessionName,
             tmuxAttachOnly: tmuxAttachOnly,
             disableAutoPersistentSession: disableAutoPersistentSession
         )
@@ -419,19 +419,20 @@ final class TerminalWorkspaceStore {
     }
 
     func closeTabsBoundToTmuxSession(credentialKey: String, sessionName: String) {
-        let trimmedTarget = sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedTarget.isEmpty else { return }
+        let normalizedTarget = XTermSessionController.normalizeTmuxSessionName(sessionName)
+        guard !normalizedTarget.isEmpty else { return }
 
         let targetTabIDs = tabs.values.compactMap { tab -> UUID? in
             guard tab.credentialKey == credentialKey else { return nil }
-            if let explicit = tab.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !explicit.isEmpty,
-               explicit == trimmedTarget {
-                return tab.id
+            if let explicitRaw = tab.tmuxSessionName {
+                let explicit = XTermSessionController.normalizeTmuxSessionName(explicitRaw)
+                if !explicit.isEmpty && explicit == normalizedTarget {
+                    return tab.id
+                }
             }
-            guard trimmedTarget.hasPrefix(XTermSessionController.autoTmuxSessionPrefix),
+            guard normalizedTarget.hasPrefix(XTermSessionController.autoTmuxSessionPrefix),
                   !tab.disableAutoPersistentSession,
-                  XTermSessionController.persistentTmuxSessionName(forTabID: tab.id) == trimmedTarget
+                  XTermSessionController.persistentTmuxSessionName(forTabID: tab.id) == normalizedTarget
             else {
                 return nil
             }
