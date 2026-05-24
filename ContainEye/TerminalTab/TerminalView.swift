@@ -268,7 +268,7 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        navigationController?.setNavigationBarHidden(false, animated: false)
+        navigationController?.setNavigationBarHidden(true, animated: false)
         configureHardwareInputs()
         refreshNavigationChrome()
         processPendingRequests()
@@ -353,26 +353,9 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
     }
 
     private func configureNavigationItems() {
-        navigationTitleMenuButton.showsMenuAsPrimaryAction = true
-        navigationTitleMenuButton.tintColor = UIColor.label
-        navigationTitleMenuButton.setTitleColor(UIColor.label, for: .normal)
-        navigationTitleMenuButton.titleLabel?.numberOfLines = 1
-        navigationTitleMenuButton.titleLabel?.lineBreakMode = .byTruncatingTail
-        navigationTitleMenuButton.titleLabel?.adjustsFontSizeToFitWidth = true
-        navigationTitleMenuButton.titleLabel?.minimumScaleFactor = 0.72
-        navigationTitleMenuButton.titleLabel?.allowsDefaultTighteningForTruncation = true
-        var config = UIButton.Configuration.plain()
-        config.baseForegroundColor = UIColor.label
-        config.image = UIImage(systemName: "chevron.down")
-        config.imagePlacement = .trailing
-        config.imagePadding = UIFloat(6)
-        config.contentInsets = .zero
-        config.titleLineBreakMode = .byTruncatingTail
-        navigationTitleMenuButton.configuration = config
-
-        navigationItem.titleView = navigationTitleMenuButton
-        navigationItem.leftBarButtonItem = addBarButtonItem
-        navigationItem.rightBarButtonItems = [snippetBarButtonItem, settingsBarButtonItem]
+        navigationItem.titleView = nil
+        navigationItem.leftBarButtonItem = nil
+        navigationItem.rightBarButtonItems = nil
     }
 
     private func configureKeyboardBar() {
@@ -489,17 +472,7 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
     // MARK: Navigation UI
 
     private func refreshNavigationChrome() {
-        let title = titleTextForFocusedPane()
-        if var navigationConfig = navigationTitleMenuButton.configuration {
-            navigationConfig.title = title
-            navigationTitleMenuButton.configuration = navigationConfig
-        } else {
-            navigationTitleMenuButton.setTitle(title, for: .normal)
-        }
-
-        let titleMenu = makeTitleMenu()
-        navigationTitleMenuButton.menu = titleMenu
-
+        return
     }
 
     private func titleTextForFocusedPane() -> String {
@@ -1317,7 +1290,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
     private let cwdLabel = UILabel()
     private let warningLabel = UILabel()
     private let backButton = UIButton(type: .system)
-    private let addButton = UIButton(type: .system)
+    private let overflowButton = UIButton(type: .system)
 
     private(set) var activeHostView: XTermWebHostView?
     private var serverPickerController: TerminalServerPickerViewController?
@@ -1325,6 +1298,8 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
     private var lastPresentedPromptID: UUID?
     private var pinchBaseFontSize: Int = 13
     private var pinchLastDeltaSteps = 0
+    private var pendingEdgeSwipeDirection: UISwipeGestureRecognizer.Direction?
+    private var pendingEdgeSwipeExpiry: Date?
 
     init(paneID: UUID, workspace: TerminalWorkspaceStore) {
         self.paneID = paneID
@@ -1411,10 +1386,10 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         backButton.addTarget(self, action: #selector(didTapBack), for: .touchUpInside)
         compactTabBarView.contentView.addSubview(backButton)
 
-        addButton.setImage(UIImage(systemName: "plus"), for: .normal)
-        addButton.tintColor = UIColor.secondaryLabel
-        addButton.addTarget(self, action: #selector(didTapAddFromPane), for: .touchUpInside)
-        compactTabBarView.contentView.addSubview(addButton)
+        overflowButton.setImage(UIImage(systemName: "ellipsis"), for: .normal)
+        overflowButton.tintColor = UIColor.secondaryLabel
+        overflowButton.addTarget(self, action: #selector(didTapOverflow), for: .touchUpInside)
+        compactTabBarView.contentView.addSubview(overflowButton)
 
         let swipeLeft = UISwipeGestureRecognizer(target: self, action: #selector(didSwipeCompactBar(_:)))
         swipeLeft.direction = .left
@@ -1422,6 +1397,9 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         let swipeRight = UISwipeGestureRecognizer(target: self, action: #selector(didSwipeCompactBar(_:)))
         swipeRight.direction = .right
         compactTabBarView.addGestureRecognizer(swipeRight)
+        let swipeUp = UISwipeGestureRecognizer(target: self, action: #selector(didSwipeUpOnCompactBar(_:)))
+        swipeUp.direction = .up
+        compactTabBarView.addGestureRecognizer(swipeUp)
 
         let contextInteraction = UIContextMenuInteraction(delegate: self)
         compactTabBarView.addInteraction(contextInteraction)
@@ -1538,7 +1516,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
             width: sideWidth,
             height: chromeBounds.height
         )
-        addButton.frame = CGRect(
+        overflowButton.frame = CGRect(
             x: chromeBounds.maxX - sideWidth,
             y: chromeBounds.minY,
             width: sideWidth,
@@ -1549,7 +1527,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         tabTitleLabel.frame = CGRect(
             x: backButton.frame.maxX + UIFloat(8),
             y: chromeBounds.minY,
-            width: max(UIFloat(0), addButton.frame.minX - backButton.frame.maxX - UIFloat(16)),
+            width: max(UIFloat(0), overflowButton.frame.minX - backButton.frame.maxX - UIFloat(16)),
             height: chromeBounds.height
         )
         cwdLabel.frame = .zero
@@ -1752,8 +1730,32 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
     }
 
     @objc
-    private func didTapAddFromPane() {
-        workspace.focusOrCreateEmptyPane()
+    private func didTapOverflow() {
+        let alert = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: "New Tab", style: .default, handler: { _ in
+            self.workspace.focusOrCreateEmptyPane()
+        }))
+        if let active = workspace.activeTab(in: paneID),
+           let session = active.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !session.isEmpty {
+            alert.addAction(UIAlertAction(title: "Rename Session", style: .default, handler: { _ in
+                self.promptRenameActiveSession(sessionName: session, credentialKey: active.credentialKey)
+            }))
+            alert.addAction(UIAlertAction(title: "Close Session", style: .destructive, handler: { _ in
+                self.promptCloseActiveSession(sessionName: session, credentialKey: active.credentialKey)
+            }))
+        }
+        alert.addAction(UIAlertAction(title: "View All Tabs", style: .default, handler: { _ in
+            self.presentAllTabs()
+        }))
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    @objc
+    private func didSwipeUpOnCompactBar(_ recognizer: UISwipeGestureRecognizer) {
+        guard recognizer.direction == .up else { return }
+        presentAllTabs()
     }
 
     @objc
@@ -1768,15 +1770,39 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
 
         let nextIndex: Int
         if recognizer.direction == .left {
-            guard currentIndex < orderedPaneIDs.count - 1 else { return }
+            guard currentIndex < orderedPaneIDs.count - 1 else {
+                handleEdgeSwipeForNewTab(direction: .left)
+                return
+            }
             nextIndex = currentIndex + 1
         } else if recognizer.direction == .right {
-            guard currentIndex > 0 else { return }
+            guard currentIndex > 0 else {
+                handleEdgeSwipeForNewTab(direction: .right)
+                return
+            }
             nextIndex = currentIndex - 1
         } else {
             return
         }
+        pendingEdgeSwipeDirection = nil
+        pendingEdgeSwipeExpiry = nil
         workspace.focusPane(paneID: orderedPaneIDs[nextIndex])
+    }
+
+    private func handleEdgeSwipeForNewTab(direction: UISwipeGestureRecognizer.Direction) {
+        let now = Date()
+        if pendingEdgeSwipeDirection == direction,
+           let expiry = pendingEdgeSwipeExpiry,
+           now <= expiry {
+            pendingEdgeSwipeDirection = nil
+            pendingEdgeSwipeExpiry = nil
+            workspace.focusOrCreateEmptyPane()
+            delegate?.terminalPane(self, didRequestMessage: "Created new tab")
+            return
+        }
+        pendingEdgeSwipeDirection = direction
+        pendingEdgeSwipeExpiry = now.addingTimeInterval(1.4)
+        delegate?.terminalPane(self, didRequestMessage: "Swipe again to create a new tab")
     }
 
     func contextMenuInteraction(
@@ -1801,7 +1827,78 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
                     self.didTapBack()
                 })
             }
+            if let active = self.workspace.activeTab(in: self.paneID),
+               let session = active.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !session.isEmpty {
+                actions.append(UIAction(title: "Rename Session", image: UIImage(systemName: "pencil")) { _ in
+                    self.promptRenameActiveSession(sessionName: session, credentialKey: active.credentialKey)
+                })
+                actions.append(UIAction(title: "Close Session", image: UIImage(systemName: "xmark.circle"), attributes: .destructive) { _ in
+                    self.promptCloseActiveSession(sessionName: session, credentialKey: active.credentialKey)
+                })
+            }
             return UIMenu(children: actions)
+        }
+    }
+
+    private func promptRenameActiveSession(sessionName: String, credentialKey: String) {
+        let alert = UIAlertController(title: "Rename session", message: sessionName, preferredStyle: .alert)
+        alert.addTextField { field in
+            field.text = sessionName
+            field.clearButtonMode = .whileEditing
+            field.autocapitalizationType = .none
+            field.autocorrectionType = .no
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Rename", style: .default, handler: { _ in
+            let newName = XTermSessionController.normalizeTmuxSessionName(alert.textFields?.first?.text ?? "")
+            guard !newName.isEmpty else { return }
+            self.renameSession(credentialKey: credentialKey, oldName: sessionName, newName: newName)
+        }))
+        present(alert, animated: true)
+    }
+
+    private func promptCloseActiveSession(sessionName: String, credentialKey: String) {
+        let alert = UIAlertController(title: "Close session?", message: sessionName, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Close", style: .destructive, handler: { _ in
+            self.closeSession(credentialKey: credentialKey, sessionName: sessionName)
+        }))
+        present(alert, animated: true)
+    }
+
+    private func renameSession(credentialKey: String, oldName: String, newName: String) {
+        guard let credential = keychain().getCredential(for: credentialKey) else { return }
+        let oldEscaped = XTermSessionController.normalizeTmuxSessionName(oldName).replacingOccurrences(of: "'", with: "'\"'\"'")
+        let newEscaped = XTermSessionController.normalizeTmuxSessionName(newName).replacingOccurrences(of: "'", with: "'\"'\"'")
+        let command = "if command -v tmux >/dev/null 2>&1; then tmux rename-session -t '\(oldEscaped)' '\(newEscaped)' 2>/dev/null && echo __OK__ || echo __ERR__; fi"
+        Task {
+            let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
+            await MainActor.run {
+                if output.contains("__OK__") {
+                    TerminalWorkspaceStore.shared.renameTabsBoundToTmuxSession(
+                        credentialKey: credentialKey,
+                        oldSessionName: oldName,
+                        newSessionName: newName
+                    )
+                    self.refreshFromWorkspace()
+                }
+            }
+        }
+    }
+
+    private func closeSession(credentialKey: String, sessionName: String) {
+        guard let credential = keychain().getCredential(for: credentialKey) else { return }
+        let escaped = XTermSessionController.normalizeTmuxSessionName(sessionName).replacingOccurrences(of: "'", with: "'\"'\"'")
+        let command = "if command -v tmux >/dev/null 2>&1; then tmux kill-session -t '\(escaped)' 2>/dev/null && echo __OK__ || echo __ERR__; fi"
+        Task {
+            let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
+            await MainActor.run {
+                if output.contains("__OK__") {
+                    TerminalWorkspaceStore.shared.closeTabsBoundToTmuxSession(credentialKey: credentialKey, sessionName: sessionName)
+                    self.refreshFromWorkspace()
+                }
+            }
         }
     }
 
@@ -2525,6 +2622,7 @@ final class TerminalTabOverviewViewController: UIViewController {
 
     private let workspace: TerminalWorkspaceStore
     private var items: [Item] = []
+    private let settingsStore = TerminalSettingsStore.shared
 
     private enum Section: Int, CaseIterable {
         case main
@@ -2580,6 +2678,28 @@ final class TerminalTabOverviewViewController: UIViewController {
             target: self,
             action: #selector(didTapDone)
         )
+        let settingsMenuButton = UIButton(type: .system)
+        settingsMenuButton.setImage(UIImage(systemName: "gearshape"), for: .normal)
+        settingsMenuButton.showsMenuAsPrimaryAction = true
+        settingsMenuButton.menu = makeSettingsMenu()
+        navigationItem.leftBarButtonItem = UIBarButtonItem(customView: settingsMenuButton)
+        navigationItem.titleView = nil
+        navigationItem.backButtonDisplayMode = .minimal
+        navigationItem.setHidesBackButton(true, animated: false)
+
+        navigationItem.rightBarButtonItems = [
+            UIBarButtonItem(
+                image: UIImage(systemName: "plus"),
+                style: .plain,
+                target: self,
+                action: #selector(didTapNewTab)
+            ),
+            UIBarButtonItem(
+                barButtonSystemItem: .done,
+                target: self,
+                action: #selector(didTapDone)
+            ),
+        ]
         collectionView.backgroundColor = .clear
         collectionView.delegate = self
         collectionView.register(TerminalServerCell.self, forCellWithReuseIdentifier: TerminalServerCell.reuseID)
@@ -2618,9 +2738,53 @@ final class TerminalTabOverviewViewController: UIViewController {
         dataSource.apply(snapshot, animatingDifferences: false)
     }
 
+    private func makeSettingsMenu() -> UIMenu {
+        UIMenu(children: [
+            UIAction(title: "Settings", image: UIImage(systemName: "gearshape")) { [weak self] _ in
+                self?.presentSettings()
+            },
+            UIAction(title: "Snippets", image: UIImage(systemName: "ellipsis.curlybraces")) { [weak self] _ in
+                self?.presentSnippets()
+            }
+        ])
+    }
+
+    private func presentSettings() {
+        let settings = TerminalSettingsViewController()
+        let navigation = UINavigationController(rootViewController: settings)
+        navigation.modalPresentationStyle = .pageSheet
+        if let sheet = navigation.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+        }
+        present(navigation, animated: true)
+    }
+
+    private func presentSnippets() {
+        let currentCredentialKey = workspace.activeControllerInFocusedPane()?.credentialKey
+        let picker = TerminalSnippetPickerViewController(
+            database: SharedDatabase.db,
+            credentialKey: currentCredentialKey
+        ) { [weak self] snippet in
+            self?.workspace.activeControllerInFocusedPane()?.applySuggestion(snippet.command)
+        }
+
+        let navigation = UINavigationController(rootViewController: picker)
+        navigation.modalPresentationStyle = .pageSheet
+        if let sheet = navigation.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+        }
+        present(navigation, animated: true)
+    }
+
     @objc
     private func didTapDone() {
         dismiss(animated: true)
+    }
+
+    @objc
+    private func didTapNewTab() {
+        workspace.focusOrCreateEmptyPane()
+        reload()
     }
 }
 
