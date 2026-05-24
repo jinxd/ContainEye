@@ -58,9 +58,6 @@ private struct TerminalWorkspaceNavigationHost: UIViewControllerRepresentable {
 private enum TerminalUIMetrics {
     static let pageInset = UIFloat(8)
     static let paneGap = UIFloat(8)
-    static let paneInnerInset = UIFloat(6)
-    static let paneCornerRadius = UIFloat(14)
-    static let terminalCornerRadius = UIFloat(12)
     static let paneHeaderHeight = UIFloat(34)
     static let keyboardSuggestionHeight = UIFloat(34)
     static let keyboardSuggestionBottomGap = UIFloat(8)
@@ -80,9 +77,6 @@ private enum TerminalUIMetrics {
 
 private enum TerminalUIColors {
     static let workspaceBackground = UIColor.systemBackground
-    static let paneMaterial = UIColor.secondarySystemBackground
-    static let paneStroke = UIColor.separator
-    static let focusedPaneStroke = UIColor.tintColor
     static let tabChromeFocused = UIColor { traits in
         if traits.userInterfaceStyle == .dark {
             return UIColor.white.withAlphaComponent(0.16)
@@ -1280,7 +1274,6 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
     private let workspace: TerminalWorkspaceStore
     private let settingsStore = TerminalSettingsStore.shared
 
-    private let panelView = UIView()
     private let headerView = UIView()
     private let contentView = UIView()
     private let compactTabBarView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
@@ -1340,18 +1333,11 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
     private func configurePaneUI() {
         view.backgroundColor = .clear
 
-        panelView.backgroundColor = TerminalUIColors.paneMaterial
-        panelView.layer.cornerRadius = TerminalUIMetrics.paneCornerRadius
-        panelView.layer.cornerCurve = .continuous
-        panelView.layer.borderWidth = UIFloat(1)
-        panelView.layer.borderColor = TerminalUIColors.paneStroke.cgColor
-        view.addSubview(panelView)
-
         headerView.backgroundColor = .clear
-        panelView.addSubview(headerView)
+        view.addSubview(headerView)
 
         contentView.backgroundColor = .clear
-        panelView.addSubview(contentView)
+        view.addSubview(contentView)
 
         compactTabBarView.layer.cornerRadius = UIFloat(14)
         compactTabBarView.layer.cornerCurve = .continuous
@@ -1410,7 +1396,6 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
     func refreshFromWorkspace() {
         let focused = workspace.focusedPaneID == paneID
         let activeTab = workspace.activeTab(in: paneID)
-        applyPaneBorderStyle(focused: focused, activeTab: activeTab)
 
         let tabNumber = (workspace.panes.firstIndex(where: { $0.id == paneID }) ?? 0) + 1
         activeTitleLabel.text = "Tab \(tabNumber)"
@@ -1474,18 +1459,11 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
     // MARK: Layout
 
     private func layoutPaneViews() {
-        panelView.frame = view.bounds.inset(by: UIEdgeInsets(
-            top: TerminalUIMetrics.paneInnerInset,
-            left: TerminalUIMetrics.paneInnerInset,
-            bottom: TerminalUIMetrics.paneInnerInset,
-            right: TerminalUIMetrics.paneInnerInset
-        ))
-
-        var inner = panelView.bounds.inset(by: UIEdgeInsets(
-            top: UIFloat(8),
-            left: UIFloat(8),
-            bottom: UIFloat(8),
-            right: UIFloat(8)
+        var inner = view.bounds.inset(by: UIEdgeInsets(
+            top: 0,
+            left: 0,
+            bottom: 0,
+            right: 0
         ))
 
         let headerSplit = inner.split(at: TerminalUIMetrics.paneHeaderHeight, from: .maxYEdge)
@@ -1607,9 +1585,8 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         let host = controller.makeOrReuseHostView()
         let initialTheme = effectiveThemePayload()
         host.backgroundColor = UIColor(terminalHex: initialTheme["background"]) ?? TerminalUIColors.terminalBackground
-        host.layer.cornerRadius = TerminalUIMetrics.terminalCornerRadius
-        host.layer.cornerCurve = .continuous
-        host.clipsToBounds = true
+        host.layer.cornerRadius = 0
+        host.clipsToBounds = false
 
         if host.superview !== contentView {
             activeHostView?.removeFromSuperview()
@@ -1663,19 +1640,6 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
             return settingsStore.resolvedTheme.payload
         }
         return settingsStore.resolvedTheme(for: selection).payload
-    }
-
-    private func applyPaneBorderStyle(focused: Bool, activeTab: TerminalTabState?) {
-        if let colorHex = activeTab?.shortcutColorHex,
-           let shortcutColor = UIColor(hex: colorHex)
-        {
-            panelView.layer.borderColor = shortcutColor.cgColor
-            panelView.layer.borderWidth = UIFloat(3)
-            return
-        }
-
-        panelView.layer.borderColor = (focused ? TerminalUIColors.focusedPaneStroke : TerminalUIColors.paneStroke).cgColor
-        panelView.layer.borderWidth = UIFloat(1)
     }
 
     // MARK: Prompt Handling
@@ -1904,8 +1868,16 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
 
     private func presentAllTabs() {
         let overview = TerminalTabOverviewViewController(workspace: workspace)
-        overview.onSelectPane = { [weak self] paneID in
-            self?.workspace.focusPane(paneID: paneID)
+        overview.onSelectSession = { [weak self] credentialKey, sessionName, title in
+            self?.workspace.openTab(
+                credentialKey: credentialKey,
+                preferredTitle: title,
+                inFocusedPane: true,
+                themeOverrideSelectionKey: nil,
+                shortcutColorHex: "#10B981",
+                tmuxSessionName: sessionName,
+                tmuxAttachOnly: true
+            )
         }
         let nav = UINavigationController(rootViewController: overview)
         nav.modalPresentationStyle = .pageSheet
@@ -2613,12 +2585,15 @@ fi
 @MainActor
 final class TerminalTabOverviewViewController: UIViewController {
     struct Item: Hashable {
-        let paneID: UUID
-        let title: String
-        let subtitle: String
+        let credentialKey: String
+        let sessionName: String
+        let host: String
+        let previewText: String
+        let isActive: Bool
+        let colorHex: String?
     }
 
-    var onSelectPane: ((UUID) -> Void)?
+    var onSelectSession: ((String, String, String) -> Void)?
 
     private let workspace: TerminalWorkspaceStore
     private var items: [Item] = []
@@ -2626,6 +2601,12 @@ final class TerminalTabOverviewViewController: UIViewController {
 
     private enum Section: Int, CaseIterable {
         case main
+    }
+
+    private struct TmuxSessionSummary: Hashable {
+        let sessionName: String
+        let windowsCount: Int?
+        let isAttached: Bool?
     }
 
     private let collectionView: UICollectionView
@@ -2638,7 +2619,7 @@ final class TerminalTabOverviewViewController: UIViewController {
             let sideInset = max(UIFloat(2), min(UIFloat(8), width * 0.03))
 
             let itemSize = NSCollectionLayoutSize(
-                widthDimension: .fractionalWidth(0.5),
+                widthDimension: .fractionalWidth(width > UIFloat(740) ? 0.5 : 1.0),
                 heightDimension: .fractionalHeight(1)
             )
             let item = NSCollectionLayoutItem(layoutSize: itemSize)
@@ -2646,9 +2627,10 @@ final class TerminalTabOverviewViewController: UIViewController {
 
             let groupSize = NSCollectionLayoutSize(
                 widthDimension: .fractionalWidth(1),
-                heightDimension: .absolute(UIFloat(98))
+                heightDimension: .absolute(UIFloat(196))
             )
-            let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item, item])
+            let groupItems: [NSCollectionLayoutItem] = width > UIFloat(740) ? [item, item] : [item]
+            let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: groupItems)
 
             let section = NSCollectionLayoutSection(group: group)
             section.interGroupSpacing = UIFloat(8)
@@ -2702,7 +2684,7 @@ final class TerminalTabOverviewViewController: UIViewController {
         ]
         collectionView.backgroundColor = .clear
         collectionView.delegate = self
-        collectionView.register(TerminalServerCell.self, forCellWithReuseIdentifier: TerminalServerCell.reuseID)
+        collectionView.register(TerminalAllTabsCell.self, forCellWithReuseIdentifier: TerminalAllTabsCell.reuseID)
         view.addSubview(collectionView)
         reload()
     }
@@ -2715,27 +2697,78 @@ final class TerminalTabOverviewViewController: UIViewController {
     private func makeDataSource() -> UICollectionViewDiffableDataSource<Section, Item> {
         UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
             guard let cell = collectionView.dequeueReusableCell(
-                withReuseIdentifier: TerminalServerCell.reuseID,
+                withReuseIdentifier: TerminalAllTabsCell.reuseID,
                 for: indexPath
-            ) as? TerminalServerCell else {
+            ) as? TerminalAllTabsCell else {
                 return UICollectionViewCell()
             }
-            cell.apply(title: item.title, host: item.subtitle, detailText: "Terminal tab", colorHex: "#3B82F6")
+            cell.onClose = { [weak self] in
+                self?.closeSession(credentialKey: item.credentialKey, sessionName: item.sessionName)
+            }
+            cell.apply(
+                title: item.sessionName,
+                subtitle: item.host,
+                previewText: item.previewText,
+                isActive: item.isActive,
+                accentHex: item.colorHex
+            )
             return cell
         }
     }
 
     private func reload() {
-        items = workspace.panes.enumerated().map { index, pane in
-            if let tab = workspace.activeTab(in: pane.id) {
-                return Item(paneID: pane.id, title: "Tab \(index + 1): \(tab.title)", subtitle: tab.credentialKey)
+        Task {
+            let credentials = keychain()
+                .allKeys()
+                .compactMap { keychain().getCredential(for: $0) }
+                .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
+
+            var discovered: [Item] = []
+            await withTaskGroup(of: [Item].self, returning: Void.self) { group in
+                for credential in credentials {
+                    group.addTask {
+                        let sessions = await Self.discoverTmuxSessions(for: credential)
+                        return sessions.map { session in
+                            var parts: [String] = []
+                            parts.append("tmux session")
+                            if let windows = session.windowsCount {
+                                parts.append("\(windows) \(windows == 1 ? "window" : "windows")")
+                            }
+                            if let attached = session.isAttached {
+                                parts.append(attached ? "attached" : "detached")
+                            }
+                            return Item(
+                                credentialKey: credential.key,
+                                sessionName: session.sessionName,
+                                host: credential.host,
+                                previewText: parts.joined(separator: " • "),
+                                isActive: session.isAttached ?? false,
+                                colorHex: "#10B981"
+                            )
+                        }
+                    }
+                }
+
+                for await partial in group {
+                    discovered.append(contentsOf: partial)
+                }
             }
-            return Item(paneID: pane.id, title: "Tab \(index + 1): Choose a server", subtitle: "Empty")
+
+            discovered.sort {
+                if $0.host == $1.host {
+                    return $0.sessionName.localizedCaseInsensitiveCompare($1.sessionName) == .orderedAscending
+                }
+                return $0.host.localizedCaseInsensitiveCompare($1.host) == .orderedAscending
+            }
+
+            await MainActor.run {
+                self.items = discovered
+                var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
+                snapshot.appendSections([.main])
+                snapshot.appendItems(discovered, toSection: .main)
+                self.dataSource.apply(snapshot, animatingDifferences: false)
+            }
         }
-        var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.main])
-        snapshot.appendItems(items, toSection: .main)
-        dataSource.apply(snapshot, animatingDifferences: false)
     }
 
     private func makeSettingsMenu() -> UIMenu {
@@ -2784,15 +2817,53 @@ final class TerminalTabOverviewViewController: UIViewController {
     @objc
     private func didTapNewTab() {
         workspace.focusOrCreateEmptyPane()
-        reload()
+        dismiss(animated: true)
+    }
+
+    private func closeSession(credentialKey: String, sessionName: String) {
+        guard let credential = keychain().getCredential(for: credentialKey) else { return }
+        let escaped = XTermSessionController.normalizeTmuxSessionName(sessionName).replacingOccurrences(of: "'", with: "'\"'\"'")
+        let command = "if command -v tmux >/dev/null 2>&1; then tmux kill-session -t '\(escaped)' 2>/dev/null && echo __OK__ || echo __ERR__; fi"
+        Task {
+            let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
+            await MainActor.run {
+                if output.contains("__OK__") {
+                    TerminalWorkspaceStore.shared.closeTabsBoundToTmuxSession(credentialKey: credentialKey, sessionName: sessionName)
+                    self.reload()
+                }
+            }
+        }
+    }
+
+    nonisolated private static func discoverTmuxSessions(for credential: Credential) async -> [TmuxSessionSummary] {
+        let command = """
+if command -v tmux >/dev/null 2>&1; then tmux list-sessions -F '#{session_name}|#{session_windows}|#{?session_attached,1,0}' 2>/dev/null || true; fi
+"""
+        let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
+        let lines = output
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        var seenSessionNames = Set<String>()
+        return lines.compactMap { line in
+            let components = line.components(separatedBy: "|")
+            guard let first = components.first else { return nil }
+            let session = XTermSessionController.normalizeTmuxSessionName(first)
+            guard !session.isEmpty else { return nil }
+            guard seenSessionNames.insert(session).inserted else { return nil }
+            let windowsCount = components.count > 1 ? Int(components[1].trimmingCharacters(in: .whitespacesAndNewlines)) : nil
+            let isAttached = components.count > 2 ? components[2].trimmingCharacters(in: .whitespacesAndNewlines) == "1" : nil
+            return TmuxSessionSummary(sessionName: session, windowsCount: windowsCount, isAttached: isAttached)
+        }
     }
 }
 
 extension TerminalTabOverviewViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         guard indexPath.item < items.count else { return }
-        let paneID = items[indexPath.item].paneID
-        onSelectPane?(paneID)
+        let item = items[indexPath.item]
+        onSelectSession?(item.credentialKey, item.sessionName, item.sessionName)
         dismiss(animated: true)
     }
 }
@@ -3795,6 +3866,93 @@ final class TerminalSectionDividerCell: UICollectionViewCell {
         lineView.frame = CGRect(x: UIFloat(10), y: y, width: max(UIFloat(0), bounds.width - UIFloat(20)), height: 1)
         label.frame = CGRect(x: UIFloat(12), y: y - UIFloat(10), width: max(UIFloat(0), bounds.width - UIFloat(24)), height: UIFloat(20))
         label.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.78)
+    }
+}
+
+@MainActor
+final class TerminalAllTabsCell: UICollectionViewCell {
+    static let reuseID = "TerminalAllTabsCell"
+
+    var onClose: (() -> Void)?
+
+    private let card = UIView()
+    private let preview = UIView()
+    private let titleLabel = UILabel()
+    private let subtitleLabel = UILabel()
+    private let previewLabel = UILabel()
+    private let closeButton = UIButton(type: .system)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        contentView.backgroundColor = .clear
+
+        card.backgroundColor = UIColor.secondarySystemBackground
+        card.layer.cornerRadius = UIFloat(14)
+        card.layer.cornerCurve = .continuous
+        card.layer.borderWidth = UIFloat(1)
+        card.layer.borderColor = UIColor.separator.cgColor
+        contentView.addSubview(card)
+
+        preview.backgroundColor = UIColor.black
+        preview.layer.cornerRadius = UIFloat(10)
+        preview.layer.cornerCurve = .continuous
+        preview.clipsToBounds = true
+        card.addSubview(preview)
+
+        previewLabel.font = UIFont.monospacedSystemFont(ofSize: UIFloat(11), weight: .regular)
+        previewLabel.textColor = UIColor.white.withAlphaComponent(0.88)
+        previewLabel.numberOfLines = 3
+        preview.addSubview(previewLabel)
+
+        titleLabel.font = UIFont.systemFont(ofSize: UIFloat(13), weight: .semibold)
+        titleLabel.textColor = UIColor.label
+        titleLabel.lineBreakMode = .byTruncatingTail
+        card.addSubview(titleLabel)
+
+        subtitleLabel.font = UIFont.systemFont(ofSize: UIFloat(11), weight: .regular)
+        subtitleLabel.textColor = UIColor.secondaryLabel
+        subtitleLabel.lineBreakMode = .byTruncatingTail
+        card.addSubview(subtitleLabel)
+
+        closeButton.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
+        closeButton.tintColor = UIColor.secondaryLabel
+        closeButton.addAction(UIAction { [weak self] _ in
+            self?.onClose?()
+        }, for: .touchUpInside)
+        card.addSubview(closeButton)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        card.frame = contentView.bounds.inset(by: UIEdgeInsets(top: UIFloat(4), left: UIFloat(2), bottom: UIFloat(4), right: UIFloat(2)))
+        let inner = card.bounds.inset(by: UIEdgeInsets(top: UIFloat(10), left: UIFloat(10), bottom: UIFloat(10), right: UIFloat(10)))
+
+        closeButton.frame = CGRect(x: inner.maxX - UIFloat(20), y: inner.minY, width: UIFloat(20), height: UIFloat(20))
+        titleLabel.frame = CGRect(x: inner.minX, y: inner.minY, width: max(0, closeButton.frame.minX - inner.minX - UIFloat(6)), height: UIFloat(20))
+        subtitleLabel.frame = CGRect(x: inner.minX, y: titleLabel.frame.maxY + UIFloat(1), width: inner.width, height: UIFloat(16))
+
+        let previewTop = subtitleLabel.frame.maxY + UIFloat(8)
+        preview.frame = CGRect(x: inner.minX, y: previewTop, width: inner.width, height: max(UIFloat(64), inner.maxY - previewTop))
+        previewLabel.frame = preview.bounds.inset(by: UIEdgeInsets(top: UIFloat(8), left: UIFloat(8), bottom: UIFloat(8), right: UIFloat(8)))
+    }
+
+    func apply(title: String, subtitle: String, previewText: String, isActive: Bool, accentHex: String?) {
+        titleLabel.text = title
+        subtitleLabel.text = subtitle
+        previewLabel.text = previewText
+
+        if let accentHex, let accent = UIColor(hex: accentHex) {
+            card.layer.borderColor = accent.withAlphaComponent(0.75).cgColor
+            card.layer.borderWidth = isActive ? UIFloat(2) : UIFloat(1)
+        } else {
+            card.layer.borderColor = (isActive ? UIColor.tintColor : UIColor.separator).cgColor
+            card.layer.borderWidth = isActive ? UIFloat(2) : UIFloat(1)
+        }
     }
 }
 
