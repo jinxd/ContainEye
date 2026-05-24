@@ -17,6 +17,7 @@ struct AgenticView: View {
     @Environment(\.blackbirdDatabase) private var db
     @Environment(\.agenticBridge) private var bridge
     @StateObject private var model = AgenticViewModel()
+    @State private var showApprovalSettings = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -80,10 +81,19 @@ struct AgenticView: View {
                     } label: {
                         Label("Copy Chat History", systemImage: "doc.on.doc")
                     }
+
+                    Button {
+                        showApprovalSettings = true
+                    } label: {
+                        Label("Command Approval Settings", systemImage: "checkmark.shield")
+                    }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
             }
+        }
+        .sheet(isPresented: $showApprovalSettings) {
+            AgenticApprovalSettingsView(model: model)
         }
     }
 
@@ -130,6 +140,58 @@ struct AgenticView: View {
             }
         }
         .padding(12)
+    }
+}
+
+private struct AgenticApprovalSettingsView: View {
+    @ObservedObject var model: AgenticViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Global") {
+                    Toggle("Always allow all commands", isOn: Binding(
+                        get: { model.approvalAllowAllCommands },
+                        set: { model.setApprovalAllowAllCommands($0) }
+                    ))
+                }
+
+                Section("Allowed prefixes") {
+                    if model.approvalAllowedPrefixes.isEmpty {
+                        Text("No saved prefixes.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(model.approvalAllowedPrefixes, id: \.self) { prefix in
+                            HStack {
+                                Text(prefix)
+                                    .font(.system(.body, design: .monospaced))
+                                Spacer()
+                                Button(role: .destructive) {
+                                    model.removeApprovalPrefix(prefix)
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+
+                Section {
+                    Button("Reset All Command Approvals", role: .destructive) {
+                        model.resetApprovalPreferences()
+                    }
+                }
+            }
+            .navigationTitle("Command Approvals")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
     }
 }
 
@@ -197,6 +259,8 @@ final class AgenticViewModel: ObservableObject {
     @Published var pendingComposerContext: String?
     @Published var pendingApproval: AgenticCommandApprovalContext?
     @Published var showCommandApprovalAlert = false
+    @Published private(set) var approvalAllowAllCommands = false
+    @Published private(set) var approvalAllowedPrefixes: [String] = []
 
     private var database: Blackbird.Database?
     private var llmHistory: [[String: Any]] = []
@@ -206,6 +270,7 @@ final class AgenticViewModel: ObservableObject {
 
     func configure(database: Blackbird.Database?) async {
         self.database = database
+        syncApprovalPublishedState()
         let restored = sessionStore.load()
         messages = restored.messages
         llmHistory = restored.llmHistory
@@ -312,6 +377,7 @@ final class AgenticViewModel: ObservableObject {
         if let prefix = pending.commandPrefix, !prefix.isEmpty {
             approvalPreferences.allowedCommandPrefixes.insert(prefix)
             approvalPreferences.save()
+            syncApprovalPublishedState()
         }
         await resolveCommandApproval(allow: true, pending: pending)
     }
@@ -319,7 +385,26 @@ final class AgenticViewModel: ObservableObject {
     func resolveCommandApprovalAlwaysAll(pending: AgenticCommandApprovalContext) async {
         approvalPreferences.allowAllCommands = true
         approvalPreferences.save()
+        syncApprovalPublishedState()
         await resolveCommandApproval(allow: true, pending: pending)
+    }
+
+    func setApprovalAllowAllCommands(_ enabled: Bool) {
+        approvalPreferences.allowAllCommands = enabled
+        approvalPreferences.save()
+        syncApprovalPublishedState()
+    }
+
+    func removeApprovalPrefix(_ prefix: String) {
+        approvalPreferences.allowedCommandPrefixes.remove(prefix)
+        approvalPreferences.save()
+        syncApprovalPublishedState()
+    }
+
+    func resetApprovalPreferences() {
+        approvalPreferences = AgenticCommandApprovalPreferences(allowAllCommands: false, allowedCommandPrefixes: [])
+        approvalPreferences.save()
+        syncApprovalPublishedState()
     }
 
     private func runAgentLoop() async {
@@ -487,6 +572,11 @@ final class AgenticViewModel: ObservableObject {
             return false
         }
         return commandRequiresApproval(trimmed)
+    }
+
+    private func syncApprovalPublishedState() {
+        approvalAllowAllCommands = approvalPreferences.allowAllCommands
+        approvalAllowedPrefixes = approvalPreferences.allowedCommandPrefixes.sorted()
     }
 }
 
