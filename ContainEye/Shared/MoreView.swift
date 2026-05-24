@@ -611,7 +611,7 @@ struct AgenticView: View {
 #endif
     }
 
-    private func runAgentLoop(chatID: UUID, seededHistory: [[String: String]]? = nil) async throws {
+    private func runAgentLoop(chatID: UUID, seededHistory: [[String: Any]]? = nil) async throws {
         guard let db else { return }
         let executor = AgenticToolExecutor(database: db)
         var workingHistory = seededHistory ?? store.llmHistory(for: chatID)
@@ -720,9 +720,25 @@ struct AgenticView: View {
                         ),
                         to: chatID
                     )
-                    workingHistory.append(["role": "assistant", "content": "Using tool: \(callToExecute.tool)"])
-                    workingHistory.append(["role": "user", "content": result.userFacingSummary])
-                    workingHistory.append(["role": "user", "content": result.toolResultEnvelope(tool: callToExecute.tool)])
+                    let toolCallID = callToExecute.id ?? "call_\(UUID().uuidString)"
+                    workingHistory.append([
+                        "role": "assistant",
+                        "content": llmResponse.assistantText,
+                        "tool_calls": [[
+                            "id": toolCallID,
+                            "type": "function",
+                            "function": [
+                                "name": callToExecute.tool,
+                                "arguments": AgenticJSON.stringify(callToExecute.arguments)
+                            ]
+                        ]],
+                        "reasoning_details": llmResponse.reasoningDetails
+                    ])
+                    workingHistory.append([
+                        "role": "tool",
+                        "tool_call_id": toolCallID,
+                        "content": result.toolResultPayloadJSON
+                    ])
                 }
                 continue
             }
@@ -766,9 +782,24 @@ struct AgenticView: View {
                 AgenticMessage(role: .system, content: result.toolResultEnvelope(tool: approvedCall.tool)),
                 to: context.chatID
             )
-            history.append(["role": "assistant", "content": "Using tool: \(approvedCall.tool)"])
-            history.append(["role": "user", "content": result.userFacingSummary])
-            history.append(["role": "user", "content": result.toolResultEnvelope(tool: approvedCall.tool)])
+            let toolCallID = approvedCall.id ?? "call_\(UUID().uuidString)"
+            history.append([
+                "role": "assistant",
+                "content": "Using tool: \(approvedCall.tool)",
+                "tool_calls": [[
+                    "id": toolCallID,
+                    "type": "function",
+                    "function": [
+                        "name": approvedCall.tool,
+                        "arguments": AgenticJSON.stringify(approvedCall.arguments)
+                    ]
+                ]]
+            ])
+            history.append([
+                "role": "tool",
+                "tool_call_id": toolCallID,
+                "content": result.toolResultPayloadJSON
+            ])
         } else {
             let denial = """
             {
@@ -779,8 +810,7 @@ struct AgenticView: View {
             """
             await store.appendMessage(AgenticMessage(role: .tool, content: "Command denied."), to: context.chatID)
             await store.appendMessage(AgenticMessage(role: .system, content: denial), to: context.chatID)
-            history.append(["role": "user", "content": "Command denied by user"])
-            history.append(["role": "user", "content": denial])
+            history.append(["role": "tool", "tool_call_id": (context.call.id ?? "call_\(UUID().uuidString)"), "content": denial])
         }
 
         do {
@@ -856,7 +886,7 @@ struct AgenticView: View {
 #endif
     }
 
-    private func presentFailureDebugAlert(chatID: UUID, reason: String, retryHistory: [[String: String]]) async {
+    private func presentFailureDebugAlert(chatID: UUID, reason: String, retryHistory: [[String: Any]]) async {
         let payload = buildFailureDebugPayload(chatID: chatID, reason: reason)
         await MainActor.run {
             failureDebugPayload = payload
@@ -1289,7 +1319,7 @@ enum AgenticRenderItem: Identifiable {
 }
 
 struct AgenticFailureRetryContext {
-    var history: [[String: String]]
+    var history: [[String: Any]]
     var reason: String
 }
 
@@ -1318,7 +1348,7 @@ struct AgenticPendingCommandApproval: Identifiable {
     var serverLabel: String
     var command: String
     var call: AgenticToolCall
-    var history: [[String: String]]
+    var history: [[String: Any]]
 
     var id: UUID { chatID }
 }
@@ -1481,7 +1511,7 @@ final class AgenticChatStore {
         save()
     }
 
-    func llmHistory(for chatID: UUID) -> [[String: String]] {
+    func llmHistory(for chatID: UUID) -> [[String: Any]] {
         guard let chat = chats.first(where: { $0.id == chatID }) else { return [] }
         return chat.messages.compactMap { message in
             switch message.role {
@@ -1497,8 +1527,8 @@ final class AgenticChatStore {
                 return ["role": "assistant", "content": message.content]
             case .tool, .system, .error:
                 return ["role": "user", "content": message.content]
-            }
         }
+    }
     }
 
     private func load() {
@@ -1629,7 +1659,7 @@ User memory:
             .joined(separator: "\n")
     }
 
-    static func generate(systemPrompt: String, history: [[String: String]]) async throws -> AgenticLLMResponse {
+    static func generate(systemPrompt: String, history: [[String: Any]]) async throws -> AgenticLLMResponse {
         let cfg = try await resolveConfig()
         let messages = buildOpenRouterMessages(systemPrompt: systemPrompt, history: history)
         var request = URLRequest(url: URL(string: "\(cfg.baseURL)/chat/completions")!)
@@ -1662,13 +1692,14 @@ User memory:
             statusCode: statusCode,
             assistantText: parsed.text,
             toolCalls: parsed.toolCalls,
-            reasoningText: parsed.reasoning
+            reasoningText: parsed.reasoning,
+            reasoningDetails: parsed.reasoningDetails
         )
     }
 
     static func generateStreaming(
         systemPrompt: String,
-        history: [[String: String]],
+        history: [[String: Any]],
         onProgress: @escaping @Sendable (String) async -> Void
     ) async throws -> AgenticLLMResponse {
         let cfg = try await resolveConfig()
@@ -1702,6 +1733,7 @@ User memory:
         var rawEvents: [String] = []
         var assistantText = ""
         var reasoningText = ""
+        var reasoningDetails: [[String: Any]] = []
         var toolBuffers: [Int: AgenticToolCallBuffer] = [:]
 
         for try await rawLine in bytes.lines {
@@ -1723,8 +1755,9 @@ User memory:
             if let reasoning = delta["reasoning"] as? String, !reasoning.isEmpty {
                 reasoningText = mergeReasoningChunk(existing: reasoningText, incoming: reasoning)
             }
-            if let reasoningDetails = delta["reasoning_details"] as? [[String: Any]] {
-                for detail in reasoningDetails {
+            if let chunkReasoningDetails = delta["reasoning_details"] as? [[String: Any]] {
+                reasoningDetails.append(contentsOf: chunkReasoningDetails)
+                for detail in chunkReasoningDetails {
                     if let text = detail["text"] as? String {
                         reasoningText = mergeReasoningChunk(existing: reasoningText, incoming: text)
                     }
@@ -1752,7 +1785,7 @@ User memory:
             guard let buffer = toolBuffers[idx], let name = buffer.name, !name.isEmpty else { return nil }
             let argsData = buffer.arguments.data(using: .utf8) ?? Data("{}".utf8)
             let argsJson = (try? JSONSerialization.jsonObject(with: argsData) as? [String: Any]) ?? [:]
-            return AgenticToolCall(tool: name, arguments: argsJson)
+            return AgenticToolCall(id: buffer.id, tool: name, arguments: argsJson)
         }
 
         if assistantText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && toolCalls.isEmpty {
@@ -1768,30 +1801,33 @@ User memory:
             statusCode: statusCode,
             assistantText: assistantText,
             toolCalls: toolCalls,
-            reasoningText: reasoningText
+            reasoningText: reasoningText,
+            reasoningDetails: reasoningDetails
         )
     }
 
-    private static func parseNonStreamingOpenRouterResponse(_ data: Data) -> (text: String, toolCalls: [AgenticToolCall], reasoning: String) {
+    private static func parseNonStreamingOpenRouterResponse(_ data: Data) -> (text: String, toolCalls: [AgenticToolCall], reasoning: String, reasoningDetails: [[String: Any]]) {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let choice = (root["choices"] as? [[String: Any]])?.first,
               let message = choice["message"] as? [String: Any] else {
-            return ("", [], "")
+            return ("", [], "", [])
         }
         let text = message["content"] as? String ?? ""
         let reasoning = message["reasoning"] as? String ?? ""
+        let reasoningDetails = (message["reasoning_details"] as? [[String: Any]]) ?? []
         let calls: [AgenticToolCall] = ((message["tool_calls"] as? [[String: Any]]) ?? []).compactMap { call in
+            let id = call["id"] as? String
             guard let function = call["function"] as? [String: Any],
                   let name = function["name"] as? String else { return nil }
             let argsString = function["arguments"] as? String ?? "{}"
             let argsData = argsString.data(using: .utf8) ?? Data("{}".utf8)
             let args = (try? JSONSerialization.jsonObject(with: argsData) as? [String: Any]) ?? [:]
-            return AgenticToolCall(tool: name, arguments: args)
+            return AgenticToolCall(id: id, tool: name, arguments: args)
         }
-        return (text, calls, reasoning)
+        return (text, calls, reasoning, reasoningDetails)
     }
 
-    private static func buildOpenRouterMessages(systemPrompt: String, history: [[String: String]]) -> [[String: Any]] {
+    private static func buildOpenRouterMessages(systemPrompt: String, history: [[String: Any]]) -> [[String: Any]] {
         var messages: [[String: Any]] = []
         messages.append([
             "role": "system",
@@ -1799,7 +1835,7 @@ User memory:
             "cache_control": ["type": "ephemeral"]
         ])
         for message in history {
-            guard let role = message["role"], let content = message["content"] else { continue }
+            guard let role = message["role"] as? String else { continue }
             let normalizedRole: String
             switch role.lowercased() {
             case "system", "user", "assistant", "tool":
@@ -1809,7 +1845,23 @@ User memory:
             default:
                 normalizedRole = "user"
             }
-            messages.append(["role": normalizedRole, "content": content])
+            var out: [String: Any] = ["role": normalizedRole]
+            if let content = message["content"] as? String {
+                out["content"] = content
+            }
+            if let toolCalls = message["tool_calls"] as? [[String: Any]], !toolCalls.isEmpty {
+                out["tool_calls"] = toolCalls
+            }
+            if let toolCallID = message["tool_call_id"] as? String, !toolCallID.isEmpty {
+                out["tool_call_id"] = toolCallID
+            }
+            if let reasoningDetails = message["reasoning_details"] as? [[String: Any]], !reasoningDetails.isEmpty {
+                out["reasoning_details"] = reasoningDetails
+            }
+            if out["content"] == nil && out["tool_calls"] == nil {
+                out["content"] = ""
+            }
+            messages.append(out)
         }
         return messages
     }
@@ -1939,7 +1991,19 @@ User memory:
         if existing.hasSuffix(incoming) {
             return existing
         }
-        return existing + incoming
+        let maxOverlap = min(existing.count, incoming.count)
+        var overlap = 0
+        if maxOverlap > 1 {
+            for size in stride(from: maxOverlap, through: 1, by: -1) {
+                let existingSuffix = String(existing.suffix(size))
+                let incomingPrefix = String(incoming.prefix(size))
+                if existingSuffix == incomingPrefix {
+                    overlap = size
+                    break
+                }
+            }
+        }
+        return existing + incoming.dropFirst(overlap)
     }
 }
 
@@ -1971,9 +2035,11 @@ struct AgenticLLMResponse {
     var assistantText: String
     var toolCalls: [AgenticToolCall]
     var reasoningText: String
+    var reasoningDetails: [[String: Any]] = []
 }
 
 struct AgenticToolCall {
+    var id: String?
     var tool: String
     var arguments: [String: Any]
 
@@ -2011,13 +2077,13 @@ struct AgenticToolCall {
         }
 
         let arguments = (json["arguments"] as? [String: Any]) ?? [:]
-        return .init(tool: tool, arguments: arguments)
+        return .init(id: nil, tool: tool, arguments: arguments)
     }
 
     private static func parseLegacyExecute(from json: [String: Any]) -> AgenticToolCall? {
         guard let type = json["type"] as? String else { return nil }
         if type == "execute", let command = json["content"] as? String {
-            return .init(tool: "run_command", arguments: ["command": command])
+            return .init(id: nil, tool: "run_command", arguments: ["command": command])
         }
         return nil
     }
@@ -2142,6 +2208,7 @@ enum AgenticStreamingPreviewParser {
 struct AgenticToolResult {
     var userFacingSummary: String
     var jsonPayload: String
+    var toolResultPayloadJSON: String { jsonPayload }
 
     func toolResultEnvelope(tool: String) -> String {
         """
@@ -2151,6 +2218,17 @@ struct AgenticToolResult {
           "payload": \(jsonPayload)
         }
         """
+    }
+}
+
+enum AgenticJSON {
+    static func stringify(_ object: Any) -> String {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object),
+              let text = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return text
     }
 }
 
