@@ -327,6 +327,12 @@ final class AgenticViewModel: ObservableObject {
         guard !isRunning else { return }
         let typed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         let context = pendingComposerContext?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if typed.hasPrefix("/") {
+            input = ""
+            pendingComposerContext = nil
+            handleSlashCommand(typed)
+            return
+        }
         let prompt: String
         if !context.isEmpty, !typed.isEmpty {
             prompt = "\(context)\n\n\(typed)"
@@ -342,6 +348,106 @@ final class AgenticViewModel: ObservableObject {
         appendMessage(role: .user, content: prompt)
         llmHistory.append(["role": "user", "content": prompt])
         await runAgentLoop()
+    }
+
+    private func handleSlashCommand(_ raw: String) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        let command = parts.first.map { String($0).lowercased() } ?? ""
+        let arg = parts.count > 1 ? String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines) : ""
+
+        switch command {
+        case "/help", "/commands":
+            appendMessage(role: .status, content: slashHelpText())
+        case "/clear":
+            messages = []
+            llmHistory = []
+            sessionStore.save(messages: messages, llmHistory: llmHistory)
+        case "/compact":
+            compactSession()
+        case "/permissions":
+            appendMessage(role: .status, content: permissionsSummary())
+        case "/allow-all":
+            setApprovalAllowAllCommands(true)
+            appendMessage(role: .status, content: "All commands are now always allowed.")
+        case "/disallow-all":
+            setApprovalAllowAllCommands(false)
+            appendMessage(role: .status, content: "Global allow-all disabled.")
+        case "/allow-prefix":
+            guard !arg.isEmpty else {
+                appendMessage(role: .error, content: "Usage: /allow-prefix <prefix>")
+                return
+            }
+            approvalPreferences.allowedCommandPrefixes.insert(arg)
+            approvalPreferences.save()
+            syncApprovalPublishedState()
+            appendMessage(role: .status, content: "Added allowed prefix: \(arg)")
+        case "/unallow-prefix":
+            guard !arg.isEmpty else {
+                appendMessage(role: .error, content: "Usage: /unallow-prefix <prefix>")
+                return
+            }
+            if approvalPreferences.allowedCommandPrefixes.remove(arg) != nil {
+                approvalPreferences.save()
+                syncApprovalPublishedState()
+                appendMessage(role: .status, content: "Removed allowed prefix: \(arg)")
+            } else {
+                appendMessage(role: .status, content: "Prefix not found: \(arg)")
+            }
+        case "/reset-permissions", "/reset-approvals":
+            resetApprovalPreferences()
+            appendMessage(role: .status, content: "Command approvals reset.")
+        default:
+            appendMessage(role: .error, content: "Unknown command \(command). Use /help.")
+        }
+        sessionStore.save(messages: messages, llmHistory: llmHistory)
+    }
+
+    private func compactSession() {
+        let keepMessages = 40
+        let keepHistory = 20
+        guard messages.count > keepMessages || llmHistory.count > keepHistory else {
+            appendMessage(role: .status, content: "Nothing to compact.")
+            return
+        }
+
+        let droppedMessages = max(0, messages.count - keepMessages)
+        let droppedHistory = max(0, llmHistory.count - keepHistory)
+
+        if droppedMessages > 0 {
+            messages = Array(messages.suffix(keepMessages))
+        }
+        if droppedHistory > 0 {
+            llmHistory = Array(llmHistory.suffix(keepHistory))
+        }
+
+        appendMessage(role: .status, content: "Compacted session. Dropped \(droppedMessages) messages and \(droppedHistory) history items.")
+    }
+
+    private func permissionsSummary() -> String {
+        let all = approvalPreferences.allowAllCommands ? "ON" : "OFF"
+        let prefixes = approvalPreferences.allowedCommandPrefixes.sorted()
+        let prefixText = prefixes.isEmpty ? "(none)" : prefixes.joined(separator: ", ")
+        return """
+        Command approvals
+        - allow-all: \(all)
+        - allowed prefixes: \(prefixText)
+        """
+    }
+
+    private func slashHelpText() -> String {
+        """
+        Slash commands:
+        - /help or /commands
+        - /clear
+        - /compact
+        - /permissions
+        - /allow-all
+        - /disallow-all
+        - /allow-prefix <prefix>
+        - /unallow-prefix <prefix>
+        - /reset-permissions
+        """
     }
 
     func resolveCommandApproval(allow: Bool, pending: AgenticCommandApprovalContext) async {
