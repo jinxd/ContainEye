@@ -61,7 +61,7 @@ private enum TerminalUIMetrics {
     static let paneInnerInset = UIFloat(6)
     static let paneCornerRadius = UIFloat(14)
     static let terminalCornerRadius = UIFloat(12)
-    static let paneHeaderHeight = UIFloat(28)
+    static let paneHeaderHeight = UIFloat(34)
     static let keyboardSuggestionHeight = UIFloat(34)
     static let keyboardSuggestionBottomGap = UIFloat(8)
     static let keyboardBarHeight = UIFloat(40)
@@ -83,6 +83,26 @@ private enum TerminalUIColors {
     static let paneMaterial = UIColor.secondarySystemBackground
     static let paneStroke = UIColor.separator
     static let focusedPaneStroke = UIColor.tintColor
+    static let tabChromeFocused = UIColor { traits in
+        if traits.userInterfaceStyle == .dark {
+            return UIColor.white.withAlphaComponent(0.16)
+        }
+        return UIColor.white.withAlphaComponent(0.92)
+    }
+    static let tabChromeUnfocused = UIColor { traits in
+        if traits.userInterfaceStyle == .dark {
+            return UIColor.white.withAlphaComponent(0.08)
+        }
+        return UIColor.black.withAlphaComponent(0.05)
+    }
+    static let tabChromeStroke = UIColor { traits in
+        if traits.userInterfaceStyle == .dark {
+            return UIColor.white.withAlphaComponent(0.2)
+        }
+        return UIColor.black.withAlphaComponent(0.1)
+    }
+    static let tabTitleFocused = UIColor.label
+    static let tabTitleUnfocused = UIColor.secondaryLabel
     static let terminalBackground = UIColor.black
     static let secondaryText = UIColor.secondaryLabel
     static let keyboardKeyFill = UIColor { traits in
@@ -654,7 +674,14 @@ final class TerminalWorkspaceViewController: UIViewController {
     }
 
     private var isRegularLayout: Bool {
-        traitCollection.horizontalSizeClass == .regular
+        let width = max(paneContainerView.bounds.width, view.bounds.width)
+        if traitCollection.horizontalSizeClass == .regular {
+            return true
+        }
+        if traitCollection.userInterfaceIdiom == .pad, width >= UIFloat(620) {
+            return true
+        }
+        return width >= UIFloat(920)
     }
 
     // MARK: Pane Sync
@@ -1230,6 +1257,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
     private let panelView = UIView()
     private let headerView = UIView()
     private let contentView = UIView()
+    private let compactTabBarView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
 
     private let tabTitleLabel = UILabel()
     private let activeTitleLabel = UILabel()
@@ -1296,16 +1324,24 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         contentView.backgroundColor = .clear
         panelView.addSubview(contentView)
 
-        tabTitleLabel.font = UIFont.systemFont(ofSize: UIFloat(12), weight: .semibold)
-        tabTitleLabel.textColor = TerminalUIColors.secondaryText
-        headerView.addSubview(tabTitleLabel)
+        compactTabBarView.layer.cornerRadius = UIFloat(14)
+        compactTabBarView.layer.cornerCurve = .continuous
+        compactTabBarView.layer.borderWidth = UIFloat(1)
+        compactTabBarView.layer.borderColor = TerminalUIColors.tabChromeStroke.cgColor
+        compactTabBarView.clipsToBounds = true
+        headerView.addSubview(compactTabBarView)
 
-        activeTitleLabel.font = UIFont.systemFont(ofSize: UIFloat(12), weight: .regular)
+        tabTitleLabel.font = UIFont.systemFont(ofSize: UIFloat(12), weight: .semibold)
+        tabTitleLabel.textColor = TerminalUIColors.tabTitleUnfocused
+        tabTitleLabel.lineBreakMode = .byTruncatingTail
+        compactTabBarView.contentView.addSubview(tabTitleLabel)
+
+        activeTitleLabel.font = UIFont.systemFont(ofSize: UIFloat(11), weight: .semibold)
         activeTitleLabel.textColor = TerminalUIColors.secondaryText
         activeTitleLabel.lineBreakMode = .byTruncatingTail
-        headerView.addSubview(activeTitleLabel)
+        compactTabBarView.contentView.addSubview(activeTitleLabel)
 
-        cwdLabel.font = UIFont.systemFont(ofSize: UIFloat(11), weight: .regular)
+        cwdLabel.font = UIFont.systemFont(ofSize: UIFloat(10), weight: .regular)
         cwdLabel.textColor = TerminalUIColors.secondaryText
         cwdLabel.lineBreakMode = .byTruncatingMiddle
         headerView.addSubview(cwdLabel)
@@ -1316,10 +1352,10 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         warningLabel.isHidden = true
         headerView.addSubview(warningLabel)
 
-        closeButton.setImage(UIImage(systemName: "xmark.circle"), for: .normal)
+        closeButton.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
         closeButton.tintColor = UIColor.secondaryLabel
         closeButton.addTarget(self, action: #selector(didTapClose), for: .touchUpInside)
-        headerView.addSubview(closeButton)
+        compactTabBarView.contentView.addSubview(closeButton)
     }
 
     // MARK: Refresh
@@ -1330,13 +1366,14 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         applyPaneBorderStyle(focused: focused, activeTab: activeTab)
 
         let tabNumber = (workspace.panes.firstIndex(where: { $0.id == paneID }) ?? 0) + 1
-        tabTitleLabel.text = "Tab \(tabNumber)"
+        activeTitleLabel.text = "Tab \(tabNumber)"
+        updateCompactTabChrome(isFocused: focused, activeTab: activeTab)
 
         guard let activeTab,
               let controller = workspace.controller(for: activeTab.id)
         else {
             observedControllerID = nil
-            activeTitleLabel.text = "Choose a server"
+            tabTitleLabel.text = "Choose a server"
             cwdLabel.text = ""
             warningLabel.isHidden = true
             closeButton.isHidden = true
@@ -1346,7 +1383,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         }
 
         closeButton.isHidden = false
-        activeTitleLabel.text = activeTab.title
+        tabTitleLabel.text = activeTab.title
         cwdLabel.text = controller.cwd
         if controller.shellIntegrationStatus == .warning, let warning = controller.lastShellIntegrationWarning {
             warningLabel.text = warning
@@ -1416,27 +1453,62 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
     }
 
     private func layoutHeaderViews(in bounds: CGRect) {
-        var headerRect = bounds
+        let chromeTrailingInset = warningLabel.isHidden ? UIFloat(96) : UIFloat(182)
+        let chromeWidth = max(UIFloat(160), bounds.width - chromeTrailingInset)
+        compactTabBarView.frame = CGRect(
+            x: 0,
+            y: (bounds.height - UIFloat(28)) / 2,
+            width: min(chromeWidth, bounds.width),
+            height: UIFloat(28)
+        )
 
-        let trailingWidth = UIFloat(28)
-        let closeSplit = headerRect.split(at: trailingWidth, from: .maxXEdge)
-        closeButton.frame = closeSplit.slice
-        headerRect = closeSplit.remainder
+        let chromeBounds = compactTabBarView.bounds.insetBy(dx: UIFloat(8), dy: UIFloat(4))
+        let closeSide = closeButton.isHidden ? UIFloat(0) : UIFloat(18)
+        let leadingWidth = UIFloat(46)
+        activeTitleLabel.frame = CGRect(
+            x: chromeBounds.minX,
+            y: chromeBounds.minY,
+            width: leadingWidth,
+            height: chromeBounds.height
+        )
+        tabTitleLabel.frame = CGRect(
+            x: activeTitleLabel.frame.maxX + UIFloat(6),
+            y: chromeBounds.minY,
+            width: max(UIFloat(0), chromeBounds.width - leadingWidth - closeSide - UIFloat(12)),
+            height: chromeBounds.height
+        )
+        closeButton.frame = CGRect(
+            x: compactTabBarView.bounds.maxX - UIFloat(24),
+            y: (compactTabBarView.bounds.height - UIFloat(18)) / 2,
+            width: UIFloat(18),
+            height: UIFloat(18)
+        )
 
-        let warningWidth = warningLabel.isHidden ? UIFloat(0) : UIFloat(100)
-        let warningSplit = headerRect.split(at: warningWidth, from: .maxXEdge)
-        warningLabel.frame = warningSplit.slice
-        headerRect = warningSplit.remainder
+        let trailingAreaX = compactTabBarView.frame.maxX + UIFloat(8)
+        let trailingWidth = max(UIFloat(0), bounds.maxX - trailingAreaX)
+        if warningLabel.isHidden {
+            cwdLabel.frame = CGRect(x: trailingAreaX, y: 0, width: trailingWidth, height: bounds.height)
+            warningLabel.frame = .zero
+        } else {
+            let warningWidth = min(UIFloat(100), trailingWidth * 0.54)
+            warningLabel.frame = CGRect(x: trailingAreaX + trailingWidth - warningWidth, y: 0, width: warningWidth, height: bounds.height)
+            cwdLabel.frame = CGRect(x: trailingAreaX, y: 0, width: max(UIFloat(0), trailingWidth - warningWidth - UIFloat(6)), height: bounds.height)
+        }
+    }
 
-        let tabSplit = headerRect.split(at: UIFloat(56), from: .minXEdge)
-        tabTitleLabel.frame = tabSplit.slice
-
-        var middle = tabSplit.remainder
-        let cwdSplit = middle.split(at: UIFloat(90), from: .maxXEdge)
-        cwdLabel.frame = cwdSplit.slice
-        middle = cwdSplit.remainder
-
-        activeTitleLabel.frame = middle
+    private func updateCompactTabChrome(isFocused: Bool, activeTab: TerminalTabState?) {
+        if isFocused {
+            compactTabBarView.contentView.backgroundColor = TerminalUIColors.tabChromeFocused
+            tabTitleLabel.textColor = TerminalUIColors.tabTitleFocused
+        } else {
+            compactTabBarView.contentView.backgroundColor = TerminalUIColors.tabChromeUnfocused
+            tabTitleLabel.textColor = TerminalUIColors.tabTitleUnfocused
+        }
+        if let hex = activeTab?.shortcutColorHex, let accent = UIColor(hex: hex) {
+            compactTabBarView.layer.borderColor = accent.withAlphaComponent(0.55).cgColor
+        } else {
+            compactTabBarView.layer.borderColor = TerminalUIColors.tabChromeStroke.cgColor
+        }
     }
 
     // MARK: Content Switching
