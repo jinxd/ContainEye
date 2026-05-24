@@ -187,7 +187,7 @@ private func splitRect(_ rect: CGRect, count: Int, spacing: CGFloat, axis: Termi
 // MARK: - Workspace View Controller
 
 @MainActor
-final class TerminalWorkspaceViewController: UIViewController {
+final class TerminalWorkspaceViewController: UIViewController, UIGestureRecognizerDelegate {
     private let workspace = TerminalWorkspaceStore.shared
     private let terminalManager = TerminalNavigationManager.shared
     private let hardwareInput = TerminalHardwareInputController()
@@ -207,6 +207,20 @@ final class TerminalWorkspaceViewController: UIViewController {
     private let keyboardStackView = UIStackView()
     private let messageLabel = UILabel()
     private let completionOverlayView = TerminalCompletionOverlayView()
+    private lazy var swipeLeftRecognizer: UISwipeGestureRecognizer = {
+        let recognizer = UISwipeGestureRecognizer(target: self, action: #selector(didSwipePane(_:)))
+        recognizer.direction = .left
+        recognizer.cancelsTouchesInView = false
+        recognizer.delegate = self
+        return recognizer
+    }()
+    private lazy var swipeRightRecognizer: UISwipeGestureRecognizer = {
+        let recognizer = UISwipeGestureRecognizer(target: self, action: #selector(didSwipePane(_:)))
+        recognizer.direction = .right
+        recognizer.cancelsTouchesInView = false
+        recognizer.delegate = self
+        return recognizer
+    }()
 
     private var paneControllers: [UUID: TerminalPaneViewController] = [:]
 
@@ -298,6 +312,8 @@ final class TerminalWorkspaceViewController: UIViewController {
 
         paneContainerView.backgroundColor = .clear
         view.addSubview(paneContainerView)
+        paneContainerView.addGestureRecognizer(swipeLeftRecognizer)
+        paneContainerView.addGestureRecognizer(swipeRightRecognizer)
 
         keyboardBarView.clipsToBounds = true
         keyboardBarView.layer.cornerRadius = UIFloat(14)
@@ -1197,6 +1213,43 @@ final class TerminalWorkspaceViewController: UIViewController {
     @objc
     private func handleOpenRequestNotification() {
         processPendingRequests()
+    }
+
+    @objc
+    private func didSwipePane(_ recognizer: UISwipeGestureRecognizer) {
+        guard !isRegularLayout else { return }
+        let orderedPaneIDs = workspace.panes.map(\.id)
+        guard orderedPaneIDs.count > 1 else { return }
+        guard let focused = workspace.focusedPaneID,
+              let currentIndex = orderedPaneIDs.firstIndex(of: focused) else {
+            workspace.focusPane(paneID: orderedPaneIDs[0])
+            return
+        }
+
+        let nextIndex: Int
+        switch recognizer.direction {
+        case .left:
+            guard currentIndex < orderedPaneIDs.count - 1 else { return }
+            nextIndex = currentIndex + 1
+        case .right:
+            guard currentIndex > 0 else { return }
+            nextIndex = currentIndex - 1
+        default:
+            return
+        }
+
+        workspace.focusPane(paneID: orderedPaneIDs[nextIndex])
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard gestureRecognizer === swipeLeftRecognizer || gestureRecognizer === swipeRightRecognizer else {
+            return true
+        }
+
+        // Keep terminal interactions untouched: only treat swipes that start in the compact header strip.
+        let point = touch.location(in: paneContainerView)
+        let headerActivationHeight = TerminalUIMetrics.paneHeaderHeight + UIFloat(18)
+        return point.y <= headerActivationHeight
     }
 }
 
