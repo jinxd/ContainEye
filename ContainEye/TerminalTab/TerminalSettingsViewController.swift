@@ -7,6 +7,7 @@ import UIKit
 final class TerminalSettingsViewController: UITableViewController {
     private enum Section: Int, CaseIterable {
         case appearance
+        case session
         case hardware
     }
 
@@ -16,6 +17,7 @@ final class TerminalSettingsViewController: UITableViewController {
         case editTheme
         case deleteTheme
         case fontSize
+        case tmuxPersistence
         case volumeEnabled
         case volumeUpAction
         case volumeDownAction
@@ -51,6 +53,8 @@ final class TerminalSettingsViewController: UITableViewController {
         switch Section(rawValue: section) {
         case .appearance:
             return "Appearance"
+        case .session:
+            return "Session"
         case .hardware:
             return "Hardware Inputs"
         case .none:
@@ -62,6 +66,8 @@ final class TerminalSettingsViewController: UITableViewController {
         switch Section(rawValue: section) {
         case .appearance:
             return "Theme here is the app default for terminal sessions. Shortcut launches can override the theme per shortcut."
+        case .session:
+            return "When enabled, each terminal tab auto-attaches to a dedicated tmux session if tmux exists on the server."
         case .hardware, .none:
             return nil
         }
@@ -107,6 +113,14 @@ final class TerminalSettingsViewController: UITableViewController {
             stepper.value = Double(settings.state.display.fontSize)
             stepper.addTarget(self, action: #selector(didChangeFontStepper(_:)), for: .valueChanged)
             cell.accessoryView = stepper
+            cell.selectionStyle = .none
+
+        case .tmuxPersistence:
+            config.text = "Persistent Tabs (tmux)"
+            let toggle = UISwitch()
+            toggle.isOn = settings.state.session.persistenceMode == .tmuxPerTab
+            toggle.addTarget(self, action: #selector(didToggleTmuxPersistence(_:)), for: .valueChanged)
+            cell.accessoryView = toggle
             cell.selectionStyle = .none
 
         case .volumeEnabled:
@@ -189,7 +203,7 @@ final class TerminalSettingsViewController: UITableViewController {
                 self?.settings.setShakeAction(action)
             }
 
-        case .fontSize, .volumeEnabled, .shakeEnabled:
+        case .tmuxPersistence, .fontSize, .volumeEnabled, .shakeEnabled:
             break
         }
     }
@@ -205,6 +219,8 @@ final class TerminalSettingsViewController: UITableViewController {
                 rows.insert(.deleteTheme, at: 3)
             }
             return rows
+        case .session:
+            return [.tmuxPersistence]
         case .hardware:
             return [.volumeEnabled, .volumeUpAction, .volumeDownAction, .shakeEnabled, .shakeAction]
         }
@@ -241,6 +257,11 @@ final class TerminalSettingsViewController: UITableViewController {
     @objc
     private func didToggleShake(_ sender: UISwitch) {
         settings.setShakeEnabled(sender.isOn)
+    }
+
+    @objc
+    private func didToggleTmuxPersistence(_ sender: UISwitch) {
+        settings.setSessionPersistenceMode(sender.isOn ? .tmuxPerTab : .off)
     }
 
     private func presentActionPicker(

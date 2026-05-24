@@ -37,6 +37,7 @@ final class XTermSessionController: Identifiable {
     let id: UUID
     let credentialKey: String
     var title: String
+    private let tmuxSessionName: String?
 
     var connectionStatus: TerminalConnectionStatus = .idle
     var shellIntegrationStatus: ShellIntegrationStatus = .unknown
@@ -82,6 +83,7 @@ final class XTermSessionController: Identifiable {
     private static let autoReloadCooldown: TimeInterval = 2
     private static let autoReloadWindow: TimeInterval = 15
     private static let maxAutoReloadAttemptsPerWindow = 3
+    private static let tmuxSessionPrefix = "containeye-tab-"
 
     var currentInputBuffer: String {
         inputBuffer
@@ -97,12 +99,14 @@ final class XTermSessionController: Identifiable {
         id: UUID = UUID(),
         credentialKey: String,
         title: String,
+        tmuxSessionName: String? = nil,
         suggestionEngine: CommandSuggestionProviding,
         documentIndex: RemoteDocumentTreeIndex
     ) {
         self.id = id
         self.credentialKey = credentialKey
         self.title = title
+        self.tmuxSessionName = tmuxSessionName
         self.suggestionEngine = suggestionEngine
         self.documentIndex = documentIndex
     }
@@ -142,7 +146,10 @@ final class XTermSessionController: Identifiable {
 
         connectionStatus = .connecting
 
-        let stream = XTermSSHStream(credential: credential)
+        let stream = XTermSSHStream(
+            credential: credential,
+            startupCommand: makeSessionStartupCommand()
+        )
         self.stream = stream
 
         stream.onOutput = { [weak self] output in
@@ -187,6 +194,29 @@ final class XTermSessionController: Identifiable {
         stream?.disconnect()
         stream = nil
         connectionStatus = .disconnected
+    }
+
+    private func makeSessionStartupCommand() -> String? {
+        let configuredSessionName: String
+
+        if let explicit = tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !explicit.isEmpty {
+            configuredSessionName = explicit
+        } else {
+            let mode = TerminalSettingsStore.shared.state.session.persistenceMode
+            guard mode == .tmuxPerTab else { return nil }
+            configuredSessionName = Self.tmuxSessionPrefix + id.uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        }
+
+        let quotedSessionName = Self.shellSingleQuoted(configuredSessionName)
+        return """
+if command -v tmux >/dev/null 2>&1; then __ce_tmux_session=\(quotedSessionName); if tmux has-session -t "$__ce_tmux_session" 2>/dev/null; then tmux attach-session -t "$__ce_tmux_session"; else tmux new-session -s "$__ce_tmux_session"; fi; fi\r
+"""
+    }
+
+    private static func shellSingleQuoted(_ value: String) -> String {
+        let escaped = value.replacingOccurrences(of: "'", with: "'\"'\"'")
+        return "'\(escaped)'"
     }
 
     func sendInput(_ data: String) {
@@ -970,11 +1000,13 @@ final class XTermSSHStream {
     var onDisconnected: ((String?) -> Void)?
 
     private let credential: Credential
+    private let startupCommand: String?
     private var shell: SSHShell?
     private let queue = DispatchQueue(label: "ContainEye.XTermSSHStream")
 
-    init(credential: Credential) {
+    init(credential: Credential, startupCommand: String? = nil) {
         self.credential = credential
+        self.startupCommand = startupCommand
     }
 
     func connect() {
@@ -1034,7 +1066,14 @@ final class XTermSSHStream {
             if let error {
                 self.onDisconnected?("SSH open error: \(error)")
             } else {
-                self.onConnected?()
+                if let startupCommand, !startupCommand.isEmpty {
+                    self.write(startupCommand)
+                    self.queue.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                        self?.onConnected?()
+                    }
+                } else {
+                    self.onConnected?()
+                }
             }
         }
     }

@@ -82,4 +82,16 @@ struct TerminalSettingsStoreTests {
         #expect(names.contains("Same"))
         #expect(names.contains("Same 2"))
     }
+
+    @MainActor
+    @Test
+    func persistsSessionPersistenceMode() {
+        let defaults = makeDefaults(suffix: "session-persist")
+
+        let storeA = TerminalSettingsStore(userDefaults: defaults)
+        storeA.setSessionPersistenceMode(.tmuxPerTab)
+
+        let storeB = TerminalSettingsStore(userDefaults: defaults)
+        #expect(storeB.state.session.persistenceMode == .tmuxPerTab)
+    }
 }

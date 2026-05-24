@@ -1451,17 +1451,29 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         }
 
         let picker = TerminalServerPickerViewController()
-        picker.onShortcutSelected = { [weak self] shortcut in
+        picker.onSelection = { [weak self] selection in
             guard let self else { return }
             self.workspace.focusPane(paneID: self.paneID)
-            self.workspace.openTab(
-                credentialKey: shortcut.credentialKey,
-                preferredTitle: shortcut.title,
-                inFocusedPane: true,
-                themeOverrideSelectionKey: shortcut.themeSelectionKey,
-                shortcutColorHex: shortcut.colorHex
-            )
-            self.launchStartupScriptIfNeeded(shortcut.startupScript, credentialKey: shortcut.credentialKey)
+            switch selection {
+            case let .shortcut(shortcut):
+                self.workspace.openTab(
+                    credentialKey: shortcut.credentialKey,
+                    preferredTitle: shortcut.title,
+                    inFocusedPane: true,
+                    themeOverrideSelectionKey: shortcut.themeSelectionKey,
+                    shortcutColorHex: shortcut.colorHex
+                )
+                self.launchStartupScriptIfNeeded(shortcut.startupScript, credentialKey: shortcut.credentialKey)
+            case let .tmuxSession(target):
+                self.workspace.openTab(
+                    credentialKey: target.credentialKey,
+                    preferredTitle: target.title,
+                    inFocusedPane: true,
+                    themeOverrideSelectionKey: nil,
+                    shortcutColorHex: "#10B981",
+                    tmuxSessionName: target.sessionName
+                )
+            }
         }
         addChild(picker)
         contentView.addSubview(picker.view)
@@ -1665,18 +1677,40 @@ private extension UIColor {
 
 @MainActor
 final class TerminalServerPickerViewController: UIViewController {
-    var onShortcutSelected: ((TerminalLaunchShortcut) -> Void)?
+    struct TmuxSessionTarget {
+        let credentialKey: String
+        let sessionName: String
+        let title: String
+    }
+
+    enum SelectionTarget {
+        case shortcut(TerminalLaunchShortcut)
+        case tmuxSession(TmuxSessionTarget)
+    }
+
+    var onSelection: ((SelectionTarget) -> Void)?
 
     private enum Section: Int, CaseIterable {
         case main
     }
 
+    private struct TmuxSessionSummary: Hashable {
+        let sessionName: String
+        let windowsCount: Int?
+        let isAttached: Bool?
+    }
+
+    private enum ItemKind: Hashable {
+        case shortcut(shortcutID: String)
+        case tmuxSession(credentialKey: String, sessionName: String)
+    }
+
     private struct Item: Hashable {
-        let shortcutID: String
+        let kind: ItemKind
         let credentialKey: String
         let title: String
         let host: String
-        let startupScript: String
+        let detailText: String
         let colorHex: String
     }
 
@@ -1744,7 +1778,7 @@ final class TerminalServerPickerViewController: UIViewController {
         addShortcutButton.addTarget(self, action: #selector(didTapAddShortcut), for: .touchUpInside)
         view.addSubview(addShortcutButton)
 
-        emptyStateLabel.text = "No shortcuts yet"
+        emptyStateLabel.text = "No shortcuts or tmux sessions"
         emptyStateLabel.textAlignment = .center
         emptyStateLabel.font = UIFont.systemFont(ofSize: UIFloat(14), weight: .medium)
         emptyStateLabel.textColor = UIColor.secondaryLabel
@@ -1770,17 +1804,53 @@ final class TerminalServerPickerViewController: UIViewController {
 
             let shortcuts = await TerminalLaunchShortcut.all(in: SharedDatabase.db)
             let credentialMap = Dictionary(uniqueKeysWithValues: credentials.map { ($0.key, $0) })
-            let mappedItems = shortcuts.compactMap { shortcut -> Item? in
+            let shortcutItems = shortcuts.compactMap { shortcut -> Item? in
                 guard let credential = credentialMap[shortcut.credentialKey] else { return nil }
                 return Item(
-                    shortcutID: shortcut.id,
+                    kind: .shortcut(shortcutID: shortcut.id),
                     credentialKey: shortcut.credentialKey,
                     title: shortcut.title,
                     host: credential.host,
-                    startupScript: shortcut.startupScript,
+                    detailText: {
+                        let trimmed = shortcut.startupScript.trimmingCharacters(in: .whitespacesAndNewlines)
+                        return trimmed.isEmpty ? "No startup script" : trimmed
+                    }(),
                     colorHex: shortcut.colorHex ?? "#3B82F6"
                 )
             }
+
+            let sessionItems = await withTaskGroup(of: [Item].self, returning: [Item].self) { group in
+                for credential in credentials {
+                    group.addTask {
+                        let sessions = await Self.discoverTmuxSessions(for: credential)
+                        guard !sessions.isEmpty else { return [] }
+                        return sessions.map { session in
+                            let detail = Self.tmuxDetailText(for: session)
+                            return Item(
+                                kind: .tmuxSession(credentialKey: credential.key, sessionName: session.sessionName),
+                                credentialKey: credential.key,
+                                title: session.sessionName,
+                                host: credential.host,
+                                detailText: detail,
+                                colorHex: "#10B981"
+                            )
+                        }
+                    }
+                }
+
+                var all: [Item] = []
+                for await partial in group {
+                    all.append(contentsOf: partial)
+                }
+                return all.sorted {
+                    if $0.host == $1.host {
+                        return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+                    }
+                    return $0.host.localizedCaseInsensitiveCompare($1.host) == .orderedAscending
+                }
+            }
+
+            let mappedItems = shortcutItems + sessionItems
 
             await MainActor.run {
                 self.items = mappedItems
@@ -1805,7 +1875,7 @@ final class TerminalServerPickerViewController: UIViewController {
             cell.apply(
                 title: item.title,
                 host: item.host,
-                startupScript: item.startupScript,
+                detailText: item.detailText,
                 colorHex: item.colorHex
             )
             return cell
@@ -1842,6 +1912,59 @@ final class TerminalServerPickerViewController: UIViewController {
         }
     }
 
+    nonisolated private static func discoverTmuxSessions(for credential: Credential) async -> [TmuxSessionSummary] {
+        let command = """
+if command -v tmux >/dev/null 2>&1; then tmux list-sessions -F '#{session_name}\\t#{session_windows}\\t#{?session_attached,1,0}' 2>/dev/null || true; fi
+"""
+        let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
+        let lines = output
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        return lines.compactMap { line in
+            let components = line.components(separatedBy: "\t")
+            guard let first = components.first else { return nil }
+            let session = first.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !session.isEmpty else { return nil }
+
+            let windowsCount: Int?
+            if components.count > 1 {
+                windowsCount = Int(components[1].trimmingCharacters(in: .whitespacesAndNewlines))
+            } else {
+                windowsCount = nil
+            }
+
+            let isAttached: Bool?
+            if components.count > 2 {
+                let value = components[2].trimmingCharacters(in: .whitespacesAndNewlines)
+                isAttached = value == "1"
+            } else {
+                isAttached = nil
+            }
+
+            return TmuxSessionSummary(
+                sessionName: session,
+                windowsCount: windowsCount,
+                isAttached: isAttached
+            )
+        }
+    }
+
+    nonisolated private static func tmuxDetailText(for session: TmuxSessionSummary) -> String {
+        var parts: [String] = []
+        parts.append("tmux session")
+        if let windowsCount = session.windowsCount {
+            let suffix = windowsCount == 1 ? "window" : "windows"
+            parts.append("\(windowsCount) \(suffix)")
+        }
+        if let attached = session.isAttached {
+            parts.append(attached ? "attached" : "detached")
+        }
+        return parts.joined(separator: " • ")
+    }
+
     @objc
     private func didTapAddShortcut() {
         let editor = TerminalShortcutEditorViewController()
@@ -1861,14 +1984,24 @@ extension TerminalServerPickerViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         guard indexPath.item < items.count else { return }
         let item = items[indexPath.item]
-        Task {
-            let shortcuts = await TerminalLaunchShortcut.all(in: SharedDatabase.db)
-            guard var selected = shortcuts.first(where: { $0.id == item.shortcutID }) else { return }
-            selected.lastUse = .now
-            try? await selected.write(to: SharedDatabase.db)
-            await MainActor.run {
-                self.onShortcutSelected?(selected)
+        switch item.kind {
+        case let .shortcut(shortcutID):
+            Task {
+                let shortcuts = await TerminalLaunchShortcut.all(in: SharedDatabase.db)
+                guard var selected = shortcuts.first(where: { $0.id == shortcutID }) else { return }
+                selected.lastUse = .now
+                try? await selected.write(to: SharedDatabase.db)
+                await MainActor.run {
+                    self.onSelection?(.shortcut(selected))
+                }
             }
+        case let .tmuxSession(credentialKey, sessionName):
+            let target = TmuxSessionTarget(
+                credentialKey: credentialKey,
+                sessionName: sessionName,
+                title: sessionName
+            )
+            onSelection?(.tmuxSession(target))
         }
     }
 
@@ -1879,12 +2012,13 @@ extension TerminalServerPickerViewController: UICollectionViewDelegate {
     ) -> UIContextMenuConfiguration? {
         guard indexPath.item < items.count else { return nil }
         let item = items[indexPath.item]
+        guard case let .shortcut(shortcutID) = item.kind else { return nil }
 
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
             guard let self else { return UIMenu() }
 
             let edit = UIAction(title: "Edit Shortcut", image: UIImage(systemName: "pencil")) { _ in
-                self.presentShortcutEditor(for: item.shortcutID)
+                self.presentShortcutEditor(for: shortcutID)
             }
 
             let delete = UIAction(
@@ -1892,7 +2026,7 @@ extension TerminalServerPickerViewController: UICollectionViewDelegate {
                 image: UIImage(systemName: "trash"),
                 attributes: .destructive
             ) { _ in
-                self.deleteShortcut(shortcutID: item.shortcutID)
+                self.deleteShortcut(shortcutID: shortcutID)
             }
 
             return UIMenu(children: [edit, delete])
@@ -2857,10 +2991,10 @@ final class TerminalServerCell: UICollectionViewCell {
         backgroundCard.addSubview(scriptLabel)
     }
 
-    func apply(title: String, host: String, startupScript: String, colorHex: String) {
+    func apply(title: String, host: String, detailText: String, colorHex: String) {
         titleLabel.text = title
         hostLabel.text = host
-        let trimmed = startupScript.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = detailText.trimmingCharacters(in: .whitespacesAndNewlines)
         scriptLabel.text = trimmed.isEmpty ? "No startup script" : trimmed
         let accent = UIColor(hex: colorHex) ?? .systemBlue
         backgroundCard.backgroundColor = accent.withAlphaComponent(0.20)

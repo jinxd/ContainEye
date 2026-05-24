@@ -8,6 +8,7 @@ struct TerminalTabState: Identifiable, Codable, Hashable {
     var createdAt: Date
     var themeOverrideSelectionKey: String?
     var shortcutColorHex: String?
+    var tmuxSessionName: String?
 }
 
 struct TerminalPaneState: Identifiable, Codable, Hashable {
@@ -78,7 +79,8 @@ final class TerminalWorkspaceStore {
         preferredTitle: String? = nil,
         inFocusedPane: Bool = true,
         themeOverrideSelectionKey: String? = nil,
-        shortcutColorHex: String? = nil
+        shortcutColorHex: String? = nil,
+        tmuxSessionName: String? = nil
     ) {
         guard tabs.count < maxTabCount else {
             return
@@ -120,7 +122,8 @@ final class TerminalWorkspaceStore {
             title: tabTitle,
             createdAt: .now,
             themeOverrideSelectionKey: themeOverrideSelectionKey,
-            shortcutColorHex: shortcutColorHex
+            shortcutColorHex: shortcutColorHex,
+            tmuxSessionName: tmuxSessionName
         )
 
         tabs[tab.id] = tab
@@ -136,6 +139,7 @@ final class TerminalWorkspaceStore {
             id: tab.id,
             credentialKey: credentialKey,
             title: tab.title,
+            tmuxSessionName: tab.tmuxSessionName,
             suggestionEngine: suggestionEngine,
             documentIndex: suggestionIndex
         )
@@ -326,6 +330,7 @@ final class TerminalWorkspaceStore {
                 id: tab.id,
                 credentialKey: tab.credentialKey,
                 title: tab.title,
+                tmuxSessionName: tab.tmuxSessionName,
                 suggestionEngine: suggestionEngine,
                 documentIndex: suggestionIndex
             )

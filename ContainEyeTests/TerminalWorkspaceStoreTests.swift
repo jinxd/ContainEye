@@ -31,7 +31,7 @@ struct TerminalWorkspaceStoreTests {
 
     @MainActor
     @Test
-    func opensTabsInFocusedPaneAndEnforcesTwelveTabLimit() {
+    func opensTabsAcrossPanesAndEnforcesOneSessionPerPaneLimit() {
         let store = makeStore()
         store.splitPane()
 
@@ -42,11 +42,11 @@ struct TerminalWorkspaceStoreTests {
             store.openTab(credentialKey: "server-\(idx)", inFocusedPane: true)
         }
 
-        #expect(store.tabs.count == 12)
+        #expect(store.tabs.count == 4)
 
         if let focusedPaneID {
             let focusedTabs = store.tabStates(in: focusedPaneID)
-            #expect(focusedTabs.count == 12)
+            #expect(focusedTabs.count == 1)
         }
     }
 
@@ -84,5 +84,39 @@ struct TerminalWorkspaceStoreTests {
         #expect(storeB.panes.count == paneCount)
         #expect(storeB.tabs.count == tabCount)
         #expect(storeB.focusedPaneID == focusedPane)
+    }
+
+    @MainActor
+    @Test
+    func persistsExplicitTmuxSessionNameOnTab() {
+        let persistenceKey = "workspace.tmux.persist.\(UUID().uuidString)"
+        let suiteName = "ContainEyeTests.Workspace.tmux.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let storeA = TerminalWorkspaceStore(
+            userDefaults: defaults,
+            persistenceKey: persistenceKey,
+            resolveCredentialLabel: { key in "Label-\(key)" },
+            autoConnectControllers: false
+        )
+
+        storeA.openTab(
+            credentialKey: "server-one",
+            preferredTitle: "Session alpha",
+            inFocusedPane: true,
+            tmuxSessionName: "alpha"
+        )
+        storeA.persistWorkspace()
+
+        let storeB = TerminalWorkspaceStore(
+            userDefaults: defaults,
+            persistenceKey: persistenceKey,
+            resolveCredentialLabel: { key in "Label-\(key)" },
+            autoConnectControllers: false
+        )
+
+        let restored = storeB.tabs.values.first
+        #expect(restored?.tmuxSessionName == "alpha")
     }
 }

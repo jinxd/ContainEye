@@ -119,17 +119,32 @@ struct TerminalHardwareSettings: Codable, Hashable {
     )
 }
 
+enum TerminalSessionPersistenceMode: String, Codable, Hashable {
+    case off
+    case tmuxPerTab
+}
+
+struct TerminalSessionSettings: Codable, Hashable {
+    var persistenceMode: TerminalSessionPersistenceMode
+
+    static let `default` = TerminalSessionSettings(
+        persistenceMode: .off
+    )
+}
+
 struct TerminalSettingsState: Codable, Hashable {
     var themeSelection: TerminalThemeSelection
     var customThemes: [TerminalThemeCustom]
     var display: TerminalDisplaySettings
     var hardware: TerminalHardwareSettings
+    var session: TerminalSessionSettings
 
     static let `default` = TerminalSettingsState(
         themeSelection: .preset(id: "midnight"),
         customThemes: [],
         display: .default,
-        hardware: .default
+        hardware: .default,
+        session: .default
     )
 }
 
@@ -304,6 +319,10 @@ final class TerminalSettingsStore {
 
     func setShakeAction(_ action: TerminalHardwareAction) {
         state.hardware.shakeAction = action
+    }
+
+    func setSessionPersistenceMode(_ mode: TerminalSessionPersistenceMode) {
+        state.session.persistenceMode = mode
     }
 
     func customTheme(id: String) -> TerminalThemeCustom? {
