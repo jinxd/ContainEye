@@ -38,6 +38,7 @@ final class XTermSessionController: Identifiable {
     let credentialKey: String
     var title: String
     private let tmuxSessionName: String?
+    private let disableAutoPersistentSession: Bool
 
     var connectionStatus: TerminalConnectionStatus = .idle
     var shellIntegrationStatus: ShellIntegrationStatus = .unknown
@@ -100,6 +101,7 @@ final class XTermSessionController: Identifiable {
         credentialKey: String,
         title: String,
         tmuxSessionName: String? = nil,
+        disableAutoPersistentSession: Bool = false,
         suggestionEngine: CommandSuggestionProviding,
         documentIndex: RemoteDocumentTreeIndex
     ) {
@@ -107,6 +109,7 @@ final class XTermSessionController: Identifiable {
         self.credentialKey = credentialKey
         self.title = title
         self.tmuxSessionName = tmuxSessionName
+        self.disableAutoPersistentSession = disableAutoPersistentSession
         self.suggestionEngine = suggestionEngine
         self.documentIndex = documentIndex
     }
@@ -203,6 +206,7 @@ final class XTermSessionController: Identifiable {
            !explicit.isEmpty {
             configuredSessionName = explicit
         } else {
+            guard !disableAutoPersistentSession else { return nil }
             let mode = TerminalSettingsStore.shared.state.session.persistenceMode
             guard mode == .tmuxPerTab else { return nil }
             configuredSessionName = Self.tmuxSessionPrefix + id.uuidString.replacingOccurrences(of: "-", with: "").lowercased()

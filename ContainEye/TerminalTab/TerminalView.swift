@@ -1456,12 +1456,14 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
             self.workspace.focusPane(paneID: self.paneID)
             switch selection {
             case let .shortcut(shortcut):
+                let hasStartupScript = !shortcut.startupScript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 self.workspace.openTab(
                     credentialKey: shortcut.credentialKey,
                     preferredTitle: shortcut.title,
                     inFocusedPane: true,
                     themeOverrideSelectionKey: shortcut.themeSelectionKey,
-                    shortcutColorHex: shortcut.colorHex
+                    shortcutColorHex: shortcut.colorHex,
+                    disableAutoPersistentSession: hasStartupScript
                 )
                 self.launchStartupScriptIfNeeded(shortcut.startupScript, credentialKey: shortcut.credentialKey)
             case let .tmuxSession(target):
@@ -2012,24 +2014,39 @@ extension TerminalServerPickerViewController: UICollectionViewDelegate {
     ) -> UIContextMenuConfiguration? {
         guard indexPath.item < items.count else { return nil }
         let item = items[indexPath.item]
-        guard case let .shortcut(shortcutID) = item.kind else { return nil }
 
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
             guard let self else { return UIMenu() }
 
-            let edit = UIAction(title: "Edit Shortcut", image: UIImage(systemName: "pencil")) { _ in
-                self.presentShortcutEditor(for: shortcutID)
-            }
+            switch item.kind {
+            case let .shortcut(shortcutID):
+                let edit = UIAction(title: "Edit Shortcut", image: UIImage(systemName: "pencil")) { _ in
+                    self.presentShortcutEditor(for: shortcutID)
+                }
 
-            let delete = UIAction(
-                title: "Delete Shortcut",
-                image: UIImage(systemName: "trash"),
-                attributes: .destructive
-            ) { _ in
-                self.deleteShortcut(shortcutID: shortcutID)
-            }
+                let delete = UIAction(
+                    title: "Delete Shortcut",
+                    image: UIImage(systemName: "trash"),
+                    attributes: .destructive
+                ) { _ in
+                    self.deleteShortcut(shortcutID: shortcutID)
+                }
 
-            return UIMenu(children: [edit, delete])
+                return UIMenu(children: [edit, delete])
+
+            case let .tmuxSession(credentialKey, sessionName):
+                let close = UIAction(
+                    title: "Close Session",
+                    image: UIImage(systemName: "xmark.circle"),
+                    attributes: .destructive
+                ) { _ in
+                    self.confirmAndCloseTmuxSession(
+                        credentialKey: credentialKey,
+                        sessionName: sessionName
+                    )
+                }
+                return UIMenu(children: [close])
+            }
         }
     }
 
@@ -2066,6 +2083,33 @@ extension TerminalServerPickerViewController: UICollectionViewDelegate {
             )) ?? []
             guard let row = rows.first else { return }
             try? await row.delete(from: SharedDatabase.db)
+            await MainActor.run {
+                self.reloadCredentials()
+            }
+        }
+    }
+
+    private func confirmAndCloseTmuxSession(credentialKey: String, sessionName: String) {
+        let alert = UIAlertController(
+            title: "Close tmux session?",
+            message: "This will run `tmux kill-session -t \(sessionName)` on the server.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Close Session", style: .destructive, handler: { [weak self] _ in
+            self?.closeTmuxSession(credentialKey: credentialKey, sessionName: sessionName)
+        }))
+        present(alert, animated: true)
+    }
+
+    private func closeTmuxSession(credentialKey: String, sessionName: String) {
+        guard let credential = keychain().getCredential(for: credentialKey) else { return }
+
+        let escapedSessionName = sessionName.replacingOccurrences(of: "'", with: "'\"'\"'")
+        let command = "tmux kill-session -t '\(escapedSessionName)' 2>/dev/null || true"
+
+        Task {
+            _ = try? await SSHClientActor.shared.execute(command, on: credential)
             await MainActor.run {
                 self.reloadCredentials()
             }
