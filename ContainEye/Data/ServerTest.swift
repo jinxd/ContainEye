@@ -13,6 +13,36 @@ import AppIntents
 import SwiftUI
 import CoreSpotlight
 
+private struct TestCommandExecutionResult {
+    let output: String
+    let exitCode: Int
+}
+
+private enum TestCommandWrapper {
+    static let exitMarker = "__CONTAINEYE_EXIT_CODE__"
+
+    static func wrap(_ command: String) -> String {
+        let escapedCommand = command.replacingOccurrences(of: "'", with: "'\"'\"'")
+        return """
+        sh -lc '\(escapedCommand); __ce_status=$?; printf "\\n\(exitMarker):%s\\n" "$__ce_status"'
+        """
+    }
+
+    static func parseResult(from rawOutput: String) -> TestCommandExecutionResult? {
+        guard let markerRange = rawOutput.range(of: "\(exitMarker):", options: .backwards) else {
+            return nil
+        }
+
+        let output = String(rawOutput[..<markerRange.lowerBound]).trimmingCharacters(in: .newlines)
+        let exitCodeText = rawOutput[markerRange.upperBound...]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let exitCode = Int(exitCodeText) else {
+            return nil
+        }
+        return TestCommandExecutionResult(output: output, exitCode: exitCode)
+    }
+}
+
 struct ServerTest: BlackbirdModel {
 
     static let primaryKey: [BlackbirdColumnKeyPath] = [
@@ -116,12 +146,23 @@ struct ServerTest: BlackbirdModel {
         guard let credential = keychain().getCredential(for: self.credentialKey) else {
             return "(Client Error) No credential in keychain"
         }
-            let fetchOutput: () async throws -> String = {
-                try await retry { try await SSHClientActor.shared.execute(self.command, on: credential) }
-                    .trimmingFromEnd(character: "\n", upto: 1)
+            let wrappedCommand = TestCommandWrapper.wrap(self.command)
+            let rawOutput = try await retry { try await SSHClientActor.shared.execute(wrappedCommand, on: credential) }
+                .trimmingFromEnd(character: "\n", upto: 1)
+
+            guard let result = TestCommandWrapper.parseResult(from: rawOutput) else {
+                let trimmedOutput = rawOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmedOutput.isEmpty ? "Command finished without output and without status marker." : rawOutput
             }
-            let output = try await fetchOutput()
-            return await output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? try fetchOutput() : output
+
+            let trimmedOutput = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedOutput.isEmpty {
+                return result.output
+            }
+            if result.exitCode == 0 {
+                return "Command succeeded (exit code 0) but produced no output."
+            }
+            return "Command failed (exit code \(result.exitCode)) and produced no output."
         } catch {
             do{
                 let _ = try await URLSession.shared.data(from: URL(string: "https://connectivitycheck.gstatic.com/generate_204")!)
