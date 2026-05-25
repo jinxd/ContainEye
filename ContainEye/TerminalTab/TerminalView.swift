@@ -1276,10 +1276,10 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
 
     private let headerView = UIView()
     private let contentView = UIView()
-    private let compactTabBarView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
-
+    private let leadingChromeView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
+    private let centerChromeView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
+    private let trailingChromeView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
     private let tabTitleLabel = UILabel()
-    private let activeTitleLabel = UILabel()
     private let cwdLabel = UILabel()
     private let warningLabel = UILabel()
     private let backButton = UIButton(type: .system)
@@ -1339,22 +1339,21 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         contentView.backgroundColor = .clear
         view.addSubview(contentView)
 
-        compactTabBarView.layer.cornerRadius = UIFloat(14)
-        compactTabBarView.layer.cornerCurve = .continuous
-        compactTabBarView.layer.borderWidth = UIFloat(1)
-        compactTabBarView.layer.borderColor = TerminalUIColors.tabChromeStroke.cgColor
-        compactTabBarView.clipsToBounds = true
-        headerView.addSubview(compactTabBarView)
+        [leadingChromeView, centerChromeView, trailingChromeView].forEach { chrome in
+            chrome.layer.cornerCurve = .continuous
+            chrome.layer.borderWidth = UIFloat(1)
+            chrome.layer.borderColor = TerminalUIColors.tabChromeStroke.cgColor
+            chrome.clipsToBounds = true
+            headerView.addSubview(chrome)
+        }
+        leadingChromeView.layer.cornerRadius = UIFloat(20)
+        centerChromeView.layer.cornerRadius = UIFloat(20)
+        trailingChromeView.layer.cornerRadius = UIFloat(20)
 
         tabTitleLabel.font = UIFont.systemFont(ofSize: UIFloat(12), weight: .semibold)
         tabTitleLabel.textColor = TerminalUIColors.tabTitleUnfocused
         tabTitleLabel.lineBreakMode = .byTruncatingTail
-        compactTabBarView.contentView.addSubview(tabTitleLabel)
-
-        activeTitleLabel.font = UIFont.systemFont(ofSize: UIFloat(11), weight: .semibold)
-        activeTitleLabel.textColor = TerminalUIColors.secondaryText
-        activeTitleLabel.lineBreakMode = .byTruncatingTail
-        compactTabBarView.contentView.addSubview(activeTitleLabel)
+        centerChromeView.contentView.addSubview(tabTitleLabel)
 
         cwdLabel.font = UIFont.systemFont(ofSize: UIFloat(10), weight: .regular)
         cwdLabel.textColor = TerminalUIColors.secondaryText
@@ -1370,25 +1369,25 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         backButton.setImage(UIImage(systemName: "chevron.left"), for: .normal)
         backButton.tintColor = UIColor.secondaryLabel
         backButton.addTarget(self, action: #selector(didTapBack), for: .touchUpInside)
-        compactTabBarView.contentView.addSubview(backButton)
+        leadingChromeView.contentView.addSubview(backButton)
 
         overflowButton.setImage(UIImage(systemName: "ellipsis"), for: .normal)
         overflowButton.tintColor = UIColor.secondaryLabel
         overflowButton.addTarget(self, action: #selector(didTapOverflow), for: .touchUpInside)
-        compactTabBarView.contentView.addSubview(overflowButton)
+        trailingChromeView.contentView.addSubview(overflowButton)
 
         let swipeLeft = UISwipeGestureRecognizer(target: self, action: #selector(didSwipeCompactBar(_:)))
         swipeLeft.direction = .left
-        compactTabBarView.addGestureRecognizer(swipeLeft)
+        centerChromeView.addGestureRecognizer(swipeLeft)
         let swipeRight = UISwipeGestureRecognizer(target: self, action: #selector(didSwipeCompactBar(_:)))
         swipeRight.direction = .right
-        compactTabBarView.addGestureRecognizer(swipeRight)
+        centerChromeView.addGestureRecognizer(swipeRight)
         let swipeUp = UISwipeGestureRecognizer(target: self, action: #selector(didSwipeUpOnCompactBar(_:)))
         swipeUp.direction = .up
-        compactTabBarView.addGestureRecognizer(swipeUp)
+        centerChromeView.addGestureRecognizer(swipeUp)
 
         let contextInteraction = UIContextMenuInteraction(delegate: self)
-        compactTabBarView.addInteraction(contextInteraction)
+        centerChromeView.addInteraction(contextInteraction)
     }
 
     // MARK: Refresh
@@ -1397,8 +1396,6 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         let focused = workspace.focusedPaneID == paneID
         let activeTab = workspace.activeTab(in: paneID)
 
-        let tabNumber = (workspace.panes.firstIndex(where: { $0.id == paneID }) ?? 0) + 1
-        activeTitleLabel.text = "Tab \(tabNumber)"
         updateCompactTabChrome(isFocused: focused, activeTab: activeTab)
 
         guard let activeTab,
@@ -1478,52 +1475,48 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
     }
 
     private func layoutHeaderViews(in bounds: CGRect) {
-        let chromeWidth = bounds.width
-        compactTabBarView.frame = CGRect(
-            x: 0,
-            y: (bounds.height - UIFloat(28)) / 2,
-            width: chromeWidth,
-            height: UIFloat(28)
+        let buttonSize = UIFloat(40)
+        let chromeHeight = UIFloat(40)
+        let spacing = UIFloat(10)
+        let y = (bounds.height - chromeHeight) / 2
+
+        leadingChromeView.frame = CGRect(x: 0, y: y, width: buttonSize, height: buttonSize)
+        trailingChromeView.frame = CGRect(x: bounds.width - buttonSize, y: y, width: buttonSize, height: buttonSize)
+        centerChromeView.frame = CGRect(
+            x: leadingChromeView.frame.maxX + spacing,
+            y: y,
+            width: max(UIFloat(120), trailingChromeView.frame.minX - (leadingChromeView.frame.maxX + spacing * 2)),
+            height: chromeHeight
         )
 
-        let chromeBounds = compactTabBarView.bounds.insetBy(dx: UIFloat(8), dy: UIFloat(4))
-        let sideWidth = UIFloat(18)
-        backButton.frame = CGRect(
-            x: chromeBounds.minX,
-            y: chromeBounds.minY,
-            width: sideWidth,
-            height: chromeBounds.height
-        )
-        overflowButton.frame = CGRect(
-            x: chromeBounds.maxX - sideWidth,
-            y: chromeBounds.minY,
-            width: sideWidth,
-            height: chromeBounds.height
-        )
-        activeTitleLabel.frame = .zero
+        backButton.frame = leadingChromeView.bounds.insetBy(dx: UIFloat(10), dy: UIFloat(10))
+        overflowButton.frame = trailingChromeView.bounds.insetBy(dx: UIFloat(10), dy: UIFloat(10))
         tabTitleLabel.textAlignment = .center
-        tabTitleLabel.frame = CGRect(
-            x: backButton.frame.maxX + UIFloat(8),
-            y: chromeBounds.minY,
-            width: max(UIFloat(0), overflowButton.frame.minX - backButton.frame.maxX - UIFloat(16)),
-            height: chromeBounds.height
-        )
+        tabTitleLabel.frame = centerChromeView.bounds.insetBy(dx: UIFloat(14), dy: UIFloat(8))
         cwdLabel.frame = .zero
         warningLabel.frame = .zero
     }
 
     private func updateCompactTabChrome(isFocused: Bool, activeTab: TerminalTabState?) {
         if isFocused {
-            compactTabBarView.contentView.backgroundColor = TerminalUIColors.tabChromeFocused
+            centerChromeView.contentView.backgroundColor = TerminalUIColors.tabChromeFocused
+            leadingChromeView.contentView.backgroundColor = TerminalUIColors.tabChromeFocused
+            trailingChromeView.contentView.backgroundColor = TerminalUIColors.tabChromeFocused
             tabTitleLabel.textColor = TerminalUIColors.tabTitleFocused
         } else {
-            compactTabBarView.contentView.backgroundColor = TerminalUIColors.tabChromeUnfocused
+            centerChromeView.contentView.backgroundColor = TerminalUIColors.tabChromeUnfocused
+            leadingChromeView.contentView.backgroundColor = TerminalUIColors.tabChromeUnfocused
+            trailingChromeView.contentView.backgroundColor = TerminalUIColors.tabChromeUnfocused
             tabTitleLabel.textColor = TerminalUIColors.tabTitleUnfocused
         }
         if let hex = activeTab?.shortcutColorHex, let accent = UIColor(hex: hex) {
-            compactTabBarView.layer.borderColor = accent.withAlphaComponent(0.55).cgColor
+            [leadingChromeView, centerChromeView, trailingChromeView].forEach {
+                $0.layer.borderColor = accent.withAlphaComponent(0.55).cgColor
+            }
         } else {
-            compactTabBarView.layer.borderColor = TerminalUIColors.tabChromeStroke.cgColor
+            [leadingChromeView, centerChromeView, trailingChromeView].forEach {
+                $0.layer.borderColor = TerminalUIColors.tabChromeStroke.cgColor
+            }
         }
     }
 
@@ -1879,12 +1872,9 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
                 tmuxAttachOnly: true
             )
         }
-        let nav = UINavigationController(rootViewController: overview)
-        nav.modalPresentationStyle = .pageSheet
-        if let sheet = nav.sheetPresentationController {
-            sheet.detents = [.medium(), .large()]
-        }
-        present(nav, animated: true)
+        overview.modalPresentationStyle = .overFullScreen
+        overview.modalTransitionStyle = .crossDissolve
+        present(overview, animated: true)
     }
 
     @objc
@@ -2632,6 +2622,14 @@ final class TerminalTabOverviewViewController: UIViewController {
 
     private let collectionView: UICollectionView
     private lazy var dataSource = makeDataSource()
+    private let backgroundBlurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+    private let topBarView = UIView()
+    private let settingsButton = UIButton(type: .system)
+    private let bottomBarView = UIView()
+    private let addButton = UIButton(type: .system)
+    private let doneButton = UIButton(type: .system)
+    private let tabCountView = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
+    private let tabCountLabel = UILabel()
 
     init(workspace: TerminalWorkspaceStore) {
         self.workspace = workspace
@@ -2674,35 +2672,48 @@ final class TerminalTabOverviewViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
-        navigationItem.title = "All Tabs"
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            barButtonSystemItem: .done,
-            target: self,
-            action: #selector(didTapDone)
-        )
-        let settingsMenuButton = UIButton(type: .system)
-        settingsMenuButton.setImage(UIImage(systemName: "gearshape"), for: .normal)
-        settingsMenuButton.showsMenuAsPrimaryAction = true
-        settingsMenuButton.menu = makeSettingsMenu()
-        navigationItem.leftBarButtonItem = UIBarButtonItem(customView: settingsMenuButton)
-        navigationItem.titleView = nil
-        navigationItem.backButtonDisplayMode = .minimal
-        navigationItem.setHidesBackButton(true, animated: false)
+        view.backgroundColor = .clear
+        backgroundBlurView.frame = view.bounds
+        backgroundBlurView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(backgroundBlurView)
 
-        navigationItem.rightBarButtonItems = [
-            UIBarButtonItem(
-                image: UIImage(systemName: "plus"),
-                style: .plain,
-                target: self,
-                action: #selector(didTapNewTab)
-            ),
-            UIBarButtonItem(
-                barButtonSystemItem: .done,
-                target: self,
-                action: #selector(didTapDone)
-            ),
-        ]
+        topBarView.backgroundColor = .clear
+        view.addSubview(topBarView)
+
+        settingsButton.setImage(UIImage(systemName: "gearshape"), for: .normal)
+        settingsButton.tintColor = .white
+        settingsButton.backgroundColor = UIColor.white.withAlphaComponent(0.14)
+        settingsButton.layer.cornerRadius = UIFloat(20)
+        settingsButton.layer.cornerCurve = .continuous
+        settingsButton.showsMenuAsPrimaryAction = true
+        settingsButton.menu = makeSettingsMenu()
+        topBarView.addSubview(settingsButton)
+
+        bottomBarView.backgroundColor = .clear
+        view.addSubview(bottomBarView)
+
+        [addButton, doneButton].forEach { button in
+            button.tintColor = .white
+            button.backgroundColor = UIColor.white.withAlphaComponent(0.14)
+            button.layer.cornerRadius = UIFloat(24)
+            button.layer.cornerCurve = .continuous
+            bottomBarView.addSubview(button)
+        }
+        addButton.setImage(UIImage(systemName: "plus"), for: .normal)
+        addButton.addTarget(self, action: #selector(didTapNewTab), for: .touchUpInside)
+        doneButton.setImage(UIImage(systemName: "checkmark"), for: .normal)
+        doneButton.backgroundColor = UIColor.systemBlue
+        doneButton.addTarget(self, action: #selector(didTapDone), for: .touchUpInside)
+
+        tabCountView.layer.cornerRadius = UIFloat(22)
+        tabCountView.layer.cornerCurve = .continuous
+        tabCountView.clipsToBounds = true
+        bottomBarView.addSubview(tabCountView)
+        tabCountLabel.font = UIFont.systemFont(ofSize: UIFloat(16), weight: .semibold)
+        tabCountLabel.textColor = .white
+        tabCountLabel.textAlignment = .center
+        tabCountView.contentView.addSubview(tabCountLabel)
+
         collectionView.backgroundColor = .clear
         collectionView.delegate = self
         collectionView.register(TerminalAllTabsCell.self, forCellWithReuseIdentifier: TerminalAllTabsCell.reuseID)
@@ -2712,7 +2723,34 @@ final class TerminalTabOverviewViewController: UIViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        collectionView.frame = view.bounds
+        let safe = view.safeAreaInsets
+        let topBarHeight = UIFloat(44)
+        topBarView.frame = CGRect(x: UIFloat(12), y: safe.top + UIFloat(6), width: view.bounds.width - UIFloat(24), height: topBarHeight)
+        settingsButton.frame = CGRect(x: 0, y: UIFloat(2), width: UIFloat(40), height: UIFloat(40))
+
+        let bottomHeight = UIFloat(64)
+        bottomBarView.frame = CGRect(
+            x: UIFloat(12),
+            y: view.bounds.height - safe.bottom - bottomHeight - UIFloat(8),
+            width: view.bounds.width - UIFloat(24),
+            height: bottomHeight
+        )
+        addButton.frame = CGRect(x: 0, y: UIFloat(8), width: UIFloat(48), height: UIFloat(48))
+        doneButton.frame = CGRect(x: bottomBarView.bounds.width - UIFloat(48), y: UIFloat(8), width: UIFloat(48), height: UIFloat(48))
+        tabCountView.frame = CGRect(
+            x: addButton.frame.maxX + UIFloat(12),
+            y: UIFloat(10),
+            width: max(UIFloat(120), doneButton.frame.minX - (addButton.frame.maxX + UIFloat(24))),
+            height: UIFloat(44)
+        )
+        tabCountLabel.frame = tabCountView.bounds
+
+        collectionView.frame = CGRect(
+            x: 0,
+            y: safe.top + UIFloat(54),
+            width: view.bounds.width,
+            height: bottomBarView.frame.minY - (safe.top + UIFloat(54))
+        )
     }
 
     private func makeDataSource() -> UICollectionViewDiffableDataSource<Section, Item> {
@@ -2785,6 +2823,7 @@ final class TerminalTabOverviewViewController: UIViewController {
 
             await MainActor.run {
                 self.items = discovered
+                self.tabCountLabel.text = "\(discovered.count) Tabs"
                 var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
                 snapshot.appendSections([.main])
                 snapshot.appendItems(discovered, toSection: .main)
