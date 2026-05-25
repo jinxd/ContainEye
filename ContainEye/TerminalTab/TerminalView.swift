@@ -1981,12 +1981,21 @@ final class TerminalServerPickerViewController: UIViewController {
     }
 
     private struct Item: Hashable {
+        let id: String
         let kind: ItemKind
         let credentialKey: String
         let title: String
         let host: String
         let detailText: String
         let colorHex: String
+
+        static func == (lhs: Item, rhs: Item) -> Bool {
+            lhs.id == rhs.id
+        }
+
+        func hash(into hasher: inout Hasher) {
+            hasher.combine(id)
+        }
     }
 
     private let collectionView: UICollectionView
@@ -2083,6 +2092,7 @@ final class TerminalServerPickerViewController: UIViewController {
             let shortcutItems = shortcuts.compactMap { shortcut -> Item? in
                 guard let credential = credentialMap[shortcut.credentialKey] else { return nil }
                 return Item(
+                    id: "shortcut:\(shortcut.id)",
                     kind: .shortcut(shortcutID: shortcut.id),
                     credentialKey: shortcut.credentialKey,
                     title: shortcut.title,
@@ -2112,6 +2122,7 @@ final class TerminalServerPickerViewController: UIViewController {
                         return sessions.map { session in
                             let detail = Self.tmuxDetailText(for: session)
                             return Item(
+                                id: "tmux:\(credential.key):\(session.sessionName)",
                                 kind: .tmuxSession(credentialKey: credential.key, sessionName: session.sessionName),
                                 credentialKey: credential.key,
                                 title: session.displayName,
@@ -2176,6 +2187,7 @@ final class TerminalServerPickerViewController: UIViewController {
     private func buildOrderedItems(sessions: [Item], shortcuts: [Item]) -> [Item] {
         guard !sessions.isEmpty, !shortcuts.isEmpty else { return sessions + shortcuts }
         let divider = Item(
+            id: "divider",
             kind: .divider,
             credentialKey: "",
             title: "",
@@ -2585,12 +2597,21 @@ fi
 @MainActor
 final class TerminalTabOverviewViewController: UIViewController {
     struct Item: Hashable {
+        let id: String
         let credentialKey: String
         let sessionName: String
         let host: String
         let previewText: String
         let isActive: Bool
         let colorHex: String?
+
+        static func == (lhs: Item, rhs: Item) -> Bool {
+            lhs.id == rhs.id
+        }
+
+        func hash(into hasher: inout Hasher) {
+            hasher.combine(id)
+        }
     }
 
     var onSelectSession: ((String, String, String) -> Void)?
@@ -2738,6 +2759,7 @@ final class TerminalTabOverviewViewController: UIViewController {
                                 parts.append(attached ? "attached" : "detached")
                             }
                             return Item(
+                                id: "tmux:\(credential.key):\(session.sessionName)",
                                 credentialKey: credential.key,
                                 sessionName: session.sessionName,
                                 host: credential.host,
