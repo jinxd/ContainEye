@@ -5,7 +5,7 @@ import UIKit
 import WebKit
 
 @MainActor
-final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditMenuInteractionDelegate, WKUIDelegate {
+final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditMenuInteractionDelegate, WKUIDelegate, UIGestureRecognizerDelegate {
     private let webView: WKWebView
     private weak var controller: XTermSessionController?
     private var isReady = false
@@ -40,11 +40,17 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
         webView.backgroundColor = .clear
         webView.isOpaque = false
         webView.scrollView.backgroundColor = .clear
-        // Keep WKWebView scrolling enabled so xterm viewport receives touch scroll gestures.
-        webView.scrollView.isScrollEnabled = true
+        webView.scrollView.isScrollEnabled = false
         webView.scrollView.showsVerticalScrollIndicator = false
         webView.scrollView.showsHorizontalScrollIndicator = false
         webView.scrollView.bounces = false
+        webView.scrollView.alwaysBounceVertical = false
+        webView.scrollView.alwaysBounceHorizontal = false
+        webView.scrollView.contentInset = .zero
+        webView.scrollView.scrollIndicatorInsets = .zero
+        if #available(iOS 11.0, *) {
+            webView.scrollView.contentInsetAdjustmentBehavior = .never
+        }
         webView.uiDelegate = self
         disableInputAssistantBar()
 
@@ -196,6 +202,10 @@ final class XTermWebHostView: UIView, XTermTerminalHost, @preconcurrency UIEditM
         }
 
         webView.evaluateJavaScript(js)
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        true
     }
 
     fileprivate func handleScriptMessage(_ message: WKScriptMessage) {

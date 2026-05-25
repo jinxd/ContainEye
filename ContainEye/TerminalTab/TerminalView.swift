@@ -58,7 +58,7 @@ private struct TerminalWorkspaceNavigationHost: UIViewControllerRepresentable {
 private enum TerminalUIMetrics {
     static let pageInset = UIFloat(8)
     static let paneGap = UIFloat(8)
-    static let paneHeaderHeight = UIFloat(34)
+    static let paneHeaderHeight = UIFloat(48)
     static let keyboardSuggestionHeight = UIFloat(34)
     static let keyboardSuggestionBottomGap = UIFloat(8)
     static let keyboardBarHeight = UIFloat(40)
@@ -1282,7 +1282,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
     private let tabTitleLabel = UILabel()
     private let cwdLabel = UILabel()
     private let warningLabel = UILabel()
-    private let backButton = UIButton(type: .system)
+    private let allTabsButton = UIButton(type: .system)
     private let overflowButton = UIButton(type: .system)
 
     private(set) var activeHostView: XTermWebHostView?
@@ -1366,10 +1366,10 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         warningLabel.isHidden = true
         headerView.addSubview(warningLabel)
 
-        backButton.setImage(UIImage(systemName: "chevron.left"), for: .normal)
-        backButton.tintColor = UIColor.secondaryLabel
-        backButton.addTarget(self, action: #selector(didTapBack), for: .touchUpInside)
-        leadingChromeView.contentView.addSubview(backButton)
+        allTabsButton.setImage(UIImage(systemName: "square.grid.2x2"), for: .normal)
+        allTabsButton.tintColor = UIColor.secondaryLabel
+        allTabsButton.addTarget(self, action: #selector(didTapAllTabsButton), for: .touchUpInside)
+        leadingChromeView.contentView.addSubview(allTabsButton)
 
         overflowButton.setImage(UIImage(systemName: "ellipsis"), for: .normal)
         overflowButton.tintColor = UIColor.secondaryLabel
@@ -1407,13 +1407,13 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
             tabTitleLabel.text = "Choose a server"
             cwdLabel.text = ""
             warningLabel.isHidden = true
-            backButton.isHidden = true
+            allTabsButton.alpha = 1
             showServerPicker()
             view.setNeedsLayout()
             return
         }
 
-        backButton.isHidden = false
+        allTabsButton.alpha = 1
         tabTitleLabel.text = activeTab.title
         cwdLabel.text = controller.cwd
         if controller.shellIntegrationStatus == .warning, let warning = controller.lastShellIntegrationWarning {
@@ -1491,7 +1491,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
             height: chromeHeight
         )
 
-        backButton.frame = leadingChromeView.bounds.insetBy(dx: UIFloat(10), dy: UIFloat(10))
+        allTabsButton.frame = leadingChromeView.bounds.insetBy(dx: UIFloat(10), dy: UIFloat(10))
         overflowButton.frame = trailingChromeView.bounds.insetBy(dx: UIFloat(10), dy: UIFloat(10))
         tabTitleLabel.textAlignment = .center
         tabTitleLabel.frame = centerChromeView.bounds.insetBy(dx: UIFloat(14), dy: UIFloat(8))
@@ -1683,9 +1683,8 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
     }
 
     @objc
-    private func didTapBack() {
-        guard let active = workspace.activeTab(in: paneID) else { return }
-        workspace.closeTab(tabID: active.id)
+    private func didTapAllTabsButton() {
+        presentAllTabs()
     }
 
     private func makeOverflowMenu() -> UIMenu {
@@ -1709,7 +1708,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
                 image: UIImage(systemName: "xmark.circle"),
                 attributes: .destructive
             ) { [weak self] _ in
-                self?.promptCloseActiveSession(sessionName: session, credentialKey: active.credentialKey)
+                self?.closeSession(credentialKey: active.credentialKey, sessionName: session)
             })
         }
         return UIMenu(children: actions)
@@ -1782,14 +1781,6 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
             actions.append(UIAction(title: "New Tab", image: UIImage(systemName: "plus")) { _ in
                 self.workspace.focusOrCreateEmptyPane()
             })
-            actions.append(UIAction(title: "Choose Server", image: UIImage(systemName: "chevron.left")) { _ in
-                self.didTapBack()
-            })
-            if self.workspace.activeTab(in: self.paneID) != nil {
-                actions.append(UIAction(title: "Close Tab", image: UIImage(systemName: "xmark"), attributes: .destructive) { _ in
-                    self.didTapBack()
-                })
-            }
             if let active = self.workspace.activeTab(in: self.paneID),
                let session = active.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
                !session.isEmpty {
@@ -1797,7 +1788,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
                     self.promptRenameActiveSession(sessionName: session, credentialKey: active.credentialKey)
                 })
                 actions.append(UIAction(title: "Close Session", image: UIImage(systemName: "xmark.circle"), attributes: .destructive) { _ in
-                    self.promptCloseActiveSession(sessionName: session, credentialKey: active.credentialKey)
+                    self.closeSession(credentialKey: active.credentialKey, sessionName: session)
                 })
             }
             return UIMenu(children: actions)
@@ -1821,30 +1812,36 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         present(alert, animated: true)
     }
 
-    private func promptCloseActiveSession(sessionName: String, credentialKey: String) {
-        let alert = UIAlertController(title: "Close session?", message: sessionName, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Close", style: .destructive, handler: { _ in
-            self.closeSession(credentialKey: credentialKey, sessionName: sessionName)
-        }))
-        present(alert, animated: true)
-    }
-
     private func renameSession(credentialKey: String, oldName: String, newName: String) {
         guard let credential = keychain().getCredential(for: credentialKey) else { return }
         let oldEscaped = XTermSessionController.normalizeTmuxSessionName(oldName).replacingOccurrences(of: "'", with: "'\"'\"'")
         let newEscaped = XTermSessionController.normalizeTmuxSessionName(newName).replacingOccurrences(of: "'", with: "'\"'\"'")
-        let command = "if command -v tmux >/dev/null 2>&1; then tmux rename-session -t '\(oldEscaped)' '\(newEscaped)' 2>/dev/null && echo __OK__ || echo __ERR__; fi"
+        let command = """
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+if ! command -v tmux >/dev/null 2>&1; then
+  echo "__CE_TMUX_ERROR__: tmux is not installed"
+elif tmux has-session -t '\(oldEscaped)' 2>/dev/null; then
+  if tmux rename-session -t '\(oldEscaped)' '\(newEscaped)' 2>/dev/null; then
+    echo "__CE_TMUX_OK__"
+  else
+    echo "__CE_TMUX_ERROR__: failed to rename session"
+  fi
+else
+  echo "__CE_TMUX_ERROR__: session not found"
+fi
+"""
         Task {
             let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
             await MainActor.run {
-                if output.contains("__OK__") {
+                if output.contains("__CE_TMUX_OK__") {
                     TerminalWorkspaceStore.shared.renameTabsBoundToTmuxSession(
                         credentialKey: credentialKey,
                         oldSessionName: oldName,
                         newSessionName: newName
                     )
                     self.refreshFromWorkspace()
+                } else {
+                    self.showTmuxOperationError(title: "Couldn’t rename session", output: output)
                 }
             }
         }
@@ -1852,17 +1849,52 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
 
     private func closeSession(credentialKey: String, sessionName: String) {
         guard let credential = keychain().getCredential(for: credentialKey) else { return }
-        let escaped = XTermSessionController.normalizeTmuxSessionName(sessionName).replacingOccurrences(of: "'", with: "'\"'\"'")
-        let command = "if command -v tmux >/dev/null 2>&1; then tmux kill-session -t '\(escaped)' 2>/dev/null && echo __OK__ || echo __ERR__; fi"
+        let normalizedSessionName = XTermSessionController.normalizeTmuxSessionName(sessionName)
+        guard !normalizedSessionName.isEmpty else { return }
+        workspace.clearPaneToServerPicker(paneID: paneID)
+        presentAllTabs()
+
+        let escaped = normalizedSessionName.replacingOccurrences(of: "'", with: "'\"'\"'")
+        let command = """
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+if ! command -v tmux >/dev/null 2>&1; then
+  echo "__CE_TMUX_ERROR__: tmux is not installed"
+elif tmux has-session -t '\(escaped)' 2>/dev/null; then
+  if tmux kill-session -t '\(escaped)' 2>/dev/null; then
+    echo "__CE_TMUX_OK__"
+  else
+    echo "__CE_TMUX_ERROR__: failed to kill session"
+  fi
+else
+  echo "__CE_TMUX_ERROR__: session not found"
+fi
+"""
         Task {
             let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
             await MainActor.run {
-                if output.contains("__OK__") {
+                if output.contains("__CE_TMUX_OK__") {
                     TerminalWorkspaceStore.shared.closeTabsBoundToTmuxSession(credentialKey: credentialKey, sessionName: sessionName)
                     self.refreshFromWorkspace()
+                } else {
+                    self.showTmuxOperationError(title: "Couldn’t close \(normalizedSessionName)", output: output)
                 }
             }
         }
+    }
+
+    private func showTmuxOperationError(title: String, output: String) {
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        let message: String
+        if let line = trimmed.split(whereSeparator: \.isNewline).map(String.init).first(where: { $0.contains("__CE_TMUX_ERROR__:") }) {
+            message = line.replacingOccurrences(of: "__CE_TMUX_ERROR__:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        } else if trimmed.isEmpty {
+            message = "Unknown error"
+        } else {
+            message = trimmed
+        }
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
     }
 
     private func presentAllTabs() {
@@ -2084,6 +2116,7 @@ final class TerminalServerPickerViewController: UIViewController {
             }
 
             let shortcuts = await TerminalLaunchShortcut.all(in: SharedDatabase.db)
+            let shortcutSessionTitleMap = Self.makeShortcutSessionTitleMap(shortcuts: shortcuts)
             let credentialMap = Dictionary(uniqueKeysWithValues: credentials.map { ($0.key, $0) })
             let shortcutItems = shortcuts.compactMap { shortcut -> Item? in
                 guard let credential = credentialMap[shortcut.credentialKey] else { return nil }
@@ -2117,11 +2150,16 @@ final class TerminalServerPickerViewController: UIViewController {
                         guard !sessions.isEmpty else { return [] }
                         return sessions.map { session in
                             let detail = Self.tmuxDetailText(for: session)
+                            let resolvedTitle = Self.resolveTmuxDisplayTitle(
+                                sessionName: session.sessionName,
+                                credentialKey: credential.key,
+                                shortcutSessionTitleMap: shortcutSessionTitleMap
+                            )
                             return Item(
                                 id: "tmux:\(credential.key):\(session.sessionName)",
                                 kind: .tmuxSession(credentialKey: credential.key, sessionName: session.sessionName),
                                 credentialKey: credential.key,
-                                title: session.displayName,
+                                title: resolvedTitle,
                                 host: credential.host,
                                 detailText: detail,
                                 colorHex: "#10B981"
@@ -2133,7 +2171,8 @@ final class TerminalServerPickerViewController: UIViewController {
                 var all: [Item] = []
                 for await partial in group {
                     all.append(contentsOf: partial)
-                    let sortedSessions = all.sorted {
+                    let titledSessions = Self.disambiguateSessionTitles(all)
+                    let sortedSessions = titledSessions.sorted {
                         if $0.host == $1.host {
                             return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
                         }
@@ -2226,6 +2265,7 @@ final class TerminalServerPickerViewController: UIViewController {
 
     nonisolated private static func discoverTmuxSessions(for credential: Credential) async -> [TmuxSessionSummary] {
         let command = """
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 if command -v tmux >/dev/null 2>&1; then tmux list-sessions -F '#{session_name}|#{session_windows}|#{?session_attached,1,0}' 2>/dev/null || true; fi
 """
         let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
@@ -2281,10 +2321,60 @@ if command -v tmux >/dev/null 2>&1; then tmux list-sessions -F '#{session_name}|
     }
 
     nonisolated static func newTmuxSessionName(for shortcut: TerminalLaunchShortcut) -> String {
-        let normalized = shortcut.id.lowercased().filter { $0.isLetter || $0.isNumber }
+        let normalized = shortcutSessionSuffix(for: shortcut.id)
         let suffix = normalized.isEmpty ? "default" : normalized
         let unique = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         return "containeye-shortcut-\(suffix)-\(unique)"
+    }
+
+    nonisolated static func shortcutSessionSuffix(for shortcutID: String) -> String {
+        shortcutID.lowercased().filter { $0.isLetter || $0.isNumber }
+    }
+
+    nonisolated static func makeShortcutSessionTitleMap(shortcuts: [TerminalLaunchShortcut]) -> [String: [String: String]] {
+        var map: [String: [String: String]] = [:]
+        for shortcut in shortcuts {
+            let suffix = shortcutSessionSuffix(for: shortcut.id)
+            guard !suffix.isEmpty else { continue }
+            map[shortcut.credentialKey, default: [:]][suffix] = shortcut.title
+        }
+        return map
+    }
+
+    nonisolated static func resolveTmuxDisplayTitle(
+        sessionName: String,
+        credentialKey: String,
+        shortcutSessionTitleMap: [String: [String: String]]
+    ) -> String {
+        let prefix = "containeye-shortcut-"
+        guard sessionName.hasPrefix(prefix) else { return sessionName }
+        let remainder = String(sessionName.dropFirst(prefix.count))
+        guard let splitIndex = remainder.lastIndex(of: "-") else { return sessionName }
+        let suffix = String(remainder[..<splitIndex])
+        if let mapped = shortcutSessionTitleMap[credentialKey]?[suffix], !mapped.isEmpty {
+            return mapped
+        }
+        return sessionName
+    }
+
+    nonisolated private static func disambiguateSessionTitles(_ sessions: [Item]) -> [Item] {
+        var counts: [String: Int] = [:]
+        return sessions.map { item in
+            guard case .tmuxSession = item.kind else { return item }
+            let key = "\(item.credentialKey)|\(item.title)"
+            counts[key, default: 0] += 1
+            let index = counts[key] ?? 1
+            guard index > 1 else { return item }
+            return Item(
+                id: item.id,
+                kind: item.kind,
+                credentialKey: item.credentialKey,
+                title: "\(item.title) (\(index))",
+                host: item.host,
+                detailText: item.detailText,
+                colorHex: item.colorHex
+            )
+        }
     }
 
     @objc
@@ -2594,9 +2684,9 @@ fi
 final class TerminalTabOverviewViewController: UIViewController {
     struct Item: Hashable {
         let id: String
-        let tabID: UUID?
         let credentialKey: String
         let sessionName: String
+        let displayTitle: String
         let host: String
         let previewText: String
         let isActive: Bool
@@ -2632,11 +2722,14 @@ final class TerminalTabOverviewViewController: UIViewController {
     private let backgroundBlurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
     private let topBarView = UIView()
     private let settingsButton = UIButton(type: .system)
+    private let selectButton = UIButton(type: .system)
     private let bottomBarView = UIView()
     private let addButton = UIButton(type: .system)
     private let doneButton = UIButton(type: .system)
     private let tabCountView = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
     private let tabCountLabel = UILabel()
+    private var isSelectionMode = false
+    private var selectedSessionIDs = Set<String>()
 
     init(workspace: TerminalWorkspaceStore) {
         self.workspace = workspace
@@ -2695,6 +2788,13 @@ final class TerminalTabOverviewViewController: UIViewController {
         settingsButton.showsMenuAsPrimaryAction = true
         settingsButton.menu = makeSettingsMenu()
         topBarView.addSubview(settingsButton)
+        selectButton.setImage(UIImage(systemName: "checklist"), for: .normal)
+        selectButton.tintColor = .white
+        selectButton.backgroundColor = UIColor.white.withAlphaComponent(0.14)
+        selectButton.layer.cornerRadius = UIFloat(20)
+        selectButton.layer.cornerCurve = .continuous
+        selectButton.addTarget(self, action: #selector(didTapSelectMode), for: .touchUpInside)
+        topBarView.addSubview(selectButton)
 
         bottomBarView.backgroundColor = .clear
         view.addSubview(bottomBarView)
@@ -2723,6 +2823,7 @@ final class TerminalTabOverviewViewController: UIViewController {
 
         collectionView.backgroundColor = .clear
         collectionView.delegate = self
+        collectionView.allowsMultipleSelection = false
         collectionView.register(TerminalAllTabsCell.self, forCellWithReuseIdentifier: TerminalAllTabsCell.reuseID)
         view.addSubview(collectionView)
         reload()
@@ -2734,6 +2835,7 @@ final class TerminalTabOverviewViewController: UIViewController {
         let topBarHeight = UIFloat(44)
         topBarView.frame = CGRect(x: UIFloat(12), y: safe.top + UIFloat(6), width: view.bounds.width - UIFloat(24), height: topBarHeight)
         settingsButton.frame = CGRect(x: 0, y: UIFloat(2), width: UIFloat(40), height: UIFloat(40))
+        selectButton.frame = CGRect(x: settingsButton.frame.maxX + UIFloat(8), y: UIFloat(2), width: UIFloat(40), height: UIFloat(40))
 
         let bottomHeight = UIFloat(64)
         bottomBarView.frame = CGRect(
@@ -2772,7 +2874,7 @@ final class TerminalTabOverviewViewController: UIViewController {
                 self?.closeSession(credentialKey: item.credentialKey, sessionName: item.sessionName)
             }
             cell.apply(
-                title: item.sessionName,
+                title: item.displayTitle,
                 subtitle: item.host,
                 previewText: item.previewText,
                 isActive: item.isActive,
@@ -2788,36 +2890,9 @@ final class TerminalTabOverviewViewController: UIViewController {
                 .allKeys()
                 .compactMap { keychain().getCredential(for: $0) }
                 .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
-            let credentialMap = Dictionary(uniqueKeysWithValues: credentials.map { ($0.key, $0) })
-
+            let shortcuts = await TerminalLaunchShortcut.all(in: SharedDatabase.db)
+            let shortcutSessionTitleMap = TerminalServerPickerViewController.makeShortcutSessionTitleMap(shortcuts: shortcuts)
             var itemsByID: [String: Item] = [:]
-
-            // Always include currently open workspace tabs so All Tabs never shows "0"
-            // while active tabs exist but remote tmux discovery is delayed or failing.
-            for tab in workspace.tabs.values {
-                let normalizedSession = XTermSessionController.normalizeTmuxSessionName(tab.tmuxSessionName ?? "")
-                let host = credentialMap[tab.credentialKey]?.host ?? tab.credentialKey
-                let itemID: String
-                let displayName: String
-                if normalizedSession.isEmpty {
-                    itemID = "tab:\(tab.id.uuidString.lowercased())"
-                    displayName = tab.title
-                } else {
-                    itemID = "tmux:\(tab.credentialKey):\(normalizedSession)"
-                    displayName = normalizedSession
-                }
-
-                itemsByID[itemID] = Item(
-                    id: itemID,
-                    tabID: tab.id,
-                    credentialKey: tab.credentialKey,
-                    sessionName: displayName,
-                    host: host,
-                    previewText: "active tab",
-                    isActive: true,
-                    colorHex: tab.shortcutColorHex ?? "#10B981"
-                )
-            }
 
             await withTaskGroup(of: [Item].self, returning: Void.self) { group in
                 for credential in credentials {
@@ -2834,9 +2909,13 @@ final class TerminalTabOverviewViewController: UIViewController {
                             }
                             return Item(
                                 id: "tmux:\(credential.key):\(session.sessionName)",
-                                tabID: nil,
                                 credentialKey: credential.key,
                                 sessionName: session.sessionName,
+                                displayTitle: TerminalServerPickerViewController.resolveTmuxDisplayTitle(
+                                    sessionName: session.sessionName,
+                                    credentialKey: credential.key,
+                                    shortcutSessionTitleMap: shortcutSessionTitleMap
+                                ),
                                 host: credential.host,
                                 previewText: parts.joined(separator: " • "),
                                 isActive: session.isAttached ?? false,
@@ -2848,18 +2927,16 @@ final class TerminalTabOverviewViewController: UIViewController {
 
                 for await partial in group {
                     for item in partial {
-                        if let existing = itemsByID[item.id], existing.tabID != nil {
-                            continue
-                        }
                         itemsByID[item.id] = item
                     }
                 }
             }
 
             var discovered = Array(itemsByID.values)
+            discovered = Self.disambiguateDisplayTitles(discovered)
             discovered.sort {
                 if $0.host == $1.host {
-                    return $0.sessionName.localizedCaseInsensitiveCompare($1.sessionName) == .orderedAscending
+                    return $0.displayTitle.localizedCaseInsensitiveCompare($1.displayTitle) == .orderedAscending
                 }
                 return $0.host.localizedCaseInsensitiveCompare($1.host) == .orderedAscending
             }
@@ -2915,32 +2992,122 @@ final class TerminalTabOverviewViewController: UIViewController {
 
     @objc
     private func didTapDone() {
-        dismiss(animated: true)
+        guard isSelectionMode else {
+            dismiss(animated: true)
+            return
+        }
+        guard !selectedSessionIDs.isEmpty else { return }
+        let selectedItems = items.filter { selectedSessionIDs.contains($0.id) }
+        for item in selectedItems {
+            closeSession(credentialKey: item.credentialKey, sessionName: item.sessionName)
+        }
+        selectedSessionIDs.removeAll()
+        tabCountLabel.text = "Select sessions to close"
+        doneButton.alpha = 0.75
     }
 
     @objc
     private func didTapNewTab() {
+        if isSelectionMode {
+            didTapSelectMode()
+            return
+        }
         workspace.focusOrCreateEmptyPane()
         dismiss(animated: true)
     }
 
+    @objc
+    private func didTapSelectMode() {
+        isSelectionMode.toggle()
+        selectedSessionIDs.removeAll()
+        collectionView.allowsMultipleSelection = isSelectionMode
+        if !isSelectionMode {
+            for selected in collectionView.indexPathsForSelectedItems ?? [] {
+                collectionView.deselectItem(at: selected, animated: false)
+            }
+        }
+        selectButton.backgroundColor = isSelectionMode ? UIColor.systemBlue : UIColor.white.withAlphaComponent(0.14)
+        addButton.setImage(UIImage(systemName: isSelectionMode ? "xmark" : "plus"), for: .normal)
+        addButton.backgroundColor = isSelectionMode ? UIColor.systemOrange : UIColor.white.withAlphaComponent(0.14)
+        doneButton.setImage(UIImage(systemName: isSelectionMode ? "trash" : "checkmark"), for: .normal)
+        tabCountLabel.text = isSelectionMode ? "Select sessions to close" : "\(items.count) Tabs"
+        doneButton.alpha = isSelectionMode ? 0.75 : 1
+    }
+
     private func closeSession(credentialKey: String, sessionName: String) {
         guard let credential = keychain().getCredential(for: credentialKey) else { return }
-        let escaped = XTermSessionController.normalizeTmuxSessionName(sessionName).replacingOccurrences(of: "'", with: "'\"'\"'")
-        let command = "if command -v tmux >/dev/null 2>&1; then tmux kill-session -t '\(escaped)' 2>/dev/null && echo __OK__ || echo __ERR__; fi"
+        let normalized = XTermSessionController.normalizeTmuxSessionName(sessionName)
+        guard !normalized.isEmpty else { return }
+        let escaped = normalized.replacingOccurrences(of: "'", with: "'\"'\"'")
+        let removed = removeDisplayedSession(credentialKey: credentialKey, sessionName: normalized)
+        let command = """
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+if ! command -v tmux >/dev/null 2>&1; then
+  echo "__CE_TMUX_ERROR__: tmux is not installed"
+elif tmux has-session -t '\(escaped)' 2>/dev/null; then
+  if tmux kill-session -t '\(escaped)' 2>/dev/null; then
+    echo "__CE_TMUX_OK__"
+  else
+    echo "__CE_TMUX_ERROR__: failed to kill session"
+  fi
+else
+  echo "__CE_TMUX_ERROR__: session not found"
+fi
+"""
         Task {
             let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
             await MainActor.run {
-                if output.contains("__OK__") {
+                if output.contains("__CE_TMUX_OK__") {
                     TerminalWorkspaceStore.shared.closeTabsBoundToTmuxSession(credentialKey: credentialKey, sessionName: sessionName)
                     self.reload()
+                } else {
+                    if let removed {
+                        self.items.append(removed)
+                        self.reloadSnapshot()
+                    } else {
+                        self.reload()
+                    }
+                    self.showCloseError(sessionName: normalized, output: output)
                 }
             }
         }
     }
 
+    private func removeDisplayedSession(credentialKey: String, sessionName: String) -> Item? {
+        guard let idx = items.firstIndex(where: {
+            $0.credentialKey == credentialKey && XTermSessionController.normalizeTmuxSessionName($0.sessionName) == sessionName
+        }) else { return nil }
+        let removed = items.remove(at: idx)
+        reloadSnapshot()
+        return removed
+    }
+
+    private func reloadSnapshot() {
+        var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
+        snapshot.appendSections([.main])
+        snapshot.appendItems(items, toSection: .main)
+        dataSource.apply(snapshot, animatingDifferences: true)
+        tabCountLabel.text = "\(items.count) Tabs"
+    }
+
+    private func showCloseError(sessionName: String, output: String) {
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        let message: String
+        if let line = trimmed.split(whereSeparator: \.isNewline).map(String.init).first(where: { $0.contains("__CE_TMUX_ERROR__:") }) {
+            message = line.replacingOccurrences(of: "__CE_TMUX_ERROR__:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        } else if trimmed.isEmpty {
+            message = "Unknown error"
+        } else {
+            message = trimmed
+        }
+        let alert = UIAlertController(title: "Couldn’t close \(sessionName)", message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+
     nonisolated private static func discoverTmuxSessions(for credential: Credential) async -> [TmuxSessionSummary] {
         let command = """
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 if command -v tmux >/dev/null 2>&1; then tmux list-sessions -F '#{session_name}|#{session_windows}|#{?session_attached,1,0}' 2>/dev/null || true; fi
 """
         let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
@@ -2961,20 +3128,149 @@ if command -v tmux >/dev/null 2>&1; then tmux list-sessions -F '#{session_name}|
             return TmuxSessionSummary(sessionName: session, windowsCount: windowsCount, isAttached: isAttached)
         }
     }
+
+    nonisolated private static func disambiguateDisplayTitles(_ sessions: [Item]) -> [Item] {
+        var counts: [String: Int] = [:]
+        return sessions.map { item in
+            let key = "\(item.credentialKey)|\(item.displayTitle)"
+            counts[key, default: 0] += 1
+            let index = counts[key] ?? 1
+            guard index > 1 else { return item }
+            return Item(
+                id: item.id,
+                credentialKey: item.credentialKey,
+                sessionName: item.sessionName,
+                displayTitle: "\(item.displayTitle) (\(index))",
+                host: item.host,
+                previewText: item.previewText,
+                isActive: item.isActive,
+                colorHex: item.colorHex
+            )
+        }
+    }
 }
 
 extension TerminalTabOverviewViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         guard indexPath.item < items.count else { return }
         let item = items[indexPath.item]
-        if let tabID = item.tabID,
-           let pane = workspace.panes.first(where: { $0.tabIDs.contains(tabID) }) {
-            workspace.setActiveTab(tabID: tabID, in: pane.id)
-            dismiss(animated: true)
+        if isSelectionMode {
+            selectedSessionIDs.insert(item.id)
+            tabCountLabel.text = selectedSessionIDs.isEmpty ? "Select sessions to close" : "\(selectedSessionIDs.count) selected • tap trash"
+            doneButton.alpha = selectedSessionIDs.isEmpty ? 0.75 : 1
             return
         }
         onSelectSession?(item.credentialKey, item.sessionName, item.sessionName)
         dismiss(animated: true)
+    }
+
+    func collectionView(_ collectionView: UICollectionView, didDeselectItemAt indexPath: IndexPath) {
+        guard isSelectionMode, indexPath.item < items.count else { return }
+        selectedSessionIDs.remove(items[indexPath.item].id)
+        tabCountLabel.text = selectedSessionIDs.isEmpty ? "Select sessions to close" : "\(selectedSessionIDs.count) selected • tap trash"
+        doneButton.alpha = selectedSessionIDs.isEmpty ? 0.75 : 1
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfigurationForItemAt indexPath: IndexPath,
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard indexPath.item < items.count else { return nil }
+        let item = items[indexPath.item]
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+            guard let self else { return UIMenu() }
+            return UIMenu(children: [
+                UIAction(title: "Open Session", image: UIImage(systemName: "arrow.right.circle")) { _ in
+                    self.onSelectSession?(item.credentialKey, item.sessionName, item.sessionName)
+                    self.dismiss(animated: true)
+                },
+                UIAction(title: "Rename Session", image: UIImage(systemName: "pencil")) { _ in
+                    self.promptRenameSession(credentialKey: item.credentialKey, sessionName: item.sessionName)
+                },
+                UIAction(title: self.selectedSessionIDs.contains(item.id) ? "Deselect" : "Select", image: UIImage(systemName: "checkmark.circle")) { _ in
+                    self.isSelectionMode = true
+                    self.selectButton.backgroundColor = UIColor.systemBlue
+                    self.collectionView.allowsMultipleSelection = true
+                    if self.selectedSessionIDs.contains(item.id) {
+                        self.selectedSessionIDs.remove(item.id)
+                        if let selectedIndex = self.items.firstIndex(of: item) {
+                            self.collectionView.deselectItem(at: IndexPath(item: selectedIndex, section: 0), animated: true)
+                        }
+                    } else {
+                        self.selectedSessionIDs.insert(item.id)
+                        if let selectedIndex = self.items.firstIndex(of: item) {
+                            self.collectionView.selectItem(at: IndexPath(item: selectedIndex, section: 0), animated: true, scrollPosition: [])
+                        }
+                    }
+                    self.addButton.setImage(UIImage(systemName: "xmark"), for: .normal)
+                    self.addButton.backgroundColor = UIColor.systemOrange
+                    self.doneButton.setImage(UIImage(systemName: "trash"), for: .normal)
+                    self.tabCountLabel.text = self.selectedSessionIDs.isEmpty ? "Select sessions to close" : "\(self.selectedSessionIDs.count) selected • tap trash"
+                    self.doneButton.alpha = self.selectedSessionIDs.isEmpty ? 0.75 : 1
+                },
+                UIAction(title: "Close Session", image: UIImage(systemName: "xmark.circle"), attributes: .destructive) { _ in
+                    self.closeSession(credentialKey: item.credentialKey, sessionName: item.sessionName)
+                },
+            ])
+        }
+    }
+
+    private func promptRenameSession(credentialKey: String, sessionName: String) {
+        let alert = UIAlertController(title: "Rename session", message: sessionName, preferredStyle: .alert)
+        alert.addTextField { field in
+            field.text = sessionName
+            field.clearButtonMode = .whileEditing
+            field.autocapitalizationType = .none
+            field.autocorrectionType = .no
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Rename", style: .default, handler: { [weak self, weak alert] _ in
+            guard let self, let raw = alert?.textFields?.first?.text else { return }
+            let newName = XTermSessionController.normalizeTmuxSessionName(raw)
+            guard !newName.isEmpty else { return }
+            self.renameSession(credentialKey: credentialKey, oldSessionName: sessionName, newSessionName: newName)
+        }))
+        present(alert, animated: true)
+    }
+
+    private func renameSession(credentialKey: String, oldSessionName: String, newSessionName: String) {
+        guard let credential = keychain().getCredential(for: credentialKey) else { return }
+        let oldNormalized = XTermSessionController.normalizeTmuxSessionName(oldSessionName)
+        let newNormalized = XTermSessionController.normalizeTmuxSessionName(newSessionName)
+        guard !oldNormalized.isEmpty, !newNormalized.isEmpty, oldNormalized != newNormalized else { return }
+
+        let oldEscaped = oldNormalized.replacingOccurrences(of: "'", with: "'\"'\"'")
+        let newEscaped = newNormalized.replacingOccurrences(of: "'", with: "'\"'\"'")
+        let command = """
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+if ! command -v tmux >/dev/null 2>&1; then
+  echo "__CE_TMUX_ERROR__: tmux is not installed"
+elif tmux has-session -t '\(oldEscaped)' 2>/dev/null; then
+  if tmux rename-session -t '\(oldEscaped)' '\(newEscaped)' 2>/dev/null; then
+    echo "__CE_TMUX_OK__"
+  else
+    echo "__CE_TMUX_ERROR__: failed to rename session"
+  fi
+else
+  echo "__CE_TMUX_ERROR__: session not found"
+fi
+"""
+        Task {
+            let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
+            await MainActor.run {
+                if output.contains("__CE_TMUX_OK__") {
+                    TerminalWorkspaceStore.shared.renameTabsBoundToTmuxSession(
+                        credentialKey: credentialKey,
+                        oldSessionName: oldNormalized,
+                        newSessionName: newNormalized
+                    )
+                    self.reload()
+                } else {
+                    self.showCloseError(sessionName: oldNormalized, output: output)
+                }
+            }
+        }
     }
 }
 
@@ -3991,6 +4287,9 @@ final class TerminalAllTabsCell: UICollectionViewCell {
     private let subtitleLabel = UILabel()
     private let previewLabel = UILabel()
     private let closeButton = UIButton(type: .system)
+    private let selectedBadge = UIImageView()
+    private var accentColor: UIColor?
+    private var sessionActive = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -4030,6 +4329,11 @@ final class TerminalAllTabsCell: UICollectionViewCell {
             self?.onClose?()
         }, for: .touchUpInside)
         card.addSubview(closeButton)
+
+        selectedBadge.image = UIImage(systemName: "checkmark.circle.fill")
+        selectedBadge.tintColor = UIColor.systemBlue
+        selectedBadge.alpha = 0
+        card.addSubview(selectedBadge)
     }
 
     @available(*, unavailable)
@@ -4043,6 +4347,7 @@ final class TerminalAllTabsCell: UICollectionViewCell {
         let inner = card.bounds.inset(by: UIEdgeInsets(top: UIFloat(10), left: UIFloat(10), bottom: UIFloat(10), right: UIFloat(10)))
 
         closeButton.frame = CGRect(x: inner.maxX - UIFloat(20), y: inner.minY, width: UIFloat(20), height: UIFloat(20))
+        selectedBadge.frame = CGRect(x: inner.maxX - UIFloat(24), y: closeButton.frame.maxY + UIFloat(6), width: UIFloat(24), height: UIFloat(24))
         titleLabel.frame = CGRect(x: inner.minX, y: inner.minY, width: max(0, closeButton.frame.minX - inner.minX - UIFloat(6)), height: UIFloat(20))
         subtitleLabel.frame = CGRect(x: inner.minX, y: titleLabel.frame.maxY + UIFloat(1), width: inner.width, height: UIFloat(16))
 
@@ -4055,13 +4360,38 @@ final class TerminalAllTabsCell: UICollectionViewCell {
         titleLabel.text = title
         subtitleLabel.text = subtitle
         previewLabel.text = previewText
+        sessionActive = isActive
 
         if let accentHex, let accent = UIColor(hex: accentHex) {
+            accentColor = accent
             card.layer.borderColor = accent.withAlphaComponent(0.75).cgColor
             card.layer.borderWidth = isActive ? UIFloat(2) : UIFloat(1)
         } else {
+            accentColor = UIColor.tintColor
             card.layer.borderColor = (isActive ? UIColor.tintColor : UIColor.separator).cgColor
             card.layer.borderWidth = isActive ? UIFloat(2) : UIFloat(1)
+        }
+        updateSelectionAppearance()
+    }
+
+    override var isSelected: Bool {
+        didSet { updateSelectionAppearance() }
+    }
+
+    private func updateSelectionAppearance() {
+        let accent = accentColor ?? UIColor.tintColor
+        if isSelected {
+            card.backgroundColor = accent.withAlphaComponent(0.28)
+            card.layer.borderColor = accent.cgColor
+            card.layer.borderWidth = UIFloat(4)
+            closeButton.tintColor = accent
+            selectedBadge.alpha = 1
+        } else {
+            card.backgroundColor = UIColor.secondarySystemBackground
+            card.layer.borderColor = (sessionActive ? accent.withAlphaComponent(0.75) : UIColor.separator).cgColor
+            card.layer.borderWidth = sessionActive ? UIFloat(2) : UIFloat(1)
+            closeButton.tintColor = UIColor.secondaryLabel
+            selectedBadge.alpha = 0
         }
     }
 }
