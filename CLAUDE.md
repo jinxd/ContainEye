@@ -177,6 +177,8 @@ When refactoring UI:
 - Do not change deployment targets or package versions unless task requires it.
 - Do not introduce a second navigation root architecture for the same flow.
 - Do not bypass environment-based dependency wiring with hidden globals.
+- For action selection UI, do not use alerts/action sheets as pickers; use `UIMenu` or context menus.
+- Default distribution flow is ad hoc via `scripts/deploy-ad-hoc.sh` unless the user explicitly asks for a different release path.
 
 ## Quick Project Snapshot
 

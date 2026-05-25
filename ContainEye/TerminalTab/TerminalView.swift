@@ -1373,7 +1373,8 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
 
         overflowButton.setImage(UIImage(systemName: "ellipsis"), for: .normal)
         overflowButton.tintColor = UIColor.secondaryLabel
-        overflowButton.addTarget(self, action: #selector(didTapOverflow), for: .touchUpInside)
+        overflowButton.showsMenuAsPrimaryAction = true
+        overflowButton.menu = makeOverflowMenu()
         trailingChromeView.contentView.addSubview(overflowButton)
 
         let swipeLeft = UISwipeGestureRecognizer(target: self, action: #selector(didSwipeCompactBar(_:)))
@@ -1395,6 +1396,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
     func refreshFromWorkspace() {
         let focused = workspace.focusedPaneID == paneID
         let activeTab = workspace.activeTab(in: paneID)
+        overflowButton.menu = makeOverflowMenu()
 
         updateCompactTabChrome(isFocused: focused, activeTab: activeTab)
 
@@ -1686,27 +1688,31 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         workspace.closeTab(tabID: active.id)
     }
 
-    @objc
-    private func didTapOverflow() {
-        let alert = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
-        alert.addAction(UIAlertAction(title: "New Tab", style: .default, handler: { _ in
-            self.workspace.focusOrCreateEmptyPane()
-        }))
+    private func makeOverflowMenu() -> UIMenu {
+        var actions: [UIAction] = [
+            UIAction(title: "New Tab", image: UIImage(systemName: "plus")) { [weak self] _ in
+                self?.workspace.focusOrCreateEmptyPane()
+            },
+            UIAction(title: "View All Tabs", image: UIImage(systemName: "square.grid.2x2")) { [weak self] _ in
+                self?.presentAllTabs()
+            },
+        ]
+
         if let active = workspace.activeTab(in: paneID),
            let session = active.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
            !session.isEmpty {
-            alert.addAction(UIAlertAction(title: "Rename Session", style: .default, handler: { _ in
-                self.promptRenameActiveSession(sessionName: session, credentialKey: active.credentialKey)
-            }))
-            alert.addAction(UIAlertAction(title: "Close Session", style: .destructive, handler: { _ in
-                self.promptCloseActiveSession(sessionName: session, credentialKey: active.credentialKey)
-            }))
+            actions.append(UIAction(title: "Rename Session", image: UIImage(systemName: "pencil")) { [weak self] _ in
+                self?.promptRenameActiveSession(sessionName: session, credentialKey: active.credentialKey)
+            })
+            actions.append(UIAction(
+                title: "Close Session",
+                image: UIImage(systemName: "xmark.circle"),
+                attributes: .destructive
+            ) { [weak self] _ in
+                self?.promptCloseActiveSession(sessionName: session, credentialKey: active.credentialKey)
+            })
         }
-        alert.addAction(UIAlertAction(title: "View All Tabs", style: .default, handler: { _ in
-            self.presentAllTabs()
-        }))
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        present(alert, animated: true)
+        return UIMenu(children: actions)
     }
 
     @objc
@@ -2588,6 +2594,7 @@ fi
 final class TerminalTabOverviewViewController: UIViewController {
     struct Item: Hashable {
         let id: String
+        let tabID: UUID?
         let credentialKey: String
         let sessionName: String
         let host: String
@@ -2781,8 +2788,37 @@ final class TerminalTabOverviewViewController: UIViewController {
                 .allKeys()
                 .compactMap { keychain().getCredential(for: $0) }
                 .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
+            let credentialMap = Dictionary(uniqueKeysWithValues: credentials.map { ($0.key, $0) })
 
-            var discovered: [Item] = []
+            var itemsByID: [String: Item] = [:]
+
+            // Always include currently open workspace tabs so All Tabs never shows "0"
+            // while active tabs exist but remote tmux discovery is delayed or failing.
+            for tab in workspace.tabs.values {
+                let normalizedSession = XTermSessionController.normalizeTmuxSessionName(tab.tmuxSessionName ?? "")
+                let host = credentialMap[tab.credentialKey]?.host ?? tab.credentialKey
+                let itemID: String
+                let displayName: String
+                if normalizedSession.isEmpty {
+                    itemID = "tab:\(tab.id.uuidString.lowercased())"
+                    displayName = tab.title
+                } else {
+                    itemID = "tmux:\(tab.credentialKey):\(normalizedSession)"
+                    displayName = normalizedSession
+                }
+
+                itemsByID[itemID] = Item(
+                    id: itemID,
+                    tabID: tab.id,
+                    credentialKey: tab.credentialKey,
+                    sessionName: displayName,
+                    host: host,
+                    previewText: "active tab",
+                    isActive: true,
+                    colorHex: tab.shortcutColorHex ?? "#10B981"
+                )
+            }
+
             await withTaskGroup(of: [Item].self, returning: Void.self) { group in
                 for credential in credentials {
                     group.addTask {
@@ -2798,6 +2834,7 @@ final class TerminalTabOverviewViewController: UIViewController {
                             }
                             return Item(
                                 id: "tmux:\(credential.key):\(session.sessionName)",
+                                tabID: nil,
                                 credentialKey: credential.key,
                                 sessionName: session.sessionName,
                                 host: credential.host,
@@ -2810,10 +2847,16 @@ final class TerminalTabOverviewViewController: UIViewController {
                 }
 
                 for await partial in group {
-                    discovered.append(contentsOf: partial)
+                    for item in partial {
+                        if let existing = itemsByID[item.id], existing.tabID != nil {
+                            continue
+                        }
+                        itemsByID[item.id] = item
+                    }
                 }
             }
 
+            var discovered = Array(itemsByID.values)
             discovered.sort {
                 if $0.host == $1.host {
                     return $0.sessionName.localizedCaseInsensitiveCompare($1.sessionName) == .orderedAscending
@@ -2924,6 +2967,12 @@ extension TerminalTabOverviewViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         guard indexPath.item < items.count else { return }
         let item = items[indexPath.item]
+        if let tabID = item.tabID,
+           let pane = workspace.panes.first(where: { $0.tabIDs.contains(tabID) }) {
+            workspace.setActiveTab(tabID: tabID, in: pane.id)
+            dismiss(animated: true)
+            return
+        }
         onSelectSession?(item.credentialKey, item.sessionName, item.sessionName)
         dismiss(animated: true)
     }
