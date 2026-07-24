@@ -58,6 +58,7 @@ enum TerminalWindowStore {
         store.openTab(
             credentialKey: target.credentialKey,
             preferredTitle: target.title,
+            shortcutColorHex: target.colorHex,
             tmuxSessionName: target.tmuxSessionName,
             tmuxAttachOnly: true,
             disableAutoPersistentSession: true

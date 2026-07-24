@@ -227,6 +227,23 @@ nonisolated private func withTerminalSSHTimeout<T: Sendable>(
     }
 }
 
+/// Fixed palette used to color-code tmux sessions that don't inherit a shortcut color.
+enum TerminalSessionPalette {
+    static let colors = [
+        "#10B981", "#3B82F6", "#8B5CF6", "#EC4899", "#F59E0B",
+        "#EF4444", "#14B8A6", "#6366F1", "#84CC16", "#F97316"
+    ]
+
+    nonisolated static func color(for key: String) -> String {
+        var hash = 5381
+        for byte in key.utf8 {
+            hash = (hash &* 33) &+ Int(byte)
+        }
+        let index = abs(hash) % colors.count
+        return colors[index]
+    }
+}
+
 // MARK: - Workspace View Controller
 
 @MainActor
@@ -1617,7 +1634,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
                     preferredTitle: target.title,
                     inFocusedPane: true,
                     themeOverrideSelectionKey: nil,
-                    shortcutColorHex: "#10B981",
+                    shortcutColorHex: target.colorHex ?? "#10B981",
                     tmuxSessionName: target.sessionName,
                     tmuxAttachOnly: true
                 )
@@ -1961,13 +1978,13 @@ fi
 
     private func presentAllTabs() {
         let overview = TerminalTabOverviewViewController(workspace: workspace)
-        overview.onSelectSession = { [weak self] credentialKey, sessionName, title in
+        overview.onSelectSession = { [weak self] credentialKey, sessionName, title, colorHex in
             self?.workspace.openTab(
                 credentialKey: credentialKey,
                 preferredTitle: title,
                 inFocusedPane: true,
                 themeOverrideSelectionKey: nil,
-                shortcutColorHex: "#10B981",
+                shortcutColorHex: colorHex ?? "#10B981",
                 tmuxSessionName: sessionName,
                 tmuxAttachOnly: true
             )
@@ -2044,6 +2061,7 @@ final class TerminalServerPickerViewController: UIViewController {
         let credentialKey: String
         let sessionName: String
         let title: String
+        var colorHex: String?
     }
 
     enum SelectionTarget {
@@ -2179,6 +2197,7 @@ final class TerminalServerPickerViewController: UIViewController {
 
             let shortcuts = await TerminalLaunchShortcut.all(in: SharedDatabase.db)
             let shortcutSessionTitleMap = Self.makeShortcutSessionTitleMap(shortcuts: shortcuts)
+            let shortcutSessionColorMap = Self.makeShortcutSessionColorMap(shortcuts: shortcuts)
             let credentialMap = Dictionary(uniqueKeysWithValues: credentials.map { ($0.key, $0) })
             let shortcutItems = shortcuts.compactMap { shortcut -> Item? in
                 guard let credential = credentialMap[shortcut.credentialKey] else { return nil }
@@ -2224,7 +2243,11 @@ final class TerminalServerPickerViewController: UIViewController {
                                 title: resolvedTitle,
                                 host: credential.host,
                                 detailText: detail,
-                                colorHex: "#10B981"
+                                colorHex: Self.resolveTmuxSessionColorHex(
+                                    sessionName: session.sessionName,
+                                    credentialKey: credential.key,
+                                    shortcutSessionColorMap: shortcutSessionColorMap
+                                )
                             )
                         }
                     }
@@ -2456,6 +2479,45 @@ if command -v tmux >/dev/null 2>&1; then tmux list-sessions -F '#{session_name}|
         return "Terminal Session"
     }
 
+    /// Maps a session's shortcut suffix to the shortcut's chosen color (both the new
+    /// slug scheme and the legacy id-hash), so sessions inherit their shortcut's color.
+    nonisolated static func makeShortcutSessionColorMap(shortcuts: [TerminalLaunchShortcut]) -> [String: [String: String]] {
+        var map: [String: [String: String]] = [:]
+        for shortcut in shortcuts {
+            guard let color = shortcut.colorHex, !color.isEmpty else { continue }
+            let slug = shortcutTitleSlug(shortcut.title)
+            if !slug.isEmpty {
+                map[shortcut.credentialKey, default: [:]][slug] = color
+            }
+            let legacySuffix = shortcutSessionSuffix(for: shortcut.id)
+            if !legacySuffix.isEmpty {
+                map[shortcut.credentialKey, default: [:]][legacySuffix] = color
+            }
+        }
+        return map
+    }
+
+    /// A stable, distinct color for a session: its shortcut color when known,
+    /// otherwise a deterministic hash into a fixed palette so each session reads
+    /// as a distinct, consistent color across launches.
+    nonisolated static func resolveTmuxSessionColorHex(
+        sessionName: String,
+        credentialKey: String,
+        shortcutSessionColorMap: [String: [String: String]]
+    ) -> String {
+        let prefix = "containeye-shortcut-"
+        if sessionName.hasPrefix(prefix) {
+            let remainder = String(sessionName.dropFirst(prefix.count))
+            if let splitIndex = remainder.lastIndex(of: "-") {
+                let suffix = String(remainder[..<splitIndex])
+                if let mapped = shortcutSessionColorMap[credentialKey]?[suffix], !mapped.isEmpty {
+                    return mapped
+                }
+            }
+        }
+        return TerminalSessionPalette.color(for: "\(credentialKey)|\(sessionName)")
+    }
+
     nonisolated private static func disambiguateSessionTitles(_ sessions: [Item]) -> [Item] {
         var counts: [String: Int] = [:]
         return sessions.map { item in
@@ -2512,7 +2574,8 @@ extension TerminalServerPickerViewController: UICollectionViewDelegate {
             let target = TmuxSessionTarget(
                 credentialKey: credentialKey,
                 sessionName: sessionName,
-                title: item.title
+                title: item.title,
+                colorHex: item.colorHex
             )
             onSelection?(.tmuxSession(target))
         }
@@ -2816,7 +2879,7 @@ final class TerminalTabOverviewViewController: UIViewController {
         }
     }
 
-    var onSelectSession: ((String, String, String) -> Void)?
+    var onSelectSession: ((String, String, String, String?) -> Void)?
 
     private let workspace: TerminalWorkspaceStore
     private var items: [Item] = []
@@ -3017,6 +3080,7 @@ final class TerminalTabOverviewViewController: UIViewController {
                 .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
             let shortcuts = await TerminalLaunchShortcut.all(in: SharedDatabase.db)
             let shortcutSessionTitleMap = TerminalServerPickerViewController.makeShortcutSessionTitleMap(shortcuts: shortcuts)
+            let shortcutSessionColorMap = TerminalServerPickerViewController.makeShortcutSessionColorMap(shortcuts: shortcuts)
 
             // Accumulate results per server. Apply incrementally as each server
             // answers so healthy servers show immediately even while another is
@@ -3032,7 +3096,8 @@ final class TerminalTabOverviewViewController: UIViewController {
                                 credentialKey: credential.key,
                                 host: credential.host,
                                 session: session,
-                                shortcutSessionTitleMap: shortcutSessionTitleMap
+                                shortcutSessionTitleMap: shortcutSessionTitleMap,
+                                shortcutSessionColorMap: shortcutSessionColorMap
                             )
                         }
                     }
@@ -3082,7 +3147,8 @@ final class TerminalTabOverviewViewController: UIViewController {
         credentialKey: String,
         host: String,
         session: TmuxSessionSummary,
-        shortcutSessionTitleMap: [String: [String: String]]
+        shortcutSessionTitleMap: [String: [String: String]],
+        shortcutSessionColorMap: [String: [String: String]]
     ) -> Item {
         let previewIsPlaceholder = session.previewLines.isEmpty
         let previewText: String
@@ -3111,7 +3177,11 @@ final class TerminalTabOverviewViewController: UIViewController {
             previewText: previewText,
             previewIsPlaceholder: previewIsPlaceholder,
             isActive: session.isAttached ?? false,
-            colorHex: "#10B981"
+            colorHex: TerminalServerPickerViewController.resolveTmuxSessionColorHex(
+                sessionName: session.sessionName,
+                credentialKey: credentialKey,
+                shortcutSessionColorMap: shortcutSessionColorMap
+            )
         )
     }
 
@@ -3404,7 +3474,7 @@ extension TerminalTabOverviewViewController: UICollectionViewDelegate {
             doneButton.alpha = selectedSessionIDs.isEmpty ? 0.75 : 1
             return
         }
-        onSelectSession?(item.credentialKey, item.sessionName, item.displayTitle)
+        onSelectSession?(item.credentialKey, item.sessionName, item.displayTitle, item.colorHex)
         dismiss(animated: true)
     }
 
@@ -3426,7 +3496,7 @@ extension TerminalTabOverviewViewController: UICollectionViewDelegate {
             guard let self else { return UIMenu() }
             var actions: [UIMenuElement] = [
                 UIAction(title: "Open Session", image: UIImage(systemName: "arrow.right.circle")) { _ in
-                    self.onSelectSession?(item.credentialKey, item.sessionName, item.displayTitle)
+                    self.onSelectSession?(item.credentialKey, item.sessionName, item.displayTitle, item.colorHex)
                     self.dismiss(animated: true)
                 }
             ]
