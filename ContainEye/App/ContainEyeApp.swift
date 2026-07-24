@@ -34,35 +34,39 @@ struct ContainEyeApp: App {
 
 
     var body: some Scene {
+        // A single main window: the first scene shows the full app; any extra
+        // window the system opens renders a standalone terminal instead.
         WindowGroup(id: "main") {
-            ContentView()
-                .confirmable()
-                .environment(\.blackbirdDatabase, db)
-                .environment(\.agenticBridge, agenticBridge)
-                .environment(\.agenticContextStore, contextStore)
-                .environment(\.terminalNavigationManager, terminalNavigationManager)
-                .environment(\.storeKitManager, storeKitManager)
+            AppSceneRootView {
+                ContentView()
 #if !os(macOS)
-                .onAppear{
-                    try? BGTaskScheduler.shared.submit(
-                        BGAppRefreshTaskRequest(identifier: "apprefresh")
-                    )
+                    .onAppear{
+                        try? BGTaskScheduler.shared.submit(
+                            BGAppRefreshTaskRequest(identifier: "apprefresh")
+                        )
 
-                    Task(priority: .background){
-                        await ServerTest.ServerTestAppEntitiy.updateSpotlightIndex()
-                        AppIntent.updateAppShortcutParameters()
-                        await loadDefaultData()
-                        UIApplication.shared.registerForRemoteNotifications()
+                        Task(priority: .background){
+                            await ServerTest.ServerTestAppEntitiy.updateSpotlightIndex()
+                            AppIntent.updateAppShortcutParameters()
+                            await loadDefaultData()
+                            UIApplication.shared.registerForRemoteNotifications()
+                        }
                     }
-                }
 #endif
-                .onReceive(ServerTest.changePublisher(in: db).receive(on: DispatchQueue.main)){ _ in
-                    WidgetCenter.shared.reloadAllTimelines()
-                    Task{try await Logger.updateData()}
-                }
-                .onReceive(Server.changePublisher(in: db).receive(on: DispatchQueue.main)) { _ in
-                    Task{try await Logger.updateData()}
-                }
+                    .onReceive(ServerTest.changePublisher(in: db).receive(on: DispatchQueue.main)){ _ in
+                        WidgetCenter.shared.reloadAllTimelines()
+                        Task{try await Logger.updateData()}
+                    }
+                    .onReceive(Server.changePublisher(in: db).receive(on: DispatchQueue.main)) { _ in
+                        Task{try await Logger.updateData()}
+                    }
+            }
+            .confirmable()
+            .environment(\.blackbirdDatabase, db)
+            .environment(\.agenticBridge, agenticBridge)
+            .environment(\.agenticContextStore, contextStore)
+            .environment(\.terminalNavigationManager, terminalNavigationManager)
+            .environment(\.storeKitManager, storeKitManager)
         }
         // Standalone terminal windows (iPad/Mac multi-window). Opening a tmux
         // session in a new window activates one of these scenes.
