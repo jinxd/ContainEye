@@ -65,22 +65,42 @@ enum TerminalWindowStore {
         )
         return store
     }
+
+    /// A fresh, empty terminal window (its own workspace) — used when the system
+    /// opens a new window with no specific session. It shows the server picker so
+    /// the user can start or attach a session.
+    @MainActor
+    static func makeEmpty(id: String) -> TerminalWorkspaceStore {
+        TerminalWorkspaceStore(
+            userDefaults: .standard,
+            persistenceKey: "terminal.window.empty.\(id)",
+            resolveCredentialLabel: { key in
+                keychain().getCredential(for: key)?.label
+            },
+            autoConnectControllers: true
+        )
+    }
 }
 
-/// The content of a standalone terminal window.
+/// The content of a standalone terminal window. A `nil` target means a fresh,
+/// empty terminal window opened by the system.
 struct StandaloneTerminalScene: View {
-    let target: TerminalWindowTarget
+    let target: TerminalWindowTarget?
     @State private var workspace: TerminalWorkspaceStore
 
-    init(target: TerminalWindowTarget) {
+    init(target: TerminalWindowTarget?) {
         self.target = target
-        _workspace = State(initialValue: TerminalWindowStore.make(for: target))
+        if let target {
+            _workspace = State(initialValue: TerminalWindowStore.make(for: target))
+        } else {
+            _workspace = State(initialValue: TerminalWindowStore.makeEmpty(id: UUID().uuidString))
+        }
     }
 
     var body: some View {
         TerminalWorkspaceNavigationHost(workspace: workspace)
             .ignoresSafeArea(.container, edges: .bottom)
-            .navigationTitle(target.title)
+            .navigationTitle(target?.title ?? "Terminal")
             .trackView("terminal/window")
     }
 }

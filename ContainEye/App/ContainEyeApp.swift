@@ -34,7 +34,7 @@ struct ContainEyeApp: App {
 
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "main") {
             ContentView()
                 .confirmable()
                 .environment(\.blackbirdDatabase, db)
@@ -67,15 +67,13 @@ struct ContainEyeApp: App {
         // Standalone terminal windows (iPad/Mac multi-window). Opening a tmux
         // session in a new window activates one of these scenes.
         WindowGroup(for: TerminalWindowTarget.self) { $target in
-            if let target {
-                StandaloneTerminalScene(target: target)
-                    .confirmable()
-                    .environment(\.blackbirdDatabase, db)
-                    .environment(\.agenticBridge, agenticBridge)
-                    .environment(\.agenticContextStore, contextStore)
-                    .environment(\.terminalNavigationManager, terminalNavigationManager)
-                    .environment(\.storeKitManager, storeKitManager)
-            }
+            StandaloneTerminalScene(target: target)
+                .confirmable()
+                .environment(\.blackbirdDatabase, db)
+                .environment(\.agenticBridge, agenticBridge)
+                .environment(\.agenticContextStore, contextStore)
+                .environment(\.terminalNavigationManager, terminalNavigationManager)
+                .environment(\.storeKitManager, storeKitManager)
         }
 
 #if !os(macOS)
