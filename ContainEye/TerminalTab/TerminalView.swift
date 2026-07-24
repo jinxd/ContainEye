@@ -27,10 +27,19 @@ func UIFloat(_ value: Int) -> CGFloat {
 // MARK: - SwiftUI Host
 
 struct RemoteTerminalView: View {
+    @Environment(\.openWindow) private var openWindow
+
     var body: some View {
         TerminalWorkspaceNavigationHost()
             .ignoresSafeArea(.container, edges: .bottom)
             .trackView("terminal/workspace")
+            .onAppear {
+                // Bridge UIKit terminal chrome to SwiftUI multi-window support so a
+                // session can be popped out into its own window on iPad/Mac.
+                TerminalWindowRouter.shared.openTerminalWindow = { target in
+                    openWindow(value: target)
+                }
+            }
     }
 }
 
@@ -38,9 +47,11 @@ struct RemoteTerminalView: View {
     RemoteTerminalView()
 }
 
-private struct TerminalWorkspaceNavigationHost: UIViewControllerRepresentable {
+struct TerminalWorkspaceNavigationHost: UIViewControllerRepresentable {
+    var workspace: TerminalWorkspaceStore = .shared
+
     func makeUIViewController(context: Context) -> UINavigationController {
-        let root = TerminalWorkspaceViewController()
+        let root = TerminalWorkspaceViewController(workspace: workspace)
         let navigation = UINavigationController(rootViewController: root)
         navigation.navigationBar.prefersLargeTitles = false
         return navigation
@@ -220,7 +231,7 @@ nonisolated private func withTerminalSSHTimeout<T: Sendable>(
 
 @MainActor
 final class TerminalWorkspaceViewController: UIViewController, UIGestureRecognizerDelegate {
-    private let workspace = TerminalWorkspaceStore.shared
+    private let workspace: TerminalWorkspaceStore
     private let terminalManager = TerminalNavigationManager.shared
     private let hardwareInput = TerminalHardwareInputController()
     private let shakeInput = TerminalShakeInputController()
@@ -283,6 +294,17 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
     private var keyboardButtons: [UIButton] = []
     private var keyboardSuggestionButtons: [UIButton] = []
     private var keyboardSuggestionDividers: [UIView] = []
+
+    @MainActor
+    init(workspace: TerminalWorkspaceStore) {
+        self.workspace = workspace
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -3402,11 +3424,24 @@ extension TerminalTabOverviewViewController: UICollectionViewDelegate {
         let item = items[indexPath.item]
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
             guard let self else { return UIMenu() }
-            return UIMenu(children: [
+            var actions: [UIMenuElement] = [
                 UIAction(title: "Open Session", image: UIImage(systemName: "arrow.right.circle")) { _ in
                     self.onSelectSession?(item.credentialKey, item.sessionName, item.displayTitle)
                     self.dismiss(animated: true)
-                },
+                }
+            ]
+            if TerminalWindowRouter.shared.supportsMultipleWindows {
+                actions.append(UIAction(title: "Open in New Window", image: UIImage(systemName: "macwindow.badge.plus")) { _ in
+                    TerminalWindowRouter.shared.open(TerminalWindowTarget(
+                        credentialKey: item.credentialKey,
+                        tmuxSessionName: item.sessionName,
+                        title: item.displayTitle,
+                        colorHex: item.colorHex
+                    ))
+                    self.dismiss(animated: true)
+                })
+            }
+            actions.append(contentsOf: [
                 UIAction(title: "Rename Session", image: UIImage(systemName: "pencil")) { _ in
                     self.promptRenameSession(credentialKey: item.credentialKey, sessionName: item.sessionName)
                 },
@@ -3435,6 +3470,7 @@ extension TerminalTabOverviewViewController: UICollectionViewDelegate {
                     self.closeSession(credentialKey: item.credentialKey, sessionName: item.sessionName)
                 },
             ])
+            return UIMenu(children: actions)
         }
     }
 
