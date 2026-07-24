@@ -205,6 +205,25 @@ final class TerminalWorkspaceStore {
         persistWorkspace()
     }
 
+    func clearPaneToServerPicker(paneID: UUID) {
+        guard let paneIndex = panes.firstIndex(where: { $0.id == paneID }) else {
+            return
+        }
+
+        let tabIDsToClose = panes[paneIndex].tabIDs
+        for tabID in tabIDsToClose {
+            tabs[tabID] = nil
+            controllers[tabID]?.disconnect()
+            controllers[tabID] = nil
+        }
+
+        panes[paneIndex].tabIDs = []
+        panes[paneIndex].activeTabID = nil
+        focusedPaneID = paneID
+        normalizePanesForSingleSession()
+        persistWorkspace()
+    }
+
     func splitPane() {
         guard panes.count < maxPaneCount else {
             return

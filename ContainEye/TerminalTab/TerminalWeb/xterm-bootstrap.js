@@ -57,6 +57,134 @@
     postBridge("selection_changed", payload);
   }
 
+  function installTouchSelection(terminal) {
+    const element = terminal.element;
+    const supportsTouch = ("ontouchstart" in window) || ((navigator.maxTouchPoints || 0) > 0);
+    if (!element || !supportsTouch) {
+      return;
+    }
+
+    const state = {
+      anchor: null,
+      selecting: false,
+      timerId: 0,
+      startX: 0,
+      startY: 0,
+      hintShown: false,
+    };
+
+    function clearTimer() {
+      if (state.timerId) {
+        window.clearTimeout(state.timerId);
+        state.timerId = 0;
+      }
+    }
+
+    function getCell(touch) {
+      const screen = element.querySelector(".xterm-screen") || element;
+      const rect = screen.getBoundingClientRect();
+      const dims = terminal._core && terminal._core._renderService && terminal._core._renderService.dimensions
+        ? terminal._core._renderService.dimensions.css
+        : null;
+      const cellWidth = dims && dims.cell ? dims.cell.width : 0;
+      const cellHeight = dims && dims.cell ? dims.cell.height : 0;
+      if (!cellWidth || !cellHeight) {
+        return null;
+      }
+
+      const col = Math.max(0, Math.min(terminal.cols - 1, Math.floor((touch.clientX - rect.left) / cellWidth)));
+      const viewportRow = Math.max(0, Math.min(terminal.rows - 1, Math.floor((touch.clientY - rect.top) / cellHeight)));
+      const row = (terminal.buffer.active.viewportY || 0) + viewportRow;
+
+      return { row: row, col: col };
+    }
+
+    function applySelection(anchor, current) {
+      const startIndex = (anchor.row * terminal.cols) + anchor.col;
+      const endIndex = (current.row * terminal.cols) + current.col;
+      const from = Math.min(startIndex, endIndex);
+      const to = Math.max(startIndex, endIndex);
+      const row = Math.floor(from / terminal.cols);
+      const col = from % terminal.cols;
+      const length = (to - from) + 1;
+
+      terminal.select(col, row, length);
+      emitSelectionChanged(terminal);
+    }
+
+    function endSelection(event) {
+      const hadLongPressSelection = state.selecting;
+      clearTimer();
+      state.selecting = false;
+      state.anchor = null;
+      if (hadLongPressSelection && event) {
+        event.preventDefault();
+        event.stopPropagation();
+        emitSelectionChanged(terminal);
+      }
+    }
+
+    element.addEventListener("touchstart", function (event) {
+      if (!event.touches || event.touches.length !== 1) {
+        endSelection();
+        return;
+      }
+
+      const touch = event.touches[0];
+      const anchor = getCell(touch);
+      if (!anchor) {
+        return;
+      }
+
+      state.startX = touch.clientX;
+      state.startY = touch.clientY;
+      state.anchor = anchor;
+      state.selecting = false;
+      clearTimer();
+
+      state.timerId = window.setTimeout(function () {
+        if (!state.anchor) {
+          return;
+        }
+        if (!state.hintShown) {
+          postBridge("selection_hint", {
+            message: "Press and hold, then move your finger to select",
+          });
+          state.hintShown = true;
+        }
+        state.selecting = true;
+        applySelection(state.anchor, state.anchor);
+      }, 260);
+    }, { passive: true });
+
+    element.addEventListener("touchmove", function (event) {
+      if (!event.touches || event.touches.length !== 1) {
+        endSelection();
+        return;
+      }
+
+      const touch = event.touches[0];
+      if (!state.selecting) {
+        const movedFar = Math.abs(touch.clientX - state.startX) > 8 || Math.abs(touch.clientY - state.startY) > 8;
+        if (movedFar) {
+          clearTimer();
+        }
+        return;
+      }
+
+      const current = getCell(touch);
+      if (!current || !state.anchor) {
+        return;
+      }
+
+      event.preventDefault();
+      applySelection(state.anchor, current);
+    }, { passive: false });
+
+    element.addEventListener("touchend", endSelection, { passive: false });
+    element.addEventListener("touchcancel", endSelection, { passive: false });
+  }
+
   function tokenizeShellLine(line) {
     const tokens = [];
     let current = "";
@@ -245,6 +373,7 @@
     applyThemeBackground(terminal.options.theme || {});
 
     fitAddon.fit();
+    installTouchSelection(terminal);
 
     terminal.onData(function (data) {
       postBridge("terminal_data", { data: data });
