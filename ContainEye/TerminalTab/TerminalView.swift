@@ -380,6 +380,9 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
             session.userInfo = info
         }
         TerminalWindowRouter.shared.installSceneDisconnectObserverIfNeeded()
+        // A window always has at least one tab (macOS-style); an empty tab shows
+        // the shortcuts view until a session is launched into it.
+        workspace.ensureAtLeastOneTab(inWindow: windowID)
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -1784,30 +1787,57 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         picker.onSelection = { [weak self] selection in
             guard let self else { return }
             self.workspace.focusPane(paneID: self.paneID)
+            // Launch into the current empty tab in place, rather than a new tab.
+            let emptyTabID = self.workspace.activeTab(in: self.paneID)
+                .flatMap { self.workspace.isTabEmpty($0.id) ? $0.id : nil }
             switch selection {
             case let .shortcut(shortcut):
                 let tmuxSessionName = TerminalServerPickerViewController.newTmuxSessionName(for: shortcut)
-                self.workspace.openTab(
-                    credentialKey: shortcut.credentialKey,
-                    preferredTitle: shortcut.title,
-                    windowID: self.paneWindowID,
-                    themeOverrideSelectionKey: shortcut.themeSelectionKey,
-                    shortcutColorHex: shortcut.colorHex,
-                    tmuxSessionName: tmuxSessionName,
-                    tmuxAttachOnly: false,
-                    disableAutoPersistentSession: true
-                )
+                if let emptyTabID {
+                    self.workspace.fillTab(
+                        tabID: emptyTabID,
+                        credentialKey: shortcut.credentialKey,
+                        preferredTitle: shortcut.title,
+                        themeOverrideSelectionKey: shortcut.themeSelectionKey,
+                        shortcutColorHex: shortcut.colorHex,
+                        tmuxSessionName: tmuxSessionName,
+                        tmuxAttachOnly: false,
+                        disableAutoPersistentSession: true
+                    )
+                } else {
+                    self.workspace.openTab(
+                        credentialKey: shortcut.credentialKey,
+                        preferredTitle: shortcut.title,
+                        windowID: self.paneWindowID,
+                        themeOverrideSelectionKey: shortcut.themeSelectionKey,
+                        shortcutColorHex: shortcut.colorHex,
+                        tmuxSessionName: tmuxSessionName,
+                        tmuxAttachOnly: false,
+                        disableAutoPersistentSession: true
+                    )
+                }
                 self.launchStartupScriptIfNeeded(shortcut.startupScript, credentialKey: shortcut.credentialKey)
             case let .tmuxSession(target):
-                self.workspace.openTab(
-                    credentialKey: target.credentialKey,
-                    preferredTitle: target.title,
-                    windowID: self.paneWindowID,
-                    themeOverrideSelectionKey: nil,
-                    shortcutColorHex: target.colorHex ?? "#10B981",
-                    tmuxSessionName: target.sessionName,
-                    tmuxAttachOnly: true
-                )
+                if let emptyTabID {
+                    self.workspace.fillTab(
+                        tabID: emptyTabID,
+                        credentialKey: target.credentialKey,
+                        preferredTitle: target.title,
+                        shortcutColorHex: target.colorHex ?? "#10B981",
+                        tmuxSessionName: target.sessionName,
+                        tmuxAttachOnly: true
+                    )
+                } else {
+                    self.workspace.openTab(
+                        credentialKey: target.credentialKey,
+                        preferredTitle: target.title,
+                        windowID: self.paneWindowID,
+                        themeOverrideSelectionKey: nil,
+                        shortcutColorHex: target.colorHex ?? "#10B981",
+                        tmuxSessionName: target.sessionName,
+                        tmuxAttachOnly: true
+                    )
+                }
             }
         }
         addChild(picker)
@@ -2349,7 +2379,7 @@ final class TerminalServerPickerViewController: UIViewController {
         addShortcutButton.addTarget(self, action: #selector(didTapAddShortcut), for: .touchUpInside)
         view.addSubview(addShortcutButton)
 
-        emptyStateLabel.text = "No shortcuts or tmux sessions"
+        emptyStateLabel.text = "No shortcuts yet"
         emptyStateLabel.textAlignment = .center
         emptyStateLabel.font = UIFont.systemFont(ofSize: UIFloat(14), weight: .medium)
         emptyStateLabel.textColor = UIColor.secondaryLabel
@@ -2393,6 +2423,9 @@ final class TerminalServerPickerViewController: UIViewController {
                 )
             }
 
+            // The shortcuts view shows shortcuts only — never active sessions.
+            _ = shortcutSessionTitleMap
+            _ = shortcutSessionColorMap
             await MainActor.run {
                 self.items = shortcutItems
                 var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
@@ -2400,58 +2433,6 @@ final class TerminalServerPickerViewController: UIViewController {
                 snapshot.appendItems(self.buildOrderedItems(sessions: [], shortcuts: self.items), toSection: .main)
                 self.dataSource.apply(snapshot, animatingDifferences: true)
                 self.emptyStateLabel.isHidden = !self.items.isEmpty
-            }
-
-            let excluded = self.excludedSessionKeys
-            await withTaskGroup(of: [Item].self, returning: Void.self) { group in
-                for credential in credentials {
-                    group.addTask {
-                        let sessions = await Self.discoverTmuxSessions(for: credential)
-                            .filter { !excluded.contains("\(credential.key)|\($0.sessionName)") }
-                        guard !sessions.isEmpty else { return [] }
-                        return sessions.map { session in
-                            let detail = Self.tmuxDetailText(for: session)
-                            let resolvedTitle = Self.resolveTmuxDisplayTitle(
-                                sessionName: session.sessionName,
-                                credentialKey: credential.key,
-                                shortcutSessionTitleMap: shortcutSessionTitleMap
-                            )
-                            return Item(
-                                id: "tmux:\(credential.key):\(session.sessionName)",
-                                kind: .tmuxSession(credentialKey: credential.key, sessionName: session.sessionName),
-                                credentialKey: credential.key,
-                                title: resolvedTitle,
-                                host: credential.host,
-                                detailText: detail,
-                                colorHex: Self.resolveTmuxSessionColorHex(
-                                    sessionName: session.sessionName,
-                                    credentialKey: credential.key,
-                                    shortcutSessionColorMap: shortcutSessionColorMap
-                                )
-                            )
-                        }
-                    }
-                }
-
-                var all: [Item] = []
-                for await partial in group {
-                    all.append(contentsOf: partial)
-                    let titledSessions = Self.disambiguateSessionTitles(all)
-                    let sortedSessions = titledSessions.sorted {
-                        if $0.host == $1.host {
-                            return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
-                        }
-                        return $0.host.localizedCaseInsensitiveCompare($1.host) == .orderedAscending
-                    }
-                    await MainActor.run {
-                        self.items = self.buildOrderedItems(sessions: sortedSessions, shortcuts: shortcutItems)
-                        var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-                        snapshot.appendSections([.main])
-                        snapshot.appendItems(self.items, toSection: .main)
-                        self.dataSource.apply(snapshot, animatingDifferences: true)
-                        self.emptyStateLabel.isHidden = !self.items.isEmpty
-                    }
-                }
             }
         }
     }

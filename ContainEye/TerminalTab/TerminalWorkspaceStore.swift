@@ -198,8 +198,10 @@ final class TerminalWorkspaceStore {
         persistWorkspace()
     }
 
-    private func makeTabTitle(baseLabel: String, paneID: UUID) -> String {
-        let siblingTitles = tabStates(in: paneID).map(\.title)
+    private func makeTabTitle(baseLabel: String, paneID: UUID, excluding excludedTabID: UUID? = nil) -> String {
+        let siblingTitles = tabStates(in: paneID)
+            .filter { $0.id != excludedTabID }
+            .map(\.title)
         guard siblingTitles.contains(baseLabel) else {
             return baseLabel
         }
@@ -211,9 +213,11 @@ final class TerminalWorkspaceStore {
     }
 
     func closeTab(tabID: UUID) {
-        guard tabs[tabID] != nil else {
+        guard let tab = tabs[tabID] else {
             return
         }
+
+        killTmuxSession(for: tab)
 
         tabs[tabID] = nil
         controllers[tabID]?.disconnect()
@@ -230,13 +234,105 @@ final class TerminalWorkspaceStore {
         persistWorkspace()
     }
 
-    /// Puts a window into "new tab" mode: keeps its tabs but shows the server
-    /// picker (no active tab) so the user can start or attach another session.
-    func beginNewTab(inWindow windowID: String) {
-        let id = paneID(forWindow: windowID)
-        guard let idx = panes.firstIndex(where: { $0.id == id }) else { return }
-        panes[idx].activeTabID = nil
-        focusedPaneID = id
+    /// Creates a new, empty tab (no session yet). An empty tab shows the shortcuts
+    /// view until a shortcut is launched into it via `fillTab`.
+    @discardableResult
+    func beginNewTab(inWindow windowID: String) -> UUID {
+        addEmptyTab(inWindow: windowID)
+    }
+
+    @discardableResult
+    func addEmptyTab(inWindow windowID: String) -> UUID {
+        let paneID = paneID(forWindow: windowID)
+        let tab = TerminalTabState(
+            id: UUID(),
+            credentialKey: "",
+            title: "New Tab",
+            createdAt: .now,
+            themeOverrideSelectionKey: nil,
+            shortcutColorHex: nil,
+            tmuxSessionName: nil,
+            tmuxAttachOnly: nil,
+            disableAutoPersistentSession: true
+        )
+        tabs[tab.id] = tab
+        if let idx = panes.firstIndex(where: { $0.id == paneID }) {
+            panes[idx].tabIDs.append(tab.id)
+            panes[idx].activeTabID = tab.id
+        }
+        focusedPaneID = paneID
+        persistWorkspace()
+        return tab.id
+    }
+
+    /// True when a tab has no live session yet (shows the shortcuts view).
+    func isTabEmpty(_ tabID: UUID) -> Bool {
+        controllers[tabID] == nil
+    }
+
+    /// Ensures a window always has at least one tab (macOS-style), creating an
+    /// empty one if needed. Returns the active tab id.
+    @discardableResult
+    func ensureAtLeastOneTab(inWindow windowID: String) -> UUID {
+        let paneID = paneID(forWindow: windowID)
+        if let pane = panes.first(where: { $0.id == paneID }), let active = pane.activeTabID {
+            return active
+        }
+        if let pane = panes.first(where: { $0.id == paneID }), let first = pane.tabIDs.first {
+            setActiveTab(tabID: first, in: paneID)
+            return first
+        }
+        return addEmptyTab(inWindow: windowID)
+    }
+
+    /// Launches a session into an existing (empty) tab in place, rather than
+    /// creating a new tab.
+    func fillTab(
+        tabID: UUID,
+        credentialKey: String,
+        preferredTitle: String? = nil,
+        themeOverrideSelectionKey: String? = nil,
+        shortcutColorHex: String? = nil,
+        tmuxSessionName: String? = nil,
+        tmuxAttachOnly: Bool = false,
+        disableAutoPersistentSession: Bool = false
+    ) {
+        guard var tab = tabs[tabID],
+              let paneID = panes.first(where: { $0.tabIDs.contains(tabID) })?.id else { return }
+
+        let normalizedTmuxSessionName = tmuxSessionName.map { XTermSessionController.normalizeTmuxSessionName($0) }
+        let trimmedPreferredTitle = preferredTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let label = (trimmedPreferredTitle?.isEmpty == false ? trimmedPreferredTitle! : nil)
+            ?? resolveCredentialLabel(credentialKey)
+            ?? credentialKey
+
+        tab.credentialKey = credentialKey
+        tab.title = makeTabTitle(baseLabel: label, paneID: paneID, excluding: tabID)
+        tab.themeOverrideSelectionKey = themeOverrideSelectionKey
+        tab.shortcutColorHex = shortcutColorHex
+        tab.tmuxSessionName = normalizedTmuxSessionName
+        tab.tmuxAttachOnly = tmuxAttachOnly
+        tab.disableAutoPersistentSession = disableAutoPersistentSession
+        tabs[tabID] = tab
+
+        controllers[tabID]?.disconnect()
+        let controller = XTermSessionController(
+            id: tabID,
+            credentialKey: credentialKey,
+            title: tab.title,
+            tmuxSessionName: tab.tmuxSessionName,
+            tmuxAttachOnly: tab.tmuxAttachOnly ?? false,
+            disableAutoPersistentSession: tab.disableAutoPersistentSession,
+            suggestionEngine: suggestionEngine,
+            documentIndex: suggestionIndex
+        )
+        if autoConnectControllers {
+            controller.connect()
+        }
+        controllers[tabID] = controller
+        if let idx = panes.firstIndex(where: { $0.id == paneID }) {
+            panes[idx].activeTabID = tabID
+        }
         persistWorkspace()
     }
 
@@ -301,11 +397,22 @@ final class TerminalWorkspaceStore {
             panes[idx].activeTabID = nil
         }
 
-        panes[destIndex].tabIDs = orderedTabIDs
-        panes[destIndex].activeTabID = previousActive ?? orderedTabIDs.last
+        // Drop empty placeholder tabs when merging so windows don't pile up
+        // "New Tab" placeholders; keep at least one tab overall.
+        let sessionTabIDs = orderedTabIDs.filter { !isTabEmpty($0) }
+        let keptTabIDs = sessionTabIDs.isEmpty ? Array(orderedTabIDs.prefix(1)) : sessionTabIDs
+        for tabID in orderedTabIDs where !keptTabIDs.contains(tabID) {
+            tabs[tabID] = nil
+            controllers[tabID]?.disconnect()
+            controllers[tabID] = nil
+        }
+
+        panes[destIndex].tabIDs = keptTabIDs
+        let active = keptTabIDs.contains(previousActive ?? UUID()) ? previousActive : keptTabIDs.last
+        panes[destIndex].activeTabID = active
         focusedPaneID = destination
 
-        // Drop now-empty non-main panes.
+        // Drop now-empty non-destination panes.
         panes.removeAll(where: { $0.id != destination && $0.tabIDs.isEmpty })
 
         persistWorkspace()
@@ -326,10 +433,9 @@ final class TerminalWorkspaceStore {
                 moveTab(tabID: tabID, toWindow: destination)
             }
         } else {
+            // Closing the window's tabs kills their sessions too.
             for tabID in tabIDsInWindow {
-                tabs[tabID] = nil
-                controllers[tabID]?.disconnect()
-                controllers[tabID] = nil
+                closeTab(tabID: tabID)
             }
         }
 
@@ -526,6 +632,22 @@ final class TerminalWorkspaceStore {
 
         guard changed else { return }
         persistWorkspace()
+    }
+
+    /// Kills a tab's tmux session on the server so closing a tab removes it.
+    private func killTmuxSession(for tab: TerminalTabState) {
+        guard let raw = tab.tmuxSessionName else { return }
+        let normalized = XTermSessionController.normalizeTmuxSessionName(raw)
+        guard !normalized.isEmpty, !tab.credentialKey.isEmpty,
+              let credential = keychain().getCredential(for: tab.credentialKey) else { return }
+        let escaped = normalized.replacingOccurrences(of: "'", with: "'\"'\"'")
+        let command = """
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+if command -v tmux >/dev/null 2>&1; then tmux kill-session -t '\(escaped)' 2>/dev/null || true; fi
+"""
+        Task.detached {
+            _ = try? await SSHClientActor.shared.execute(command, on: credential)
+        }
     }
 
     private func migrateLegacyTabTmuxBinding(_ tab: TerminalTabState) -> TerminalTabState {
