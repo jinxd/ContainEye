@@ -260,23 +260,26 @@ final class TerminalWorkspaceStore {
 
     // MARK: Moving tabs between windows
 
-    /// Moves a tab into another window, activating it there. The session
-    /// (controller) is preserved, so the live terminal simply reappears in the
-    /// destination window.
-    func moveTab(tabID: UUID, toWindow windowID: String) {
+    /// Moves a tab into another window (or reorders within the same window),
+    /// activating it there. The session controller is preserved, so the live
+    /// terminal simply reappears at the destination. `index` inserts at a
+    /// specific position; `nil` appends.
+    func moveTab(tabID: UUID, toWindow windowID: String, at index: Int? = nil) {
         guard tabs[tabID] != nil else { return }
 
+        let destination = paneID(forWindow: windowID)
+        let sameWindow = panes.first(where: { $0.tabIDs.contains(tabID) })?.windowID == windowID
+
         for idx in panes.indices where panes[idx].tabIDs.contains(tabID) {
-            if panes[idx].windowID == windowID { return } // already here
             panes[idx].tabIDs.removeAll(where: { $0 == tabID })
-            if panes[idx].activeTabID == tabID {
+            if !sameWindow, panes[idx].activeTabID == tabID {
                 panes[idx].activeTabID = panes[idx].tabIDs.last
             }
         }
 
-        let destination = paneID(forWindow: windowID)
         if let idx = panes.firstIndex(where: { $0.id == destination }) {
-            panes[idx].tabIDs.append(tabID)
+            let insertion = min(max(0, index ?? panes[idx].tabIDs.count), panes[idx].tabIDs.count)
+            panes[idx].tabIDs.insert(tabID, at: insertion)
             panes[idx].activeTabID = tabID
         }
         focusedPaneID = destination
@@ -333,6 +336,10 @@ final class TerminalWorkspaceStore {
 
     func controller(for tabID: UUID) -> XTermSessionController? {
         controllers[tabID]
+    }
+
+    func tabState(id: UUID) -> TerminalTabState? {
+        tabs[id]
     }
 
     func activeTab(in paneID: UUID) -> TerminalTabState? {

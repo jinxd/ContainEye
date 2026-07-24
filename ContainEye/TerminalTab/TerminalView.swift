@@ -261,8 +261,19 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
     }
 
     private let navigationTitleMenuButton = UIButton(type: .system)
-    private let tabBarScrollView = UIScrollView()
-    private let tabBarStack = UIStackView()
+    private lazy var tabBarCollectionView: UICollectionView = {
+        let layout = UICollectionViewFlowLayout()
+        layout.scrollDirection = .horizontal
+        layout.minimumInteritemSpacing = UIFloat(4)
+        layout.minimumLineSpacing = UIFloat(4)
+        layout.sectionInset = UIEdgeInsets(top: UIFloat(4), left: UIFloat(4), bottom: UIFloat(4), right: UIFloat(4))
+        let cv = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        cv.backgroundColor = .clear
+        cv.showsHorizontalScrollIndicator = false
+        cv.alwaysBounceHorizontal = true
+        return cv
+    }()
+    private lazy var tabBarDataSource = makeTabBarDataSource()
     private let tabBarNewButton = UIButton(type: .system)
     private let tabBarCollapseButton = UIButton(type: .system)
     private let tabBarHeight = UIFloat(40)
@@ -679,12 +690,12 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
         let showTabBar = hasTabs && traitCollection.horizontalSizeClass == .regular
         if showTabBar {
             let tabRect = CGRect(x: layoutRect.minX, y: layoutRect.minY, width: layoutRect.width, height: tabBarHeight)
-            tabBarScrollView.isHidden = false
+            tabBarCollectionView.isHidden = false
             tabBarNewButton.isHidden = false
             layoutTabBar(in: tabRect)
             layoutRect = CGRect(x: layoutRect.minX, y: tabRect.maxY + UIFloat(4), width: layoutRect.width, height: max(0, layoutRect.height - tabBarHeight - UIFloat(4)))
         } else {
-            tabBarScrollView.isHidden = true
+            tabBarCollectionView.isHidden = true
             tabBarNewButton.isHidden = true
             tabBarCollapseButton.isHidden = true
         }
@@ -750,14 +761,12 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
     // MARK: Tab Bar
 
     private func configureTabBar() {
-        tabBarScrollView.showsHorizontalScrollIndicator = false
-        tabBarScrollView.backgroundColor = .clear
-        view.addSubview(tabBarScrollView)
-
-        tabBarStack.axis = .horizontal
-        tabBarStack.alignment = .fill
-        tabBarStack.spacing = UIFloat(6)
-        tabBarScrollView.addSubview(tabBarStack)
+        tabBarCollectionView.delegate = self
+        tabBarCollectionView.dragDelegate = self
+        tabBarCollectionView.dropDelegate = self
+        tabBarCollectionView.dragInteractionEnabled = true
+        _ = tabBarDataSource
+        view.addSubview(tabBarCollectionView)
 
         tabBarNewButton.setImage(UIImage(systemName: "plus"), for: .normal)
         tabBarNewButton.tintColor = .label
@@ -773,6 +782,18 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
             self?.collapseWindows()
         }, for: .touchUpInside)
         view.addSubview(tabBarCollapseButton)
+    }
+
+    private func makeTabBarDataSource() -> UICollectionViewDiffableDataSource<Int, UUID> {
+        let registration = UICollectionView.CellRegistration<TerminalTabBarCell, UUID> { [weak self] cell, _, tabID in
+            guard let self, let tab = self.workspace.tabState(id: tabID) else { return }
+            let isActive = self.workspace.activeTab(in: self.windowPaneID)?.id == tabID
+            cell.configure(title: tab.title, colorHex: tab.shortcutColorHex, isActive: isActive)
+            cell.onClose = { [weak self] in self?.workspace.closeTab(tabID: tabID) }
+        }
+        return UICollectionViewDiffableDataSource<Int, UUID>(collectionView: tabBarCollectionView) { collectionView, indexPath, tabID in
+            collectionView.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: tabID)
+        }
     }
 
     private func collapseWindows() {
@@ -797,52 +818,33 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
         tabBarNewButton.frame = CGRect(x: topRect.maxX - buttonWidth, y: topRect.minY, width: buttonWidth, height: topRect.height)
         tabBarCollapseButton.frame = CGRect(x: topRect.maxX - buttonWidth - collapseWidth, y: topRect.minY, width: collapseWidth, height: topRect.height)
 
-        let scrollWidth = max(0, topRect.width - buttonWidth - collapseWidth)
-        tabBarScrollView.frame = CGRect(x: topRect.minX, y: topRect.minY, width: scrollWidth, height: topRect.height)
-
-        let contentWidth = max(scrollWidth, tabBarStack.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width + UIFloat(8))
-        tabBarStack.frame = CGRect(x: UIFloat(4), y: 0, width: contentWidth, height: topRect.height)
-        tabBarScrollView.contentSize = CGSize(width: contentWidth + UIFloat(8), height: topRect.height)
+        tabBarCollectionView.frame = CGRect(
+            x: topRect.minX,
+            y: topRect.minY,
+            width: max(0, topRect.width - buttonWidth - collapseWidth),
+            height: topRect.height
+        )
+        tabBarCollectionView.collectionViewLayout.invalidateLayout()
     }
 
     func refreshTabBar() {
-        tabBarStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let tabStates = workspace.tabStates(in: windowPaneID)
-        let activeID = workspace.activeTab(in: windowPaneID)?.id
-        for tab in tabStates {
-            tabBarStack.addArrangedSubview(makeTabChip(tab: tab, isActive: tab.id == activeID))
+        var snapshot = NSDiffableDataSourceSnapshot<Int, UUID>()
+        snapshot.appendSections([0])
+        snapshot.appendItems(workspace.tabStates(in: windowPaneID).map(\.id), toSection: 0)
+        tabBarDataSource.apply(snapshot, animatingDifferences: false)
+        // Refresh active-state styling on existing cells.
+        var reconfigure = tabBarDataSource.snapshot()
+        if !reconfigure.itemIdentifiers.isEmpty {
+            reconfigure.reconfigureItems(reconfigure.itemIdentifiers)
+            tabBarDataSource.apply(reconfigure, animatingDifferences: false)
         }
         view.setNeedsLayout()
-    }
-
-    private func makeTabChip(tab: TerminalTabState, isActive: Bool) -> UIView {
-        let chip = TerminalTabChipView()
-        chip.tabID = tab.id
-        chip.configure(
-            title: tab.title,
-            colorHex: tab.shortcutColorHex,
-            isActive: isActive
-        )
-        chip.onSelect = { [weak self] in
-            guard let self else { return }
-            self.workspace.setActiveTab(tabID: tab.id, in: self.windowPaneID)
-        }
-        chip.onClose = { [weak self] in
-            self?.workspace.closeTab(tabID: tab.id)
-        }
-        chip.menuProvider = { [weak self] in
-            self?.tabContextMenu(for: tab)
-        }
-        chip.onDragCancelledOutside = { [weak self] in
-            self?.moveTabToNewWindow(tabID: tab.id)
-        }
-        return chip
     }
 
     private func tabContextMenu(for tab: TerminalTabState) -> UIMenu {
         var actions: [UIMenuElement] = []
         if TerminalWindowRouter.shared.supportsMultipleWindows {
-            actions.append(UIAction(title: "Move to New Window", image: UIImage(systemName: "macwindow.badge.plus")) { [weak self] _ in
+            actions.append(UIAction(title: "Open in New Window", image: UIImage(systemName: "macwindow.badge.plus")) { [weak self] _ in
                 self?.moveTabToNewWindow(tabID: tab.id)
             })
             let otherWindows = self.workspace.windowIDsWithTabs().filter { $0 != self.windowID }
@@ -850,6 +852,11 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
                 let name = otherWindow == TerminalWorkspaceStore.mainWindowID ? "Main Window" : "Other Window"
                 actions.append(UIAction(title: "Move to \(name)", image: UIImage(systemName: "arrow.right.square")) { [weak self] _ in
                     self?.workspace.moveTab(tabID: tab.id, toWindow: otherWindow)
+                })
+            }
+            if self.workspace.windowIDsWithTabs().count > 1 {
+                actions.append(UIAction(title: "Merge All Windows Here", image: UIImage(systemName: "arrow.down.right.and.arrow.up.left.rectangle")) { [weak self] _ in
+                    self?.collapseWindows()
                 })
             }
         }
@@ -5003,56 +5010,35 @@ final class TerminalAllTabsCell: UICollectionViewCell, UIGestureRecognizerDelega
 }
 
 @MainActor
-final class TerminalTabChipView: UIView, UIContextMenuInteractionDelegate, UIDragInteractionDelegate {
-    var onSelect: (() -> Void)?
+final class TerminalTabBarCell: UICollectionViewCell {
     var onClose: (() -> Void)?
-    var menuProvider: (() -> UIMenu?)?
-    /// Fired when the chip is dragged and dropped outside any window (drag-out).
-    var onDragCancelledOutside: (() -> Void)?
-    var tabID: UUID?
 
+    private let container = UIView()
     private let titleLabel = UILabel()
     private let colorDot = UIView()
     private let closeButton = UIButton(type: .system)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        layer.cornerRadius = UIFloat(9)
-        layer.cornerCurve = .continuous
-        clipsToBounds = true
+
+        container.layer.cornerRadius = UIFloat(8)
+        container.layer.cornerCurve = .continuous
+        container.clipsToBounds = true
+        contentView.addSubview(container)
 
         colorDot.layer.cornerRadius = UIFloat(3)
-        addSubview(colorDot)
+        container.addSubview(colorDot)
 
         titleLabel.font = .systemFont(ofSize: UIFloat(12), weight: .medium)
         titleLabel.lineBreakMode = .byTruncatingTail
-        addSubview(titleLabel)
+        titleLabel.textAlignment = .center
+        container.addSubview(titleLabel)
 
         let symbolConfig = UIImage.SymbolConfiguration(pointSize: UIFloat(9), weight: .bold)
         closeButton.setImage(UIImage(systemName: "xmark", withConfiguration: symbolConfig), for: .normal)
         closeButton.tintColor = .secondaryLabel
         closeButton.addAction(UIAction { [weak self] _ in self?.onClose?() }, for: .touchUpInside)
-        addSubview(closeButton)
-
-        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(didTap)))
-        addInteraction(UIContextMenuInteraction(delegate: self))
-        let drag = UIDragInteraction(delegate: self)
-        drag.isEnabled = true
-        addInteraction(drag)
-    }
-
-    func dragInteraction(_ interaction: UIDragInteraction, itemsForBeginning session: UIDragSession) -> [UIDragItem] {
-        guard let tabID else { return [] }
-        let item = UIDragItem(itemProvider: NSItemProvider(object: tabID.uuidString as NSString))
-        item.localObject = tabID.uuidString
-        return [item]
-    }
-
-    func dragInteraction(_ interaction: UIDragInteraction, session: UIDragSession, didEndWith operation: UIDropOperation) {
-        // A cancel means no window accepted the drop — treat as "pull out to new window".
-        if operation == .cancel {
-            onDragCancelledOutside?()
-        }
+        container.addSubview(closeButton)
     }
 
     @available(*, unavailable)
@@ -5060,46 +5046,97 @@ final class TerminalTabChipView: UIView, UIContextMenuInteractionDelegate, UIDra
         fatalError("init(coder:) has not been implemented")
     }
 
-    @objc private func didTap() {
-        onSelect?()
-    }
-
     func configure(title: String, colorHex: String?, isActive: Bool) {
         titleLabel.text = title
         let accent = colorHex.flatMap { UIColor(hex: $0) } ?? .systemGray
         colorDot.backgroundColor = accent
-        backgroundColor = isActive ? accent.withAlphaComponent(0.22) : UIColor.secondarySystemBackground
+        container.backgroundColor = isActive ? accent.withAlphaComponent(0.22) : UIColor.secondarySystemFill
         titleLabel.textColor = isActive ? .label : .secondaryLabel
-        layer.borderWidth = isActive ? UIFloat(1) : 0
-        layer.borderColor = accent.withAlphaComponent(0.6).cgColor
-        invalidateIntrinsicContentSize()
-    }
-
-    override var intrinsicContentSize: CGSize {
-        let titleWidth = titleLabel.intrinsicContentSize.width
-        let width = min(UIFloat(170), max(UIFloat(96), titleWidth + UIFloat(52)))
-        return CGSize(width: width, height: UIFloat(32))
+        container.layer.borderWidth = isActive ? UIFloat(1) : 0
+        container.layer.borderColor = accent.withAlphaComponent(0.7).cgColor
+        closeButton.tintColor = isActive ? .label : .secondaryLabel
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        colorDot.frame = CGRect(x: UIFloat(9), y: bounds.midY - UIFloat(3), width: UIFloat(6), height: UIFloat(6))
-        closeButton.frame = CGRect(x: bounds.maxX - UIFloat(26), y: 0, width: UIFloat(26), height: bounds.height)
+        container.frame = contentView.bounds
+        colorDot.frame = CGRect(x: UIFloat(10), y: container.bounds.midY - UIFloat(3), width: UIFloat(6), height: UIFloat(6))
+        closeButton.frame = CGRect(x: container.bounds.maxX - UIFloat(26), y: 0, width: UIFloat(26), height: container.bounds.height)
         titleLabel.frame = CGRect(
-            x: colorDot.frame.maxX + UIFloat(6),
+            x: colorDot.frame.maxX + UIFloat(4),
             y: 0,
-            width: max(0, closeButton.frame.minX - colorDot.frame.maxX - UIFloat(8)),
-            height: bounds.height
+            width: max(0, closeButton.frame.minX - colorDot.frame.maxX - UIFloat(6)),
+            height: container.bounds.height
         )
     }
+}
 
-    func contextMenuInteraction(
-        _ interaction: UIContextMenuInteraction,
-        configurationForMenuAtLocation location: CGPoint
+extension TerminalWorkspaceViewController: UICollectionViewDelegateFlowLayout {
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        guard collectionView === tabBarCollectionView,
+              let tabID = tabBarDataSource.itemIdentifier(for: indexPath) else { return }
+        workspace.setActiveTab(tabID: tabID, in: windowPaneID)
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        layout collectionViewLayout: UICollectionViewLayout,
+        sizeForItemAt indexPath: IndexPath
+    ) -> CGSize {
+        let count = max(1, workspace.tabStates(in: windowPaneID).count)
+        let available = collectionView.bounds.width - UIFloat(8)
+        let spacing = UIFloat(4) * CGFloat(max(0, count - 1))
+        let ideal = (available - spacing) / CGFloat(count)
+        // Fill width like macOS tabs when few; shrink to a floor and scroll when many.
+        let width = min(UIFloat(230), max(UIFloat(120), ideal))
+        return CGSize(width: width, height: max(UIFloat(28), collectionView.bounds.height - UIFloat(8)))
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfigurationForItemAt indexPath: IndexPath,
+        point: CGPoint
     ) -> UIContextMenuConfiguration? {
-        UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
-            self?.menuProvider?() ?? UIMenu()
+        guard let tabID = tabBarDataSource.itemIdentifier(for: indexPath),
+              let tab = workspace.tabState(id: tabID) else { return nil }
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+            self?.tabContextMenu(for: tab) ?? UIMenu()
         }
+    }
+}
+
+extension TerminalWorkspaceViewController: UICollectionViewDragDelegate {
+    func collectionView(
+        _ collectionView: UICollectionView,
+        itemsForBeginning session: UIDragSession,
+        at indexPath: IndexPath
+    ) -> [UIDragItem] {
+        guard let tabID = tabBarDataSource.itemIdentifier(for: indexPath) else { return [] }
+        let item = UIDragItem(itemProvider: NSItemProvider(object: tabID.uuidString as NSString))
+        item.localObject = tabID.uuidString
+        return [item]
+    }
+}
+
+extension TerminalWorkspaceViewController: UICollectionViewDropDelegate {
+    func collectionView(_ collectionView: UICollectionView, canHandle session: UIDropSession) -> Bool {
+        session.localDragSession != nil
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        dropSessionDidUpdate session: UIDropSession,
+        withDestinationIndexPath destinationIndexPath: IndexPath?
+    ) -> UICollectionViewDropProposal {
+        UICollectionViewDropProposal(operation: .move, intent: .insertAtDestinationIndexPath)
+    }
+
+    func collectionView(_ collectionView: UICollectionView, performDropWith coordinator: UICollectionViewDropCoordinator) {
+        guard let item = coordinator.items.first,
+              let value = item.dragItem.localObject as? String,
+              let tabID = UUID(uuidString: value) else { return }
+        let destinationIndex = coordinator.destinationIndexPath?.item
+        workspace.moveTab(tabID: tabID, toWindow: windowID, at: destinationIndex)
     }
 }
 
