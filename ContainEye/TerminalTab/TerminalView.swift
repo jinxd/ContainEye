@@ -418,6 +418,18 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
         refreshNavigationChrome()
         updateKeyboardBarVisibility()
         view.setNeedsLayout()
+        handleEmptyWindowIfNeeded()
+    }
+
+    /// Closing the last tab closes the window. The main window can't close, so it
+    /// gets a fresh empty tab instead (macOS-style).
+    private func handleEmptyWindowIfNeeded() {
+        guard workspace.tabStates(in: windowPaneID).isEmpty else { return }
+        if windowID == TerminalWorkspaceStore.mainWindowID {
+            workspace.ensureAtLeastOneTab(inWindow: windowID)
+        } else if let session = view.window?.windowScene?.session {
+            UIApplication.shared.requestSceneSessionDestruction(session, options: nil)
+        }
     }
 
     // MARK: Setup
