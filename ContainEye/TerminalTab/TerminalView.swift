@@ -555,10 +555,10 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
         withObservationTracking({ [weak self] in
             guard let self else { return }
             _ = self.workspace.focusedPaneID
-            _ = self.workspace.activeControllerInFocusedPane()?.id
-            _ = self.workspace.activeControllerInFocusedPane()?.controlModifierArmed
-            _ = self.workspace.activeControllerInFocusedPane()?.suggestions
-            _ = self.workspace.activeControllerInFocusedPane()?.currentInputBuffer
+            _ = self.workspace.activeController(inWindow: self.windowID)?.id
+            _ = self.workspace.activeController(inWindow: self.windowID)?.controlModifierArmed
+            _ = self.workspace.activeController(inWindow: self.windowID)?.suggestions
+            _ = self.workspace.activeController(inWindow: self.windowID)?.currentInputBuffer
         }, onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.startKeyboardControllerObservation()
@@ -695,10 +695,11 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
             keyboardControlsContainer.frame = .zero
         }
 
-        // Reserve the tab strip at the top of the workspace area. Shown on wide
-        // (iPad/Mac) layouts only; compact iPhone keeps its swipe/overview UX.
+        // Reserve the tab strip at the top of the workspace area. Shown on iPad/Mac
+        // regardless of window size (iPad windows resize); iPhone keeps its
+        // swipe/overview UX.
         let hasTabs = !workspace.tabStates(in: windowPaneID).isEmpty
-        let showTabBar = hasTabs && traitCollection.horizontalSizeClass == .regular
+        let showTabBar = hasTabs && traitCollection.userInterfaceIdiom != .phone
         if showTabBar {
             let tabRect = CGRect(x: layoutRect.minX, y: layoutRect.minY, width: layoutRect.width, height: tabBarHeight)
             tabBarCollectionView.isHidden = false
@@ -715,7 +716,7 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
         layoutPaneControllers(in: paneContainerView.bounds)
 
         if !completionOverlayView.isHidden {
-            let count = workspace.activeControllerInFocusedPane()?.suggestions.prefix(8).count ?? 0
+            let count = workspace.activeController(inWindow: self.windowID)?.suggestions.prefix(8).count ?? 0
             let overlayHeight = TerminalCompletionOverlayView.preferredHeight(for: count)
             let overlayWidth = TerminalCompletionOverlayView.preferredWidth
 
@@ -941,13 +942,21 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
         ProcessInfo.processInfo.isMacCatalystApp || ProcessInfo.processInfo.isiOSAppOnMac
     }
 
+    /// Whether this VC's window is the focused one. The keyboard bar and
+    /// suggestions must only appear in the active window, not every open window.
+    private var isWindowActive: Bool {
+        guard let scene = view.window?.windowScene else { return true }
+        return scene.activationState == .foregroundActive
+    }
+
     private var shouldShowKeyboardBar: Bool {
-        keyboardVisible && workspace.activeControllerInFocusedPane() != nil
+        isWindowActive && keyboardVisible && workspace.activeController(inWindow: self.windowID) != nil
     }
 
     private var shouldShowCompletionOverlay: Bool {
+        guard isWindowActive else { return false }
         let keyboardAbsent = isRunningOnMac || !keyboardVisible
-        guard keyboardAbsent, let controller = workspace.activeControllerInFocusedPane() else {
+        guard keyboardAbsent, let controller = workspace.activeController(inWindow: self.windowID) else {
             return false
         }
         return !controller.suggestions.isEmpty
@@ -962,7 +971,7 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
     }
 
     private func updateCompletionOverlay() {
-        guard shouldShowCompletionOverlay, let controller = workspace.activeControllerInFocusedPane() else {
+        guard shouldShowCompletionOverlay, let controller = workspace.activeController(inWindow: self.windowID) else {
             if !completionOverlayView.isHidden {
                 pendingCursorAnchor = nil
                 UIView.animate(withDuration: 0.15, animations: {
@@ -1013,7 +1022,7 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
     private func updateKeyboardSuggestionButtons() {
         let wasVisible = !keyboardSuggestionButtons.isEmpty
 
-        guard let controller = workspace.activeControllerInFocusedPane() else {
+        guard let controller = workspace.activeController(inWindow: self.windowID) else {
             setKeyboardSuggestionButtons([], typedInput: "")
             animateSuggestionBarVisibilityIfNeeded(
                 wasVisible: wasVisible,
@@ -1033,7 +1042,7 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
     }
 
     private func updateKeyboardButtonsState() {
-        guard let controller = workspace.activeControllerInFocusedPane() else {
+        guard let controller = workspace.activeController(inWindow: self.windowID) else {
             for button in keyboardButtons {
                 button.backgroundColor = TerminalUIColors.keyboardKeyFill
                 button.setTitleColor(UIColor.label, for: .normal)
@@ -1121,7 +1130,7 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
     }
 
     private func performHardwareAction(_ action: TerminalHardwareAction) {
-        guard let controller = workspace.activeControllerInFocusedPane() else {
+        guard let controller = workspace.activeController(inWindow: self.windowID) else {
             return
         }
 
@@ -1166,12 +1175,12 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
     }
 
     @objc private func completionArrowUp() {
-        guard let controller = workspace.activeControllerInFocusedPane() else { return }
+        guard let controller = workspace.activeController(inWindow: self.windowID) else { return }
         completionOverlayView.moveSelection(by: -1, count: min(controller.suggestions.count, 8))
     }
 
     @objc private func completionArrowDown() {
-        guard let controller = workspace.activeControllerInFocusedPane() else { return }
+        guard let controller = workspace.activeController(inWindow: self.windowID) else { return }
         completionOverlayView.moveSelection(by: 1, count: min(controller.suggestions.count, 8))
     }
 
@@ -1213,7 +1222,7 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
             button.backgroundColor = .clear
             button.accessibilityLabel = suggestion.text
             button.addAction(UIAction(handler: { [weak self] _ in
-                guard let self, let controller = self.workspace.activeControllerInFocusedPane() else { return }
+                guard let self, let controller = self.workspace.activeController(inWindow: self.windowID) else { return }
                 controller.applySuggestion(suggestion.text)
                 controller.focus()
             }), for: .touchUpInside)
@@ -1299,12 +1308,13 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
 
     @objc
     private func didTapSnippets() {
-        let currentCredentialKey = workspace.activeControllerInFocusedPane()?.credentialKey
+        let currentCredentialKey = workspace.activeController(inWindow: self.windowID)?.credentialKey
         let picker = TerminalSnippetPickerViewController(
             database: SharedDatabase.db,
             credentialKey: currentCredentialKey
         ) { [weak self] snippet in
-            self?.workspace.activeControllerInFocusedPane()?.applySuggestion(snippet.command)
+            guard let self else { return }
+            self.workspace.activeController(inWindow: self.windowID)?.applySuggestion(snippet.command)
         }
 
         let navigation = UINavigationController(rootViewController: picker)
@@ -1329,7 +1339,7 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
     @objc
     private func didTapKeyboardControl(_ sender: UIButton) {
         guard let control = TerminalKeyboardControl(rawValue: sender.tag),
-              let controller = workspace.activeControllerInFocusedPane()
+              let controller = workspace.activeController(inWindow: self.windowID)
         else {
             return
         }
@@ -1693,13 +1703,20 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
             right: 0
         ))
 
-        let headerSplit = inner.split(at: TerminalUIMetrics.paneHeaderHeight, from: .maxYEdge)
+        // iPad/Mac use the top tab bar instead of this compact bottom chrome.
+        let usesTopTabBar = traitCollection.userInterfaceIdiom != .phone
+        headerView.isHidden = usesTopTabBar
+        let headerHeight = usesTopTabBar ? 0 : TerminalUIMetrics.paneHeaderHeight
+
+        let headerSplit = inner.split(at: headerHeight, from: .maxYEdge)
         headerView.frame = headerSplit.slice
         inner = headerSplit.remainder
 
         contentView.frame = inner
 
-        layoutHeaderViews(in: headerView.bounds)
+        if !usesTopTabBar {
+            layoutHeaderViews(in: headerView.bounds)
+        }
         activeHostView?.frame = contentView.bounds
         serverPickerController?.view.frame = contentView.bounds
     }
@@ -1842,7 +1859,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
             for _ in 0..<80 {
                 try? await Task.sleep(for: .milliseconds(120))
                 guard let self else { return }
-                guard let controller = self.workspace.activeControllerInFocusedPane() else { continue }
+                guard let controller = self.workspace.activeController(inWindow: self.paneWindowID) else { continue }
                 guard controller.credentialKey == credentialKey else { continue }
                 guard controller.connectionStatus == .connected else { continue }
                 guard !controller.isBootstrapPending else { continue }
@@ -3388,12 +3405,13 @@ final class TerminalTabOverviewViewController: UIViewController {
     }
 
     private func presentSnippets() {
-        let currentCredentialKey = workspace.activeControllerInFocusedPane()?.credentialKey
+        let currentCredentialKey = workspace.activeController(inWindow: windowID)?.credentialKey
         let picker = TerminalSnippetPickerViewController(
             database: SharedDatabase.db,
             credentialKey: currentCredentialKey
         ) { [weak self] snippet in
-            self?.workspace.activeControllerInFocusedPane()?.applySuggestion(snippet.command)
+            guard let self else { return }
+            self.workspace.activeController(inWindow: self.windowID)?.applySuggestion(snippet.command)
         }
 
         let navigation = UINavigationController(rootViewController: picker)

@@ -397,6 +397,17 @@ final class TerminalWorkspaceStore {
         return controllers[activeID]
     }
 
+    /// The active session controller for a specific window (not the globally
+    /// focused pane) — so each window's keyboard bar/suggestions are its own.
+    func activeController(inWindow windowID: String) -> XTermSessionController? {
+        guard let pane = panes.first(where: { $0.windowID == windowID }),
+              let activeID = pane.activeTabID
+        else {
+            return nil
+        }
+        return controllers[activeID]
+    }
+
     // MARK: Persistence
 
     func restoreWorkspace() {
