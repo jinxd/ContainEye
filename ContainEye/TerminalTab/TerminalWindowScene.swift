@@ -44,6 +44,54 @@ final class TerminalWindowRouter {
             }
         }
     }
+
+    private var installedDisconnectObserver = false
+
+    /// Watches for windows being closed so we can ask what to do with their tabs.
+    func installSceneDisconnectObserverIfNeeded() {
+        guard !installedDisconnectObserver else { return }
+        installedDisconnectObserver = true
+        NotificationCenter.default.addObserver(
+            forName: UIScene.didDisconnectNotification,
+            object: nil,
+            queue: .main
+        ) { note in
+            MainActor.assumeIsolated {
+                guard let scene = note.object as? UIScene,
+                      let windowID = scene.session.userInfo?["terminalWindowID"] as? String else { return }
+                TerminalWindowRouter.shared.handleWindowClosed(windowID: windowID)
+            }
+        }
+    }
+
+    private func handleWindowClosed(windowID: String) {
+        guard windowID != TerminalWorkspaceStore.mainWindowID else { return }
+        let store = TerminalWorkspaceStore.shared
+        let tabCount = store.tabIDs(inWindow: windowID).count
+        guard tabCount > 0 else {
+            store.discardWindow(windowID, moveTabsTo: nil)
+            return
+        }
+
+        let alert = UIAlertController(
+            title: "Window closed",
+            message: "Move its \(tabCount) tab\(tabCount == 1 ? "" : "s") to the main window, or close them?",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Move to Main Window", style: .default) { _ in
+            store.discardWindow(windowID, moveTabsTo: TerminalWorkspaceStore.mainWindowID)
+        })
+        alert.addAction(UIAlertAction(title: "Close Tabs", style: .destructive) { _ in
+            store.discardWindow(windowID, moveTabsTo: nil)
+        })
+
+        guard let windowScene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }),
+              var top = windowScene.keyWindow?.rootViewController else { return }
+        while let presented = top.presentedViewController { top = presented }
+        top.present(alert, animated: true)
+    }
 }
 
 /// The content of a standalone terminal window: the shared workspace scoped to one

@@ -311,6 +311,35 @@ final class TerminalWorkspaceStore {
         persistWorkspace()
     }
 
+    func tabIDs(inWindow windowID: String) -> [UUID] {
+        panes.first(where: { $0.windowID == windowID })?.tabIDs ?? []
+    }
+
+    /// Handles a closed window: either move its tabs to another window, or close
+    /// them. The window's pane is then removed.
+    func discardWindow(_ windowID: String, moveTabsTo destination: String?) {
+        guard let paneIndex = panes.firstIndex(where: { $0.windowID == windowID }) else { return }
+        let tabIDsInWindow = panes[paneIndex].tabIDs
+
+        if let destination, destination != windowID {
+            for tabID in tabIDsInWindow {
+                moveTab(tabID: tabID, toWindow: destination)
+            }
+        } else {
+            for tabID in tabIDsInWindow {
+                tabs[tabID] = nil
+                controllers[tabID]?.disconnect()
+                controllers[tabID] = nil
+            }
+        }
+
+        panes.removeAll(where: { $0.windowID == windowID })
+        if focusedPaneID == nil || !panes.contains(where: { $0.id == focusedPaneID }) {
+            focusedPaneID = panes.first?.id
+        }
+        persistWorkspace()
+    }
+
     func focusPane(paneID: UUID) {
         guard panes.contains(where: { $0.id == paneID }) else {
             return

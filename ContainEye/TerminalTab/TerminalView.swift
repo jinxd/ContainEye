@@ -371,6 +371,17 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
         processPendingRequests()
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // Tag this window's scene so we can identify it when it's closed.
+        if let session = view.window?.windowScene?.session {
+            var info = session.userInfo ?? [:]
+            info["terminalWindowID"] = windowID
+            session.userInfo = info
+        }
+        TerminalWindowRouter.shared.installSceneDisconnectObserverIfNeeded()
+    }
+
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         hardwareInput.stop()
