@@ -398,6 +398,9 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
 
         configureTabBar()
 
+        // Accept tabs dragged in from other windows.
+        view.addInteraction(UIDropInteraction(delegate: self))
+
         paneContainerView.backgroundColor = .clear
         view.addSubview(paneContainerView)
         paneContainerView.addGestureRecognizer(swipeLeftRecognizer)
@@ -583,6 +586,14 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
             actions.append(UIMenu(title: "", options: .displayInline, children: tabActions))
         }
 
+        if workspace.windowIDsWithTabs().count > 1 {
+            actions.append(UIMenu(title: "", options: .displayInline, children: [
+                UIAction(title: "Merge All Windows Here", image: UIImage(systemName: "arrow.down.right.and.arrow.up.left.rectangle")) { [weak self] _ in
+                    self?.collapseWindows()
+                }
+            ]))
+        }
+
         return UIMenu(children: actions)
     }
 
@@ -756,19 +767,30 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
         }, for: .touchUpInside)
         view.addSubview(tabBarNewButton)
 
-        tabBarCollapseButton.setImage(UIImage(systemName: "rectangle.stack"), for: .normal)
+        tabBarCollapseButton.setImage(UIImage(systemName: "arrow.down.right.and.arrow.up.left.rectangle"), for: .normal)
         tabBarCollapseButton.tintColor = .label
         tabBarCollapseButton.addAction(UIAction { [weak self] _ in
-            guard let self else { return }
-            self.workspace.collapseAllWindows(into: TerminalWorkspaceStore.mainWindowID)
-            TerminalWindowRouter.shared.closeSecondaryWindows()
+            self?.collapseWindows()
         }, for: .touchUpInside)
         view.addSubview(tabBarCollapseButton)
     }
 
+    private func collapseWindows() {
+        // Merge every window's tabs into this window, then close the others.
+        workspace.collapseAllWindows(into: windowID)
+        TerminalWindowRouter.shared.closeSecondaryWindows()
+    }
+
+    private func moveTabToNewWindow(tabID: UUID) {
+        guard TerminalWindowRouter.shared.supportsMultipleWindows else { return }
+        let newWindowID = UUID().uuidString
+        workspace.moveTab(tabID: tabID, toWindow: newWindowID)
+        TerminalWindowRouter.shared.open(TerminalWindowTarget(windowID: newWindowID))
+    }
+
     private func layoutTabBar(in topRect: CGRect) {
         let buttonWidth = UIFloat(40)
-        let showCollapse = workspace.windowIDsWithTabs().count > 1 && windowID == TerminalWorkspaceStore.mainWindowID
+        let showCollapse = workspace.windowIDsWithTabs().count > 1
         tabBarCollapseButton.isHidden = !showCollapse
         let collapseWidth = showCollapse ? buttonWidth : 0
 
@@ -795,6 +817,7 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
 
     private func makeTabChip(tab: TerminalTabState, isActive: Bool) -> UIView {
         let chip = TerminalTabChipView()
+        chip.tabID = tab.id
         chip.configure(
             title: tab.title,
             colorHex: tab.shortcutColorHex,
@@ -810,6 +833,9 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
         chip.menuProvider = { [weak self] in
             self?.tabContextMenu(for: tab)
         }
+        chip.onDragCancelledOutside = { [weak self] in
+            self?.moveTabToNewWindow(tabID: tab.id)
+        }
         return chip
     }
 
@@ -817,10 +843,7 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
         var actions: [UIMenuElement] = []
         if TerminalWindowRouter.shared.supportsMultipleWindows {
             actions.append(UIAction(title: "Move to New Window", image: UIImage(systemName: "macwindow.badge.plus")) { [weak self] _ in
-                guard let self else { return }
-                let newWindowID = UUID().uuidString
-                self.workspace.moveTab(tabID: tab.id, toWindow: newWindowID)
-                TerminalWindowRouter.shared.openTerminalWindow?(TerminalWindowTarget(windowID: newWindowID))
+                self?.moveTabToNewWindow(tabID: tab.id)
             })
             let otherWindows = self.workspace.windowIDsWithTabs().filter { $0 != self.windowID }
             for otherWindow in otherWindows {
@@ -1387,6 +1410,30 @@ extension TerminalWorkspaceViewController: TerminalPaneViewControllerDelegate {
     }
 }
 
+extension TerminalWorkspaceViewController: UIDropInteractionDelegate {
+    func dropInteraction(_ interaction: UIDropInteraction, canHandle session: UIDropSession) -> Bool {
+        session.localDragSession != nil && droppedTabID(from: session) != nil
+    }
+
+    func dropInteraction(_ interaction: UIDropInteraction, sessionDidUpdate session: UIDropSession) -> UIDropProposal {
+        UIDropProposal(operation: droppedTabID(from: session) != nil ? .move : .cancel)
+    }
+
+    func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
+        guard let tabID = droppedTabID(from: session) else { return }
+        workspace.moveTab(tabID: tabID, toWindow: windowID)
+    }
+
+    private func droppedTabID(from session: UIDropSession) -> UUID? {
+        for item in session.items {
+            if let value = item.localObject as? String, let id = UUID(uuidString: value) {
+                return id
+            }
+        }
+        return nil
+    }
+}
+
 // MARK: - Keyboard Controls
 
 private enum TerminalKeyboardControl: Int, CaseIterable {
@@ -1697,6 +1744,8 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         }
 
         let picker = TerminalServerPickerViewController()
+        picker.windowID = paneWindowID
+        picker.excludedSessionKeys = workspace.sessionKeysBoundToOtherWindows(excluding: paneWindowID)
         picker.onSelection = { [weak self] selection in
             guard let self else { return }
             self.workspace.focusPane(paneID: self.paneID)
@@ -2065,6 +2114,7 @@ fi
 
     private func presentAllTabs() {
         let overview = TerminalTabOverviewViewController(workspace: workspace)
+        overview.windowID = paneWindowID
         overview.onSelectSession = { [weak self] credentialKey, sessionName, title, colorHex in
             guard let self else { return }
             self.workspace.openTab(
@@ -2158,6 +2208,11 @@ final class TerminalServerPickerViewController: UIViewController {
     }
 
     var onSelection: ((SelectionTarget) -> Void)?
+
+    /// The window this picker belongs to; sessions open in other windows are hidden.
+    var windowID: String = TerminalWorkspaceStore.mainWindowID
+    /// Session keys ("credentialKey|session") open in other windows, to be excluded.
+    var excludedSessionKeys: Set<String> = []
 
     private enum Section: Int, CaseIterable {
         case main
@@ -2312,10 +2367,12 @@ final class TerminalServerPickerViewController: UIViewController {
                 self.emptyStateLabel.isHidden = !self.items.isEmpty
             }
 
+            let excluded = self.excludedSessionKeys
             await withTaskGroup(of: [Item].self, returning: Void.self) { group in
                 for credential in credentials {
                     group.addTask {
                         let sessions = await Self.discoverTmuxSessions(for: credential)
+                            .filter { !excluded.contains("\(credential.key)|\($0.sessionName)") }
                         guard !sessions.isEmpty else { return [] }
                         return sessions.map { session in
                             let detail = Self.tmuxDetailText(for: session)
@@ -2969,6 +3026,9 @@ final class TerminalTabOverviewViewController: UIViewController {
 
     var onSelectSession: ((String, String, String, String?) -> Void)?
 
+    /// The window this overview belongs to; sessions open in other windows are hidden.
+    var windowID: String = TerminalWorkspaceStore.mainWindowID
+
     private let workspace: TerminalWorkspaceStore
     private var items: [Item] = []
     private let settingsStore = TerminalSettingsStore.shared
@@ -3169,6 +3229,8 @@ final class TerminalTabOverviewViewController: UIViewController {
             let shortcuts = await TerminalLaunchShortcut.all(in: SharedDatabase.db)
             let shortcutSessionTitleMap = TerminalServerPickerViewController.makeShortcutSessionTitleMap(shortcuts: shortcuts)
             let shortcutSessionColorMap = TerminalServerPickerViewController.makeShortcutSessionColorMap(shortcuts: shortcuts)
+            // Sessions already open as tabs in other windows don't belong here.
+            let excludedSessionKeys = workspace.sessionKeysBoundToOtherWindows(excluding: windowID)
 
             // Accumulate results per server. Apply incrementally as each server
             // answers so healthy servers show immediately even while another is
@@ -3179,15 +3241,17 @@ final class TerminalTabOverviewViewController: UIViewController {
                 for credential in credentials {
                     group.addTask {
                         let sessions = await Self.discoverTmuxSessions(for: credential)
-                        return sessions.map { session in
-                            Self.makeItem(
-                                credentialKey: credential.key,
-                                host: credential.host,
-                                session: session,
-                                shortcutSessionTitleMap: shortcutSessionTitleMap,
-                                shortcutSessionColorMap: shortcutSessionColorMap
-                            )
-                        }
+                        return sessions
+                            .filter { !excludedSessionKeys.contains("\(credential.key)|\($0.sessionName)") }
+                            .map { session in
+                                Self.makeItem(
+                                    credentialKey: credential.key,
+                                    host: credential.host,
+                                    session: session,
+                                    shortcutSessionTitleMap: shortcutSessionTitleMap,
+                                    shortcutSessionColorMap: shortcutSessionColorMap
+                                )
+                            }
                     }
                 }
 
@@ -4939,10 +5003,13 @@ final class TerminalAllTabsCell: UICollectionViewCell, UIGestureRecognizerDelega
 }
 
 @MainActor
-final class TerminalTabChipView: UIView, UIContextMenuInteractionDelegate {
+final class TerminalTabChipView: UIView, UIContextMenuInteractionDelegate, UIDragInteractionDelegate {
     var onSelect: (() -> Void)?
     var onClose: (() -> Void)?
     var menuProvider: (() -> UIMenu?)?
+    /// Fired when the chip is dragged and dropped outside any window (drag-out).
+    var onDragCancelledOutside: (() -> Void)?
+    var tabID: UUID?
 
     private let titleLabel = UILabel()
     private let colorDot = UIView()
@@ -4969,6 +5036,23 @@ final class TerminalTabChipView: UIView, UIContextMenuInteractionDelegate {
 
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(didTap)))
         addInteraction(UIContextMenuInteraction(delegate: self))
+        let drag = UIDragInteraction(delegate: self)
+        drag.isEnabled = true
+        addInteraction(drag)
+    }
+
+    func dragInteraction(_ interaction: UIDragInteraction, itemsForBeginning session: UIDragSession) -> [UIDragItem] {
+        guard let tabID else { return [] }
+        let item = UIDragItem(itemProvider: NSItemProvider(object: tabID.uuidString as NSString))
+        item.localObject = tabID.uuidString
+        return [item]
+    }
+
+    func dragInteraction(_ interaction: UIDragInteraction, session: UIDragSession, didEndWith operation: UIDropOperation) {
+        // A cancel means no window accepted the drop — treat as "pull out to new window".
+        if operation == .cancel {
+            onDragCancelledOutside?()
+        }
     }
 
     @available(*, unavailable)

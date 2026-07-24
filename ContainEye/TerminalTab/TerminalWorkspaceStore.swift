@@ -105,6 +105,22 @@ final class TerminalWorkspaceStore {
         panes.filter { !$0.tabIDs.isEmpty }.map(\.windowID)
     }
 
+    /// "credentialKey|normalizedSession" keys for tmux sessions already open as
+    /// tabs in some window *other than* the given one. Used so a window's picker
+    /// and tabs overview don't offer sessions that belong to another window.
+    func sessionKeysBoundToOtherWindows(excluding windowID: String) -> Set<String> {
+        var result = Set<String>()
+        for pane in panes where pane.windowID != windowID {
+            for tabID in pane.tabIDs {
+                guard let tab = tabs[tabID], let raw = tab.tmuxSessionName else { continue }
+                let normalized = XTermSessionController.normalizeTmuxSessionName(raw)
+                guard !normalized.isEmpty else { continue }
+                result.insert("\(tab.credentialKey)|\(normalized)")
+            }
+        }
+        return result
+    }
+
     // MARK: Tabs
 
     func openTab(
