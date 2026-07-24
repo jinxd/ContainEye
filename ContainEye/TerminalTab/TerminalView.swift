@@ -178,6 +178,44 @@ private func splitRect(_ rect: CGRect, count: Int, spacing: CGFloat, axis: Termi
     return result
 }
 
+// MARK: - SSH Timeout Helper
+
+/// Resumes a continuation exactly once from whichever finishes first:
+/// the SSH work or the timeout. The abandoned work keeps running in the
+/// background (SSH calls are not cancellation-aware) and its result is dropped.
+private final class TerminalSSHTimeoutResumeBox<T>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didResume = false
+
+    func resume(with continuation: CheckedContinuation<T?, Never>, value: T?) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !didResume else { return }
+        didResume = true
+        continuation.resume(returning: value)
+    }
+}
+
+/// Runs an SSH operation with an upper time bound so one unreachable server
+/// cannot stall discovery or session operations for the remaining servers.
+/// Returns `nil` on timeout.
+nonisolated private func withTerminalSSHTimeout<T: Sendable>(
+    seconds: UInt64 = 15,
+    operation: @escaping @Sendable () async -> T
+) async -> T? {
+    await withCheckedContinuation { continuation in
+        let box = TerminalSSHTimeoutResumeBox<T>()
+        Task {
+            let value = await operation()
+            box.resume(with: continuation, value: value)
+        }
+        Task {
+            try? await Task.sleep(for: .seconds(seconds))
+            box.resume(with: continuation, value: nil)
+        }
+    }
+}
+
 // MARK: - Workspace View Controller
 
 @MainActor
@@ -1831,7 +1869,9 @@ else
 fi
 """
         Task {
-            let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
+            let output = await withTerminalSSHTimeout {
+                (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
+            } ?? "__CE_TMUX_ERROR__: Timed out — server unreachable"
             await MainActor.run {
                 if output.contains("__CE_TMUX_OK__") {
                     TerminalWorkspaceStore.shared.renameTabsBoundToTmuxSession(
@@ -2268,7 +2308,9 @@ final class TerminalServerPickerViewController: UIViewController {
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 if command -v tmux >/dev/null 2>&1; then tmux list-sessions -F '#{session_name}|#{session_windows}|#{?session_attached,1,0}' 2>/dev/null || true; fi
 """
-        let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
+        let output = await withTerminalSSHTimeout {
+            (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
+        } ?? ""
         let lines = output
             .split(whereSeparator: \.isNewline)
             .map(String.init)
@@ -2321,10 +2363,32 @@ if command -v tmux >/dev/null 2>&1; then tmux list-sessions -F '#{session_name}|
     }
 
     nonisolated static func newTmuxSessionName(for shortcut: TerminalLaunchShortcut) -> String {
-        let normalized = shortcutSessionSuffix(for: shortcut.id)
-        let suffix = normalized.isEmpty ? "default" : normalized
-        let unique = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
-        return "containeye-shortcut-\(suffix)-\(unique)"
+        // Human-readable, short session names: e.g. "containeye-shortcut-web-server-3fa9c12e".
+        // The slug is used to resolve the display title back to the shortcut; the 8-hex
+        // suffix keeps every launch a distinct tmux session.
+        let slug = shortcutTitleSlug(shortcut.title)
+        let unique = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(8))
+        return "containeye-shortcut-\(slug)-\(unique)"
+    }
+
+    /// A lowercase, dash-separated slug derived from a shortcut title, safe for tmux session names.
+    nonisolated static func shortcutTitleSlug(_ title: String) -> String {
+        var slug = ""
+        var lastWasDash = false
+        for character in title.lowercased() {
+            if character.isLetter || character.isNumber {
+                slug.append(character)
+                lastWasDash = false
+            } else if !lastWasDash {
+                slug.append("-")
+                lastWasDash = true
+            }
+        }
+        slug = slug.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        if slug.count > 24 {
+            slug = String(slug.prefix(24)).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        }
+        return slug.isEmpty ? "terminal" : slug
     }
 
     nonisolated static func shortcutSessionSuffix(for shortcutID: String) -> String {
@@ -2334,9 +2398,16 @@ if command -v tmux >/dev/null 2>&1; then tmux list-sessions -F '#{session_name}|
     nonisolated static func makeShortcutSessionTitleMap(shortcuts: [TerminalLaunchShortcut]) -> [String: [String: String]] {
         var map: [String: [String: String]] = [:]
         for shortcut in shortcuts {
-            let suffix = shortcutSessionSuffix(for: shortcut.id)
-            guard !suffix.isEmpty else { continue }
-            map[shortcut.credentialKey, default: [:]][suffix] = shortcut.title
+            // Key by the title slug (new naming scheme) and the legacy id-hash suffix so
+            // sessions created by any app version still resolve to their shortcut title.
+            let slug = shortcutTitleSlug(shortcut.title)
+            if !slug.isEmpty {
+                map[shortcut.credentialKey, default: [:]][slug] = shortcut.title
+            }
+            let legacySuffix = shortcutSessionSuffix(for: shortcut.id)
+            if !legacySuffix.isEmpty {
+                map[shortcut.credentialKey, default: [:]][legacySuffix] = shortcut.title
+            }
         }
         return map
     }
@@ -2354,7 +2425,13 @@ if command -v tmux >/dev/null 2>&1; then tmux list-sessions -F '#{session_name}|
         if let mapped = shortcutSessionTitleMap[credentialKey]?[suffix], !mapped.isEmpty {
             return mapped
         }
-        return sessionName
+        // Fallback for unresolvable prefixed names (e.g. the shortcut was deleted):
+        // prettify a readable slug, but never surface an opaque id-hash blob.
+        if suffix.count <= 24, !suffix.allSatisfy({ $0.isHexDigit }) {
+            let pretty = suffix.replacingOccurrences(of: "-", with: " ").capitalized
+            if !pretty.isEmpty { return pretty }
+        }
+        return "Terminal Session"
     }
 
     nonisolated private static func disambiguateSessionTitles(_ sessions: [Item]) -> [Item] {
@@ -2413,7 +2490,7 @@ extension TerminalServerPickerViewController: UICollectionViewDelegate {
             let target = TmuxSessionTarget(
                 credentialKey: credentialKey,
                 sessionName: sessionName,
-                title: sessionName
+                title: item.title
             )
             onSelection?(.tmuxSession(target))
         }
@@ -2577,7 +2654,9 @@ fi
 """
 
         Task {
-            let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
+            let output = await withTerminalSSHTimeout {
+                (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
+            } ?? "__CE_TMUX_ERROR__: Timed out — server unreachable"
             await MainActor.run {
                 if output.contains("__CE_TMUX_OK__") {
                     TerminalWorkspaceStore.shared.renameTabsBoundToTmuxSession(
@@ -2689,6 +2768,9 @@ final class TerminalTabOverviewViewController: UIViewController {
         let displayTitle: String
         let host: String
         let previewText: String
+        // True when previewText is a meta summary (e.g. "2 windows • attached")
+        // rather than actual captured terminal output.
+        let previewIsPlaceholder: Bool
         let isActive: Bool
         let colorHex: String?
 
@@ -2698,6 +2780,17 @@ final class TerminalTabOverviewViewController: UIViewController {
 
         func hash(into hasher: inout Hasher) {
             hasher.combine(id)
+        }
+
+        /// Whether the visible content (not just identity) matches — used to decide
+        /// which items need a cell reconfigure during an incremental reload.
+        func hasSameContent(as other: Item) -> Bool {
+            displayTitle == other.displayTitle
+            && host == other.host
+            && previewText == other.previewText
+            && previewIsPlaceholder == other.previewIsPlaceholder
+            && isActive == other.isActive
+            && colorHex == other.colorHex
         }
     }
 
@@ -2715,6 +2808,8 @@ final class TerminalTabOverviewViewController: UIViewController {
         let sessionName: String
         let windowsCount: Int?
         let isAttached: Bool?
+        // Last non-empty lines captured from the session's active pane.
+        let previewLines: [String]
     }
 
     private let collectionView: UICollectionView
@@ -2730,6 +2825,8 @@ final class TerminalTabOverviewViewController: UIViewController {
     private let tabCountLabel = UILabel()
     private var isSelectionMode = false
     private var selectedSessionIDs = Set<String>()
+    // Bumped on every reload so results from a superseded reload are discarded.
+    private var reloadGeneration = 0
 
     init(workspace: TerminalWorkspaceStore) {
         self.workspace = workspace
@@ -2873,10 +2970,14 @@ final class TerminalTabOverviewViewController: UIViewController {
             cell.onClose = { [weak self] in
                 self?.closeSession(credentialKey: item.credentialKey, sessionName: item.sessionName)
             }
+            cell.swipeToCloseEnabled = { [weak self] in
+                self?.isSelectionMode == false
+            }
             cell.apply(
                 title: item.displayTitle,
                 subtitle: item.host,
                 previewText: item.previewText,
+                previewIsPlaceholder: item.previewIsPlaceholder,
                 isActive: item.isActive,
                 accentHex: item.colorHex
             )
@@ -2885,6 +2986,8 @@ final class TerminalTabOverviewViewController: UIViewController {
     }
 
     private func reload() {
+        reloadGeneration += 1
+        let generation = reloadGeneration
         Task {
             let credentials = keychain()
                 .allKeys()
@@ -2892,6 +2995,10 @@ final class TerminalTabOverviewViewController: UIViewController {
                 .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
             let shortcuts = await TerminalLaunchShortcut.all(in: SharedDatabase.db)
             let shortcutSessionTitleMap = TerminalServerPickerViewController.makeShortcutSessionTitleMap(shortcuts: shortcuts)
+
+            // Accumulate results per server. Apply incrementally as each server
+            // answers so healthy servers show immediately even while another is
+            // slow or unreachable (each discovery is time-bounded).
             var itemsByID: [String: Item] = [:]
 
             await withTaskGroup(of: [Item].self, returning: Void.self) { group in
@@ -2899,27 +3006,11 @@ final class TerminalTabOverviewViewController: UIViewController {
                     group.addTask {
                         let sessions = await Self.discoverTmuxSessions(for: credential)
                         return sessions.map { session in
-                            var parts: [String] = []
-                            parts.append("tmux session")
-                            if let windows = session.windowsCount {
-                                parts.append("\(windows) \(windows == 1 ? "window" : "windows")")
-                            }
-                            if let attached = session.isAttached {
-                                parts.append(attached ? "attached" : "detached")
-                            }
-                            return Item(
-                                id: "tmux:\(credential.key):\(session.sessionName)",
+                            Self.makeItem(
                                 credentialKey: credential.key,
-                                sessionName: session.sessionName,
-                                displayTitle: TerminalServerPickerViewController.resolveTmuxDisplayTitle(
-                                    sessionName: session.sessionName,
-                                    credentialKey: credential.key,
-                                    shortcutSessionTitleMap: shortcutSessionTitleMap
-                                ),
                                 host: credential.host,
-                                previewText: parts.joined(separator: " • "),
-                                isActive: session.isAttached ?? false,
-                                colorHex: "#10B981"
+                                session: session,
+                                shortcutSessionTitleMap: shortcutSessionTitleMap
                             )
                         }
                     }
@@ -2929,27 +3020,88 @@ final class TerminalTabOverviewViewController: UIViewController {
                     for item in partial {
                         itemsByID[item.id] = item
                     }
+                    let sorted = Self.sortedDisambiguated(Array(itemsByID.values))
+                    await MainActor.run {
+                        self.applyDiscovered(sorted, generation: generation)
+                    }
                 }
             }
 
-            var discovered = Array(itemsByID.values)
-            discovered = Self.disambiguateDisplayTitles(discovered)
-            discovered.sort {
-                if $0.host == $1.host {
-                    return $0.displayTitle.localizedCaseInsensitiveCompare($1.displayTitle) == .orderedAscending
-                }
-                return $0.host.localizedCaseInsensitiveCompare($1.host) == .orderedAscending
-            }
-
+            // Final apply so a run that discovered zero sessions still clears the list.
+            let sorted = Self.sortedDisambiguated(Array(itemsByID.values))
             await MainActor.run {
-                self.items = discovered
-                self.tabCountLabel.text = "\(discovered.count) Tabs"
-                var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-                snapshot.appendSections([.main])
-                snapshot.appendItems(discovered, toSection: .main)
-                self.dataSource.apply(snapshot, animatingDifferences: false)
+                self.applyDiscovered(sorted, generation: generation)
             }
         }
+    }
+
+    private func applyDiscovered(_ discovered: [Item], generation: Int) {
+        guard generation == reloadGeneration else { return }
+        // Items whose identity is unchanged but content differs need an explicit
+        // reconfigure — diffable equality is id-only and would otherwise skip them.
+        let changedIDs = discovered
+            .filter { new in items.contains { $0.id == new.id && !$0.hasSameContent(as: new) } }
+            .map(\.id)
+        items = discovered
+        if !isSelectionMode {
+            tabCountLabel.text = "\(discovered.count) Tabs"
+        }
+        var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
+        snapshot.appendSections([.main])
+        snapshot.appendItems(discovered, toSection: .main)
+        if !changedIDs.isEmpty {
+            let changedItems = discovered.filter { changedIDs.contains($0.id) }
+            snapshot.reconfigureItems(changedItems)
+        }
+        dataSource.apply(snapshot, animatingDifferences: true)
+    }
+
+    nonisolated private static func makeItem(
+        credentialKey: String,
+        host: String,
+        session: TmuxSessionSummary,
+        shortcutSessionTitleMap: [String: [String: String]]
+    ) -> Item {
+        let previewIsPlaceholder = session.previewLines.isEmpty
+        let previewText: String
+        if previewIsPlaceholder {
+            var parts: [String] = []
+            if let windows = session.windowsCount {
+                parts.append("\(windows) \(windows == 1 ? "window" : "windows")")
+            }
+            if let attached = session.isAttached {
+                parts.append(attached ? "attached" : "detached")
+            }
+            previewText = parts.isEmpty ? "No output yet" : parts.joined(separator: " • ")
+        } else {
+            previewText = session.previewLines.joined(separator: "\n")
+        }
+        return Item(
+            id: "tmux:\(credentialKey):\(session.sessionName)",
+            credentialKey: credentialKey,
+            sessionName: session.sessionName,
+            displayTitle: TerminalServerPickerViewController.resolveTmuxDisplayTitle(
+                sessionName: session.sessionName,
+                credentialKey: credentialKey,
+                shortcutSessionTitleMap: shortcutSessionTitleMap
+            ),
+            host: host,
+            previewText: previewText,
+            previewIsPlaceholder: previewIsPlaceholder,
+            isActive: session.isAttached ?? false,
+            colorHex: "#10B981"
+        )
+    }
+
+    private static func sortedDisambiguated(_ items: [Item]) -> [Item] {
+        var discovered = disambiguateDisplayTitles(items)
+        discovered.sort {
+            if $0.host == $1.host {
+                return $0.displayTitle.localizedCaseInsensitiveCompare($1.displayTitle) == .orderedAscending
+            }
+            return $0.host.localizedCaseInsensitiveCompare($1.host) == .orderedAscending
+        }
+        return discovered
     }
 
     private func makeSettingsMenu() -> UIMenu {
@@ -3055,19 +3207,23 @@ else
 fi
 """
         Task {
-            let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
+            let output = await withTerminalSSHTimeout {
+                (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
+            }
             await MainActor.run {
-                if output.contains("__CE_TMUX_OK__") {
+                if output?.contains("__CE_TMUX_OK__") == true {
                     TerminalWorkspaceStore.shared.closeTabsBoundToTmuxSession(credentialKey: credentialKey, sessionName: sessionName)
                     self.reload()
                 } else {
-                    if let removed {
+                    // Restore the optimistically-removed card, unless a concurrent
+                    // reload already re-added it (avoids duplicate diffable identifiers).
+                    if let removed, !self.items.contains(where: { $0.id == removed.id }) {
                         self.items.append(removed)
                         self.reloadSnapshot()
                     } else {
                         self.reload()
                     }
-                    self.showCloseError(sessionName: normalized, output: output)
+                    self.showCloseError(sessionName: normalized, output: output ?? "__CE_TMUX_ERROR__: Timed out — server unreachable")
                 }
             }
         }
@@ -3106,27 +3262,92 @@ fi
     }
 
     nonisolated private static func discoverTmuxSessions(for credential: Credential) async -> [TmuxSessionSummary] {
+        // One SSH exec per server: for each tmux session emit a header, a meta line
+        // (windows|attached) and the last non-empty lines of its active pane, so the
+        // overview cards can show a real mini-preview instead of a generic summary.
         let command = """
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
-if command -v tmux >/dev/null 2>&1; then tmux list-sessions -F '#{session_name}|#{session_windows}|#{?session_attached,1,0}' 2>/dev/null || true; fi
+if command -v tmux >/dev/null 2>&1; then
+tmux list-sessions -F '#{session_name}' 2>/dev/null | while IFS= read -r __ce_s; do
+  [ -z "$__ce_s" ] && continue
+  printf '__CE_SESSION__|%s\\n' "$__ce_s"
+  tmux display-message -p -t "$__ce_s" '#{session_windows}|#{?session_attached,1,0}' 2>/dev/null
+  tmux capture-pane -p -t "$__ce_s" 2>/dev/null | sed 's/[[:space:]]*$//' | awk 'NF' | tail -n 3
+  printf '__CE_END__\\n'
+done
+fi
 """
-        let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
-        let lines = output
-            .split(whereSeparator: \.isNewline)
-            .map(String.init)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let output = await withTerminalSSHTimeout {
+            (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
+        } ?? ""
+        return parseDiscoveryOutput(output)
+    }
+
+    nonisolated private static func parseDiscoveryOutput(_ output: String) -> [TmuxSessionSummary] {
+        var sessions: [TmuxSessionSummary] = []
         var seenSessionNames = Set<String>()
-        return lines.compactMap { line in
-            let components = line.components(separatedBy: "|")
-            guard let first = components.first else { return nil }
-            let session = XTermSessionController.normalizeTmuxSessionName(first)
-            guard !session.isEmpty else { return nil }
-            guard seenSessionNames.insert(session).inserted else { return nil }
-            let windowsCount = components.count > 1 ? Int(components[1].trimmingCharacters(in: .whitespacesAndNewlines)) : nil
-            let isAttached = components.count > 2 ? components[2].trimmingCharacters(in: .whitespacesAndNewlines) == "1" : nil
-            return TmuxSessionSummary(sessionName: session, windowsCount: windowsCount, isAttached: isAttached)
+
+        var currentName: String?
+        var windowsCount: Int?
+        var isAttached: Bool?
+        var previewLines: [String] = []
+        var sawMetaLine = false
+
+        func flush() {
+            guard let name = currentName else { return }
+            if seenSessionNames.insert(name).inserted {
+                sessions.append(TmuxSessionSummary(
+                    sessionName: name,
+                    windowsCount: windowsCount,
+                    isAttached: isAttached,
+                    previewLines: previewLines
+                ))
+            }
+            currentName = nil
+            windowsCount = nil
+            isAttached = nil
+            previewLines = []
+            sawMetaLine = false
         }
+
+        for rawLine in output.split(whereSeparator: \.isNewline).map(String.init) {
+            if currentName == nil {
+                // Only recognise a header when between sessions, so pane content that
+                // happens to contain a marker can't fabricate a phantom session.
+                guard rawLine.hasPrefix("__CE_SESSION__|") else { continue }
+                let name = XTermSessionController.normalizeTmuxSessionName(
+                    String(rawLine.dropFirst("__CE_SESSION__|".count))
+                )
+                currentName = name.isEmpty ? nil : name
+                continue
+            }
+
+            if rawLine == "__CE_END__" {
+                flush()
+                continue
+            }
+            // Ignore stray markers appearing inside captured pane output.
+            if rawLine.hasPrefix("__CE_SESSION__|") { continue }
+
+            if !sawMetaLine {
+                sawMetaLine = true
+                let parts = rawLine.components(separatedBy: "|")
+                if parts.count == 2, let windows = Int(parts[0]), parts[1] == "0" || parts[1] == "1" {
+                    windowsCount = windows
+                    isAttached = parts[1] == "1"
+                    continue
+                }
+                // display-message produced no usable meta line (session vanished mid-loop):
+                // treat this line as the first preview line instead.
+            }
+
+            let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty {
+                previewLines.append(trimmed)
+            }
+        }
+        flush()
+        return sessions
     }
 
     nonisolated private static func disambiguateDisplayTitles(_ sessions: [Item]) -> [Item] {
@@ -3143,6 +3364,7 @@ if command -v tmux >/dev/null 2>&1; then tmux list-sessions -F '#{session_name}|
                 displayTitle: "\(item.displayTitle) (\(index))",
                 host: item.host,
                 previewText: item.previewText,
+                previewIsPlaceholder: item.previewIsPlaceholder,
                 isActive: item.isActive,
                 colorHex: item.colorHex
             )
@@ -3160,7 +3382,7 @@ extension TerminalTabOverviewViewController: UICollectionViewDelegate {
             doneButton.alpha = selectedSessionIDs.isEmpty ? 0.75 : 1
             return
         }
-        onSelectSession?(item.credentialKey, item.sessionName, item.sessionName)
+        onSelectSession?(item.credentialKey, item.sessionName, item.displayTitle)
         dismiss(animated: true)
     }
 
@@ -3182,7 +3404,7 @@ extension TerminalTabOverviewViewController: UICollectionViewDelegate {
             guard let self else { return UIMenu() }
             return UIMenu(children: [
                 UIAction(title: "Open Session", image: UIImage(systemName: "arrow.right.circle")) { _ in
-                    self.onSelectSession?(item.credentialKey, item.sessionName, item.sessionName)
+                    self.onSelectSession?(item.credentialKey, item.sessionName, item.displayTitle)
                     self.dismiss(animated: true)
                 },
                 UIAction(title: "Rename Session", image: UIImage(systemName: "pencil")) { _ in
@@ -3257,7 +3479,9 @@ else
 fi
 """
         Task {
-            let output = (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
+            let output = await withTerminalSSHTimeout {
+                (try? await SSHClientActor.shared.execute(command, on: credential)) ?? ""
+            } ?? "__CE_TMUX_ERROR__: Timed out — server unreachable"
             await MainActor.run {
                 if output.contains("__CE_TMUX_OK__") {
                     TerminalWorkspaceStore.shared.renameTabsBoundToTmuxSession(
@@ -4276,12 +4500,16 @@ final class TerminalSectionDividerCell: UICollectionViewCell {
 }
 
 @MainActor
-final class TerminalAllTabsCell: UICollectionViewCell {
+final class TerminalAllTabsCell: UICollectionViewCell, UIGestureRecognizerDelegate {
     static let reuseID = "TerminalAllTabsCell"
 
     var onClose: (() -> Void)?
+    /// Queried when a swipe begins; return false to disable swipe-to-close (e.g. selection mode).
+    var swipeToCloseEnabled: (() -> Bool)?
 
     private let card = UIView()
+    private let swipeBackground = UIView()
+    private let swipeIcon = UIImageView()
     private let preview = UIView()
     private let titleLabel = UILabel()
     private let subtitleLabel = UILabel()
@@ -4290,10 +4518,28 @@ final class TerminalAllTabsCell: UICollectionViewCell {
     private let selectedBadge = UIImageView()
     private var accentColor: UIColor?
     private var sessionActive = false
+    private var didCancelScrollForSwipe = false
+    private lazy var panGesture: UIPanGestureRecognizer = {
+        let recognizer = UIPanGestureRecognizer(target: self, action: #selector(handleSwipePan(_:)))
+        recognizer.delegate = self
+        return recognizer
+    }()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentView.backgroundColor = .clear
+
+        swipeBackground.backgroundColor = UIColor.systemRed
+        swipeBackground.layer.cornerRadius = UIFloat(14)
+        swipeBackground.layer.cornerCurve = .continuous
+        swipeBackground.alpha = 0
+        swipeIcon.image = UIImage(systemName: "trash.fill")
+        swipeIcon.tintColor = .white
+        swipeIcon.contentMode = .center
+        swipeBackground.addSubview(swipeIcon)
+        contentView.addSubview(swipeBackground)
+
+        contentView.addGestureRecognizer(panGesture)
 
         card.backgroundColor = UIColor.secondarySystemBackground
         card.layer.cornerRadius = UIFloat(14)
@@ -4343,8 +4589,15 @@ final class TerminalAllTabsCell: UICollectionViewCell {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        card.frame = contentView.bounds.inset(by: UIEdgeInsets(top: UIFloat(4), left: UIFloat(2), bottom: UIFloat(4), right: UIFloat(2)))
-        let inner = card.bounds.inset(by: UIEdgeInsets(top: UIFloat(10), left: UIFloat(10), bottom: UIFloat(10), right: UIFloat(10)))
+        let cardFrame = contentView.bounds.inset(by: UIEdgeInsets(top: UIFloat(4), left: UIFloat(2), bottom: UIFloat(4), right: UIFloat(2)))
+        // Don't stomp the frame while a swipe transform is active (transform + frame
+        // changes are undefined); the transform handles positioning during the gesture.
+        if card.transform.isIdentity {
+            card.frame = cardFrame
+        }
+        swipeBackground.frame = cardFrame
+        swipeIcon.frame = CGRect(x: cardFrame.width - UIFloat(52), y: 0, width: UIFloat(44), height: cardFrame.height)
+        let inner = CGRect(origin: .zero, size: cardFrame.size).inset(by: UIEdgeInsets(top: UIFloat(10), left: UIFloat(10), bottom: UIFloat(10), right: UIFloat(10)))
 
         closeButton.frame = CGRect(x: inner.maxX - UIFloat(20), y: inner.minY, width: UIFloat(20), height: UIFloat(20))
         selectedBadge.frame = CGRect(x: inner.maxX - UIFloat(24), y: closeButton.frame.maxY + UIFloat(6), width: UIFloat(24), height: UIFloat(24))
@@ -4356,10 +4609,15 @@ final class TerminalAllTabsCell: UICollectionViewCell {
         previewLabel.frame = preview.bounds.inset(by: UIEdgeInsets(top: UIFloat(8), left: UIFloat(8), bottom: UIFloat(8), right: UIFloat(8)))
     }
 
-    func apply(title: String, subtitle: String, previewText: String, isActive: Bool, accentHex: String?) {
+    func apply(title: String, subtitle: String, previewText: String, previewIsPlaceholder: Bool, isActive: Bool, accentHex: String?) {
         titleLabel.text = title
         subtitleLabel.text = subtitle
         previewLabel.text = previewText
+        // Dim meta placeholders so real captured terminal output stands out.
+        previewLabel.textColor = UIColor.white.withAlphaComponent(previewIsPlaceholder ? 0.5 : 0.88)
+        previewLabel.font = previewIsPlaceholder
+            ? UIFont.systemFont(ofSize: UIFloat(11), weight: .regular)
+            : UIFont.monospacedSystemFont(ofSize: UIFloat(11), weight: .regular)
         sessionActive = isActive
 
         if let accentHex, let accent = UIColor(hex: accentHex) {
@@ -4393,6 +4651,92 @@ final class TerminalAllTabsCell: UICollectionViewCell {
             closeButton.tintColor = UIColor.secondaryLabel
             selectedBadge.alpha = 0
         }
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        // Force-cancel any in-flight swipe and reset visual state before reuse.
+        panGesture.isEnabled = false
+        panGesture.isEnabled = true
+        card.transform = .identity
+        card.alpha = 1
+        swipeBackground.alpha = 0
+        didCancelScrollForSwipe = false
+        onClose = nil
+        swipeToCloseEnabled = nil
+    }
+
+    @objc
+    private func handleSwipePan(_ recognizer: UIPanGestureRecognizer) {
+        let translationX = min(0, recognizer.translation(in: contentView).x)
+        switch recognizer.state {
+        case .began:
+            didCancelScrollForSwipe = false
+        case .changed:
+            // Once the drag is clearly horizontal, cancel the collection view's scroll
+            // so the card slides cleanly instead of the list scrolling underneath.
+            if !didCancelScrollForSwipe {
+                let translation = recognizer.translation(in: contentView)
+                if abs(translation.x) > UIFloat(12), abs(translation.x) > abs(translation.y) {
+                    cancelEnclosingScroll()
+                    didCancelScrollForSwipe = true
+                }
+            }
+            card.transform = CGAffineTransform(translationX: translationX, y: 0)
+            swipeBackground.alpha = min(1, -translationX / UIFloat(70))
+        case .ended, .cancelled, .failed:
+            let velocityX = recognizer.velocity(in: contentView).x
+            let threshold = bounds.width * 0.35
+            let shouldClose = recognizer.state == .ended && (translationX < -threshold || velocityX < -700)
+            if shouldClose {
+                let handler = onClose
+                UIView.animate(withDuration: 0.18, animations: {
+                    self.card.transform = CGAffineTransform(translationX: -self.bounds.width, y: 0)
+                    self.card.alpha = 0
+                    self.swipeBackground.alpha = 1
+                }, completion: { _ in
+                    handler?()
+                })
+            } else {
+                UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.85, initialSpringVelocity: 0) {
+                    self.card.transform = .identity
+                    self.swipeBackground.alpha = 0
+                }
+            }
+            didCancelScrollForSwipe = false
+        default:
+            break
+        }
+    }
+
+    private func cancelEnclosingScroll() {
+        var view: UIView? = superview
+        while let current = view {
+            if let collectionView = current as? UICollectionView {
+                let scrollPan = collectionView.panGestureRecognizer
+                scrollPan.isEnabled = false
+                scrollPan.isEnabled = true
+                return
+            }
+            view = current.superview
+        }
+    }
+
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === panGesture else {
+            return super.gestureRecognizerShouldBegin(gestureRecognizer)
+        }
+        guard swipeToCloseEnabled?() ?? true else { return false }
+        // Only begin for a predominantly leftward drag; leave vertical drags to scrolling.
+        let velocity = panGesture.velocity(in: contentView)
+        return velocity.x < 0 && abs(velocity.x) > abs(velocity.y)
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        otherGestureRecognizer is UIPanGestureRecognizer
     }
 }
 

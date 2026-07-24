@@ -11,6 +11,7 @@ import NIO
 
 actor SSHClientActor {
     private var clients = [String: SSHClient]()
+    private var pendingConnections = [String: Task<SSHClient, Error>]()
 
 
     func log(_ message: String) {
@@ -21,29 +22,46 @@ actor SSHClientActor {
         if let client = clients[credential.key], client.isConnected {
             do {
                 return try await client.execute(command)
-            } catch{
+            } catch {
+                // Evict connections that turned out to be dead so the next call reconnects.
+                if !client.isConnected {
+                    clients[credential.key] = nil
+                }
                 throw error
             }
-        } else {
-            let client: SSHClient
-            do {
-                try await clients[credential.key]?.close()
-            } catch {
-                log("client closing error in \(#function): \(error.generateDescription()) \(String(describing: error))")
-            }
-            do{
-                client = try await SSHClient.connect(using: credential)
-            } catch {
-                log("client connection error in \(#function): \(error.generateDescription()) \(String(describing: error))")
-                throw error
-            }
-            clients[credential.key] = client
-            do {
-                return try await client.execute(command)
-            } catch {
-                log("client execution error in \(#function): \(error.generateDescription()) \(String(describing: error))")
-                throw error
-            }
+        }
+
+        // Coalesce concurrent connection attempts for the same credential so
+        // parallel callers share one SSH connection instead of leaking duplicates.
+        if let pending = pendingConnections[credential.key] {
+            let client = try await pending.value
+            return try await client.execute(command)
+        }
+
+        do {
+            try await clients[credential.key]?.close()
+        } catch {
+            log("client closing error in \(#function): \(error.generateDescription()) \(String(describing: error))")
+        }
+        clients[credential.key] = nil
+
+        let connectTask = Task { try await SSHClient.connect(using: credential) }
+        pendingConnections[credential.key] = connectTask
+        let client: SSHClient
+        do {
+            client = try await connectTask.value
+        } catch {
+            pendingConnections[credential.key] = nil
+            log("client connection error in \(#function): \(error.generateDescription()) \(String(describing: error))")
+            throw error
+        }
+        pendingConnections[credential.key] = nil
+        clients[credential.key] = client
+        do {
+            return try await client.execute(command)
+        } catch {
+            log("client execution error in \(#function): \(error.generateDescription()) \(String(describing: error))")
+            throw error
         }
     }
 

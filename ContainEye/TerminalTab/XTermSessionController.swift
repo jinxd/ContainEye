@@ -80,6 +80,7 @@ final class XTermSessionController: Identifiable {
     private var autoReloadAttempts = 0
     private var lastAutoReloadAt: Date?
     private var bypassSFTPEditPromptOnce = false
+    private var didIntentionallyDisconnect = false
 
     private static let sftpEditPromptNeverShowKey = "terminal.sftpEditorPrompt.neverShow"
     private static let autoReloadCooldown: TimeInterval = 2
@@ -153,6 +154,8 @@ final class XTermSessionController: Identifiable {
             return
         }
 
+        didIntentionallyDisconnect = false
+
         guard let credential = keychain().getCredential(for: credentialKey) else {
             connectionStatus = .failed
             lastShellIntegrationWarning = "Missing credential for key \(credentialKey)"
@@ -199,6 +202,9 @@ final class XTermSessionController: Identifiable {
     }
 
     func disconnect() {
+        // Set before tearing down the stream: the stream's close-callback fires
+        // onDisconnected asynchronously and must not trigger an auto-reload.
+        didIntentionallyDisconnect = true
         suggestionTask?.cancel()
         suggestionTask = nil
         shellIntegrationProbeTask?.cancel()
@@ -652,6 +658,10 @@ final class XTermSessionController: Identifiable {
     }
 
     private func scheduleAutoReloadIfNeeded(reason: String) {
+        guard !didIntentionallyDisconnect else {
+            return
+        }
+
         let now = Date()
         if let last = lastAutoReloadAt,
            now.timeIntervalSince(last) < Self.autoReloadCooldown {

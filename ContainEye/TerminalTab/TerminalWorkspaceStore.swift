@@ -172,11 +172,15 @@ final class TerminalWorkspaceStore {
     }
 
     private func makeTabTitle(baseLabel: String, credentialKey: String) -> String {
-        let existingCount = tabs.values.filter { $0.credentialKey == credentialKey }.count
-        if existingCount == 0 {
+        let siblingTitles = tabs.values.filter { $0.credentialKey == credentialKey }.map(\.title)
+        guard siblingTitles.contains(baseLabel) else {
             return baseLabel
         }
-        return "\(baseLabel) (\(existingCount + 1))"
+        var index = 2
+        while siblingTitles.contains("\(baseLabel) (\(index))") {
+            index += 1
+        }
+        return "\(baseLabel) (\(index))"
     }
 
     func closeTab(tabID: UUID) {
