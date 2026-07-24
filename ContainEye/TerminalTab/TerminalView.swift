@@ -28,6 +28,7 @@ func UIFloat(_ value: Int) -> CGFloat {
 
 struct RemoteTerminalView: View {
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some View {
         TerminalWorkspaceNavigationHost()
@@ -38,6 +39,9 @@ struct RemoteTerminalView: View {
                 // session can be popped out into its own window on iPad/Mac.
                 TerminalWindowRouter.shared.openTerminalWindow = { target in
                     openWindow(value: target)
+                }
+                TerminalWindowRouter.shared.dismissTerminalWindow = { target in
+                    dismissWindow(value: target)
                 }
             }
     }
@@ -812,8 +816,14 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
     }
 
     private func collapseWindows() {
-        // Merge every window's tabs into this window, then close the others.
+        // Merge every window's tabs into this window, then dismiss the others.
+        let otherWindowIDs = workspace.windowIDsWithTabs().filter { $0 != windowID }
         workspace.collapseAllWindows(into: windowID)
+        for otherWindowID in otherWindowIDs {
+            TerminalWindowRouter.shared.dismiss(TerminalWindowTarget(windowID: otherWindowID))
+        }
+        // Fallback for windows the system opened (not value-backed) that
+        // dismissWindow(value:) can't target.
         TerminalWindowRouter.shared.closeSecondaryWindows()
     }
 

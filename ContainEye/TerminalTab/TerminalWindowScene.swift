@@ -24,6 +24,7 @@ final class TerminalWindowRouter {
     private init() {}
 
     var openTerminalWindow: ((TerminalWindowTarget) -> Void)?
+    var dismissTerminalWindow: ((TerminalWindowTarget) -> Void)?
 
     /// True only on platforms/configurations that allow multiple scenes (iPad, Mac).
     var supportsMultipleWindows: Bool {
@@ -32,6 +33,10 @@ final class TerminalWindowRouter {
 
     func open(_ target: TerminalWindowTarget) {
         openTerminalWindow?(target)
+    }
+
+    func dismiss(_ target: TerminalWindowTarget) {
+        dismissTerminalWindow?(target)
     }
 
     /// Best-effort close of every window except the currently active one. Used by
