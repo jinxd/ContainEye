@@ -13,8 +13,11 @@ struct TerminalTabState: Identifiable, Codable, Hashable {
     var disableAutoPersistentSession: Bool
 }
 
+/// A per-window tab group. Each OS window maps to exactly one pane; the pane
+/// holds that window's tabs (Safari-style), one of which is active.
 struct TerminalPaneState: Identifiable, Codable, Hashable {
     let id: UUID
+    var windowID: String
     var tabIDs: [UUID]
     var activeTabID: UUID?
 }
@@ -28,9 +31,11 @@ struct TerminalWorkspaceSnapshot: Codable {
 @MainActor
 @Observable
 final class TerminalWorkspaceStore {
+    nonisolated static let mainWindowID = "main"
+
     static let shared = TerminalWorkspaceStore(
         userDefaults: .standard,
-        persistenceKey: "terminal.workspace.snapshot.v2",
+        persistenceKey: "terminal.workspace.snapshot.v3",
         resolveCredentialLabel: { key in
             keychain().getCredential(for: key)?.label
         },
@@ -44,8 +49,7 @@ final class TerminalWorkspaceStore {
     @ObservationIgnored
     private var controllers: [UUID: XTermSessionController] = [:]
 
-    let maxPaneCount = 4
-    let maxTabCount = 12
+    let maxTabCount = 24
 
     @ObservationIgnored
     private let suggestionIndex: RemoteDocumentTreeIndex
@@ -63,7 +67,7 @@ final class TerminalWorkspaceStore {
 
     init(
         userDefaults: UserDefaults = .standard,
-        persistenceKey: String = "terminal.workspace.snapshot.v1",
+        persistenceKey: String = "terminal.workspace.snapshot.v3",
         resolveCredentialLabel: @escaping (String) -> String?,
         autoConnectControllers: Bool = true
     ) {
@@ -76,10 +80,37 @@ final class TerminalWorkspaceStore {
         restoreWorkspace()
     }
 
+    // MARK: Window ↔ pane mapping
+
+    /// The pane backing a window, creating it if needed.
+    @discardableResult
+    func paneID(forWindow windowID: String) -> UUID {
+        if let existing = panes.first(where: { $0.windowID == windowID }) {
+            return existing.id
+        }
+        let pane = TerminalPaneState(id: UUID(), windowID: windowID, tabIDs: [], activeTabID: nil)
+        panes.append(pane)
+        if focusedPaneID == nil {
+            focusedPaneID = pane.id
+        }
+        return pane.id
+    }
+
+    func windowID(forPane paneID: UUID) -> String? {
+        panes.first(where: { $0.id == paneID })?.windowID
+    }
+
+    /// Window IDs that currently have at least one tab.
+    func windowIDsWithTabs() -> [String] {
+        panes.filter { !$0.tabIDs.isEmpty }.map(\.windowID)
+    }
+
+    // MARK: Tabs
+
     func openTab(
         credentialKey: String,
         preferredTitle: String? = nil,
-        inFocusedPane: Bool = true,
+        windowID: String = TerminalWorkspaceStore.mainWindowID,
         themeOverrideSelectionKey: String? = nil,
         shortcutColorHex: String? = nil,
         tmuxSessionName: String? = nil,
@@ -91,46 +122,27 @@ final class TerminalWorkspaceStore {
         }
 
         let normalizedTmuxSessionName = tmuxSessionName.map { XTermSessionController.normalizeTmuxSessionName($0) }
+
+        // If the session is already open in any window, focus it there.
         if let tmuxName = normalizedTmuxSessionName, !tmuxName.isEmpty,
            let existing = tabs.values.first(where: {
                $0.credentialKey == credentialKey &&
                ($0.tmuxSessionName.map { XTermSessionController.normalizeTmuxSessionName($0) } == tmuxName)
            }),
-           let pane = panes.first(where: { $0.activeTabID == existing.id }) {
-            focusedPaneID = pane.id
+           let paneIndex = panes.firstIndex(where: { $0.tabIDs.contains(existing.id) }) {
+            panes[paneIndex].activeTabID = existing.id
+            focusedPaneID = panes[paneIndex].id
             persistWorkspace()
             return
         }
+
+        let paneID = paneID(forWindow: windowID)
 
         let trimmedPreferredTitle = preferredTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
         let label = (trimmedPreferredTitle?.isEmpty == false ? trimmedPreferredTitle! : nil)
             ?? resolveCredentialLabel(credentialKey)
             ?? credentialKey
-        let tabTitle = makeTabTitle(baseLabel: label, credentialKey: credentialKey)
-
-        if panes.isEmpty {
-            panes = [TerminalPaneState(id: UUID(), tabIDs: [], activeTabID: nil)]
-            focusedPaneID = panes.first?.id
-        }
-
-        normalizePanesForSingleSession()
-
-        let targetPaneID: UUID
-        if inFocusedPane,
-           let focusedPaneID,
-           let focusedIndex = panes.firstIndex(where: { $0.id == focusedPaneID }),
-           panes[focusedIndex].activeTabID == nil {
-            targetPaneID = focusedPaneID
-        } else if let emptyPane = panes.first(where: { $0.activeTabID == nil }) {
-            targetPaneID = emptyPane.id
-        } else if panes.count < maxPaneCount {
-            let pane = TerminalPaneState(id: UUID(), tabIDs: [], activeTabID: nil)
-            panes.append(pane)
-            targetPaneID = pane.id
-        } else {
-            // One live session per pane. At max pane count we cannot open another session.
-            return
-        }
+        let tabTitle = makeTabTitle(baseLabel: label, paneID: paneID)
 
         let tab = TerminalTabState(
             id: UUID(),
@@ -146,12 +158,11 @@ final class TerminalWorkspaceStore {
 
         tabs[tab.id] = tab
 
-        if let idx = panes.firstIndex(where: { $0.id == targetPaneID }) {
-            panes[idx].tabIDs = [tab.id]
+        if let idx = panes.firstIndex(where: { $0.id == paneID }) {
+            panes[idx].tabIDs.append(tab.id)
             panes[idx].activeTabID = tab.id
         }
-
-        focusedPaneID = targetPaneID
+        focusedPaneID = paneID
 
         let controller = XTermSessionController(
             id: tab.id,
@@ -171,8 +182,8 @@ final class TerminalWorkspaceStore {
         persistWorkspace()
     }
 
-    private func makeTabTitle(baseLabel: String, credentialKey: String) -> String {
-        let siblingTitles = tabs.values.filter { $0.credentialKey == credentialKey }.map(\.title)
+    private func makeTabTitle(baseLabel: String, paneID: UUID) -> String {
+        let siblingTitles = tabStates(in: paneID).map(\.title)
         guard siblingTitles.contains(baseLabel) else {
             return baseLabel
         }
@@ -193,19 +204,23 @@ final class TerminalWorkspaceStore {
         controllers[tabID] = nil
 
         for idx in panes.indices {
+            guard panes[idx].tabIDs.contains(tabID) else { continue }
             panes[idx].tabIDs.removeAll(where: { $0 == tabID })
             if panes[idx].activeTabID == tabID {
                 panes[idx].activeTabID = panes[idx].tabIDs.last
             }
         }
 
-        // Remove empty non-primary panes.
-        if panes.count > 1 {
-            panes.removeAll(where: { $0.tabIDs.isEmpty })
-        }
+        persistWorkspace()
+    }
 
-        normalizePanesForSingleSession()
-
+    /// Puts a window into "new tab" mode: keeps its tabs but shows the server
+    /// picker (no active tab) so the user can start or attach another session.
+    func beginNewTab(inWindow windowID: String) {
+        let id = paneID(forWindow: windowID)
+        guard let idx = panes.firstIndex(where: { $0.id == id }) else { return }
+        panes[idx].activeTabID = nil
+        focusedPaneID = id
         persistWorkspace()
     }
 
@@ -224,62 +239,55 @@ final class TerminalWorkspaceStore {
         panes[paneIndex].tabIDs = []
         panes[paneIndex].activeTabID = nil
         focusedPaneID = paneID
-        normalizePanesForSingleSession()
         persistWorkspace()
     }
 
-    func splitPane() {
-        guard panes.count < maxPaneCount else {
-            return
+    // MARK: Moving tabs between windows
+
+    /// Moves a tab into another window, activating it there. The session
+    /// (controller) is preserved, so the live terminal simply reappears in the
+    /// destination window.
+    func moveTab(tabID: UUID, toWindow windowID: String) {
+        guard tabs[tabID] != nil else { return }
+
+        for idx in panes.indices where panes[idx].tabIDs.contains(tabID) {
+            if panes[idx].windowID == windowID { return } // already here
+            panes[idx].tabIDs.removeAll(where: { $0 == tabID })
+            if panes[idx].activeTabID == tabID {
+                panes[idx].activeTabID = panes[idx].tabIDs.last
+            }
         }
 
-        let pane = TerminalPaneState(id: UUID(), tabIDs: [], activeTabID: nil)
-        panes.append(pane)
-        focusedPaneID = pane.id
-
+        let destination = paneID(forWindow: windowID)
+        if let idx = panes.firstIndex(where: { $0.id == destination }) {
+            panes[idx].tabIDs.append(tabID)
+            panes[idx].activeTabID = tabID
+        }
+        focusedPaneID = destination
         persistWorkspace()
     }
 
-    func focusOrCreateEmptyPane() {
-        if panes.isEmpty {
-            let pane = TerminalPaneState(id: UUID(), tabIDs: [], activeTabID: nil)
-            panes = [pane]
-            focusedPaneID = pane.id
-            persistWorkspace()
-            return
+    /// Pulls every tab from all windows into a single window (the main window by
+    /// default). Other windows are emptied; their OS windows can then be closed.
+    func collapseAllWindows(into windowID: String = TerminalWorkspaceStore.mainWindowID) {
+        let destination = paneID(forWindow: windowID)
+        guard let destIndex = panes.firstIndex(where: { $0.id == destination }) else { return }
+
+        var orderedTabIDs = panes[destIndex].tabIDs
+        let previousActive = panes[destIndex].activeTabID
+
+        for idx in panes.indices where panes[idx].id != destination {
+            orderedTabIDs.append(contentsOf: panes[idx].tabIDs.filter { !orderedTabIDs.contains($0) })
+            panes[idx].tabIDs = []
+            panes[idx].activeTabID = nil
         }
 
-        if let emptyPane = panes.first(where: { $0.activeTabID == nil }) {
-            focusedPaneID = emptyPane.id
-            persistWorkspace()
-            return
-        }
+        panes[destIndex].tabIDs = orderedTabIDs
+        panes[destIndex].activeTabID = previousActive ?? orderedTabIDs.last
+        focusedPaneID = destination
 
-        guard panes.count < maxPaneCount else {
-            return
-        }
-
-        let pane = TerminalPaneState(id: UUID(), tabIDs: [], activeTabID: nil)
-        panes.append(pane)
-        focusedPaneID = pane.id
-        persistWorkspace()
-    }
-
-    func removePane(paneID: UUID) {
-        guard panes.count > 1,
-              let pane = panes.first(where: { $0.id == paneID })
-        else {
-            return
-        }
-
-        for tabID in pane.tabIDs {
-            tabs[tabID] = nil
-            controllers[tabID]?.disconnect()
-            controllers[tabID] = nil
-        }
-
-        panes.removeAll(where: { $0.id == paneID })
-        normalizePanesForSingleSession()
+        // Drop now-empty non-main panes.
+        panes.removeAll(where: { $0.id != destination && $0.tabIDs.isEmpty })
 
         persistWorkspace()
     }
@@ -288,7 +296,6 @@ final class TerminalWorkspaceStore {
         guard panes.contains(where: { $0.id == paneID }) else {
             return
         }
-
         focusedPaneID = paneID
         persistWorkspace()
     }
@@ -297,7 +304,6 @@ final class TerminalWorkspaceStore {
         guard let idx = panes.firstIndex(where: { $0.id == paneID }) else {
             return
         }
-
         guard panes[idx].tabIDs.contains(tabID) else {
             return
         }
@@ -306,6 +312,8 @@ final class TerminalWorkspaceStore {
         focusedPaneID = paneID
         persistWorkspace()
     }
+
+    // MARK: Lookups
 
     func controller(for tabID: UUID) -> XTermSessionController? {
         controllers[tabID]
@@ -317,7 +325,6 @@ final class TerminalWorkspaceStore {
         else {
             return nil
         }
-
         return tabs[active]
     }
 
@@ -325,20 +332,7 @@ final class TerminalWorkspaceStore {
         guard let pane = panes.first(where: { $0.id == paneID }) else {
             return []
         }
-
         return pane.tabIDs.compactMap { tabs[$0] }
-    }
-
-    func visiblePaneIDs(isRegularWidth: Bool) -> [UUID] {
-        if isRegularWidth {
-            return panes.map(\.id)
-        }
-
-        if let focusedPaneID {
-            return [focusedPaneID]
-        }
-
-        return panes.first.map { [$0.id] } ?? []
     }
 
     func activeControllerInFocusedPane() -> XTermSessionController? {
@@ -348,26 +342,24 @@ final class TerminalWorkspaceStore {
         else {
             return nil
         }
-
         return controllers[activeID]
     }
+
+    // MARK: Persistence
 
     func restoreWorkspace() {
         guard let data = defaults.data(forKey: persistenceKey),
               let snapshot = try? JSONDecoder().decode(TerminalWorkspaceSnapshot.self, from: data)
         else {
             if panes.isEmpty {
-                panes = [TerminalPaneState(id: UUID(), tabIDs: [], activeTabID: nil)]
-                focusedPaneID = panes.first?.id
+                _ = paneID(forWindow: TerminalWorkspaceStore.mainWindowID)
             }
             return
         }
 
         panes = snapshot.panes
         focusedPaneID = snapshot.focusedPaneID
-        let migratedTabs = snapshot.tabs.map { tab in
-            migrateLegacyTabTmuxBinding(tab)
-        }
+        let migratedTabs = snapshot.tabs.map { migrateLegacyTabTmuxBinding($0) }
         tabs = Dictionary(uniqueKeysWithValues: migratedTabs.map { ($0.id, $0) })
 
         controllers = [:]
@@ -388,7 +380,7 @@ final class TerminalWorkspaceStore {
             controllers[tab.id] = controller
         }
 
-        normalizePanesForSingleSession()
+        normalizeWorkspace()
     }
 
     func persistWorkspace() {
@@ -404,36 +396,25 @@ final class TerminalWorkspaceStore {
         }
     }
 
-    private func normalizePanesForSingleSession() {
-        if panes.isEmpty {
-            panes = [TerminalPaneState(id: UUID(), tabIDs: [], activeTabID: nil)]
+    /// Ensures the main window pane exists, tab references are valid, and each
+    /// pane's active tab is one it actually holds. Detached tabs are dropped.
+    private func normalizeWorkspace() {
+        if !panes.contains(where: { $0.windowID == TerminalWorkspaceStore.mainWindowID }) {
+            _ = paneID(forWindow: TerminalWorkspaceStore.mainWindowID)
         }
 
-        var usedTabIDs = Set<UUID>()
-        var attachedTabIDs = Set<UUID>()
-
+        var referencedTabIDs = Set<UUID>()
         for idx in panes.indices {
-            let preferred = panes[idx].activeTabID
-            let candidates = [preferred] + panes[idx].tabIDs
-
-            let chosen = candidates
-                .compactMap { $0 }
-                .first(where: { tabs[$0] != nil && !usedTabIDs.contains($0) })
-
-            if let chosen {
-                panes[idx].activeTabID = chosen
-                panes[idx].tabIDs = [chosen]
-                usedTabIDs.insert(chosen)
-                attachedTabIDs.insert(chosen)
-            } else {
-                panes[idx].activeTabID = nil
-                panes[idx].tabIDs = []
+            panes[idx].tabIDs = panes[idx].tabIDs.filter { tabs[$0] != nil }
+            referencedTabIDs.formUnion(panes[idx].tabIDs)
+            if let active = panes[idx].activeTabID, !panes[idx].tabIDs.contains(active) {
+                panes[idx].activeTabID = panes[idx].tabIDs.last
             }
         }
 
-        // Drop detached tab/controller state to avoid stale shared sessions across panes.
-        let detachedTabIDs = Set(tabs.keys).subtracting(attachedTabIDs)
-        for tabID in detachedTabIDs {
+        // Drop tabs/controllers that no pane references.
+        let orphanTabIDs = Set(tabs.keys).subtracting(referencedTabIDs)
+        for tabID in orphanTabIDs {
             controllers[tabID]?.disconnect()
             controllers[tabID] = nil
             tabs[tabID] = nil

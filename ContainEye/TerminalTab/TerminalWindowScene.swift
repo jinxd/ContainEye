@@ -2,27 +2,22 @@
 //  TerminalWindowScene.swift
 //  ContainEye
 //
-//  Standalone, single-session terminal windows for iPad/Mac multi-window.
-//  Each pop-out window attaches its own SSH connection to one server-side tmux
-//  session, independent of the main tabbed workspace.
+//  Standalone terminal windows for iPad/Mac multi-window. Every window shares the
+//  single workspace store but is scoped to its own `windowID`; a window shows only
+//  the tabs assigned to it (Safari-style).
 //
 
 import SwiftUI
 import UIKit
 
-/// A tmux session that can be opened in its own window.
+/// Identifies which window a standalone terminal scene should display.
 struct TerminalWindowTarget: Codable, Hashable, Identifiable {
-    var credentialKey: String
-    var tmuxSessionName: String
-    var title: String
-    var colorHex: String?
-
-    /// Stable identity so reopening the same session reuses its window state.
-    var id: String { "\(credentialKey)|\(tmuxSessionName)" }
+    var windowID: String
+    var id: String { windowID }
 }
 
 /// Bridges the UIKit terminal chrome to SwiftUI's multi-window support. The main
-/// terminal view registers the `openTerminalWindow` closure while it is on screen.
+/// terminal view registers `openTerminalWindow` while it is on screen.
 @MainActor
 final class TerminalWindowRouter {
     static let shared = TerminalWindowRouter()
@@ -38,69 +33,32 @@ final class TerminalWindowRouter {
     func open(_ target: TerminalWindowTarget) {
         openTerminalWindow?(target)
     }
-}
 
-enum TerminalWindowStore {
-    /// Builds an independent workspace store seeded with a single attached session.
-    /// A per-target persistence key keeps each window's layout separate from the
-    /// main workspace and from other pop-out windows.
-    @MainActor
-    static func make(for target: TerminalWindowTarget) -> TerminalWorkspaceStore {
-        let store = TerminalWorkspaceStore(
-            userDefaults: .standard,
-            persistenceKey: "terminal.window.\(target.id)",
-            resolveCredentialLabel: { key in
-                keychain().getCredential(for: key)?.label
-            },
-            autoConnectControllers: true
-        )
-        // Attach the requested tmux session (deduped against any restored state).
-        store.openTab(
-            credentialKey: target.credentialKey,
-            preferredTitle: target.title,
-            shortcutColorHex: target.colorHex,
-            tmuxSessionName: target.tmuxSessionName,
-            tmuxAttachOnly: true,
-            disableAutoPersistentSession: true
-        )
-        return store
-    }
-
-    /// A fresh, empty terminal window (its own workspace) — used when the system
-    /// opens a new window with no specific session. It shows the server picker so
-    /// the user can start or attach a session.
-    @MainActor
-    static func makeEmpty(id: String) -> TerminalWorkspaceStore {
-        TerminalWorkspaceStore(
-            userDefaults: .standard,
-            persistenceKey: "terminal.window.empty.\(id)",
-            resolveCredentialLabel: { key in
-                keychain().getCredential(for: key)?.label
-            },
-            autoConnectControllers: true
-        )
+    /// Best-effort close of every window except the currently active one. Used by
+    /// "collapse" after all tabs have been pulled into the main window.
+    func closeSecondaryWindows() {
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene else { continue }
+            if windowScene.activationState != .foregroundActive {
+                UIApplication.shared.requestSceneSessionDestruction(windowScene.session, options: nil)
+            }
+        }
     }
 }
 
-/// The content of a standalone terminal window. A `nil` target means a fresh,
-/// empty terminal window opened by the system.
+/// The content of a standalone terminal window: the shared workspace scoped to one
+/// window. A `nil` target means a system-opened window that gets a fresh windowID.
 struct StandaloneTerminalScene: View {
-    let target: TerminalWindowTarget?
-    @State private var workspace: TerminalWorkspaceStore
+    @State private var windowID: String
 
     init(target: TerminalWindowTarget?) {
-        self.target = target
-        if let target {
-            _workspace = State(initialValue: TerminalWindowStore.make(for: target))
-        } else {
-            _workspace = State(initialValue: TerminalWindowStore.makeEmpty(id: UUID().uuidString))
-        }
+        _windowID = State(initialValue: target?.windowID ?? UUID().uuidString)
     }
 
     var body: some View {
-        TerminalWorkspaceNavigationHost(workspace: workspace)
+        TerminalWorkspaceNavigationHost(workspace: .shared, windowID: windowID)
             .ignoresSafeArea(.container, edges: .bottom)
-            .navigationTitle(target?.title ?? "Terminal")
+            .navigationTitle("Terminal")
             .trackView("terminal/window")
     }
 }

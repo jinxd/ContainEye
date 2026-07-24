@@ -49,9 +49,10 @@ struct RemoteTerminalView: View {
 
 struct TerminalWorkspaceNavigationHost: UIViewControllerRepresentable {
     var workspace: TerminalWorkspaceStore = .shared
+    var windowID: String = TerminalWorkspaceStore.mainWindowID
 
     func makeUIViewController(context: Context) -> UINavigationController {
-        let root = TerminalWorkspaceViewController(workspace: workspace)
+        let root = TerminalWorkspaceViewController(workspace: workspace, windowID: windowID)
         let navigation = UINavigationController(rootViewController: root)
         navigation.navigationBar.prefersLargeTitles = false
         return navigation
@@ -260,6 +261,11 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
     }
 
     private let navigationTitleMenuButton = UIButton(type: .system)
+    private let tabBarScrollView = UIScrollView()
+    private let tabBarStack = UIStackView()
+    private let tabBarNewButton = UIButton(type: .system)
+    private let tabBarCollapseButton = UIButton(type: .system)
+    private let tabBarHeight = UIFloat(40)
     private let paneContainerView = UIView()
     private let keyboardBarView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
     private let keyboardSuggestionsContainerView = UIView()
@@ -312,9 +318,18 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
     private var keyboardSuggestionButtons: [UIButton] = []
     private var keyboardSuggestionDividers: [UIView] = []
 
+    /// The OS window this workspace renders. Each window shows only its own tabs.
+    private let windowID: String
+
+    /// The single pane backing this window.
+    private var windowPaneID: UUID {
+        workspace.paneID(forWindow: windowID)
+    }
+
     @MainActor
-    init(workspace: TerminalWorkspaceStore) {
+    init(workspace: TerminalWorkspaceStore, windowID: String = TerminalWorkspaceStore.mainWindowID) {
         self.workspace = workspace
+        self.windowID = windowID
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -380,6 +395,8 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
 
     private func configureBaseUI() {
         view.backgroundColor = TerminalUIColors.workspaceBackground
+
+        configureTabBar()
 
         paneContainerView.backgroundColor = .clear
         view.addSubview(paneContainerView)
@@ -547,44 +564,39 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
     }
 
     private func titleTextForFocusedPane() -> String {
-        guard let focusedID = workspace.focusedPaneID,
-              let index = workspace.panes.firstIndex(where: { $0.id == focusedID })
-        else {
-            return "Terminal"
+        if let active = workspace.activeTab(in: windowPaneID) {
+            return active.title
         }
-
-        if let active = workspace.activeTab(in: focusedID) {
-            return "\(index + 1): \(active.title)"
-        }
-
-        return "\(index + 1)"
+        return "Terminal"
     }
 
     private func makeTitleMenu() -> UIMenu {
         var actions: [UIMenuElement] = [
             UIAction(title: "New Tab", image: UIImage(systemName: "plus")) { [weak self] _ in
-                self?.workspace.focusOrCreateEmptyPane()
+                guard let self else { return }
+                self.workspace.beginNewTab(inWindow: self.windowID)
             }
         ]
 
-        if !workspace.panes.isEmpty {
-            actions.append(UIMenu(title: "", options: .displayInline, children: paneSwitchActions()))
+        let tabActions = paneSwitchActions()
+        if !tabActions.isEmpty {
+            actions.append(UIMenu(title: "", options: .displayInline, children: tabActions))
         }
 
         return UIMenu(children: actions)
     }
 
     private func paneSwitchActions() -> [UIAction] {
-        let selectedPaneID = workspace.focusedPaneID ?? workspace.panes.first?.id
+        let selectedTabID = workspace.activeTab(in: windowPaneID)?.id
 
-        return workspace.panes.enumerated().map { index, pane in
-            let isSelected = pane.id == selectedPaneID
-            let title = "Tab \(index + 1)"
+        return workspace.tabStates(in: windowPaneID).map { tab in
+            let isSelected = tab.id == selectedTabID
             return UIAction(
-                title: title,
+                title: tab.title,
                 state: isSelected ? .on : .off
             ) { [weak self] _ in
-                self?.workspace.focusPane(paneID: pane.id)
+                guard let self else { return }
+                self.workspace.setActiveTab(tabID: tab.id, in: self.windowPaneID)
             }
         }
     }
@@ -650,6 +662,22 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
             keyboardControlsContainer.frame = .zero
         }
 
+        // Reserve the tab strip at the top of the workspace area. Shown on wide
+        // (iPad/Mac) layouts only; compact iPhone keeps its swipe/overview UX.
+        let hasTabs = !workspace.tabStates(in: windowPaneID).isEmpty
+        let showTabBar = hasTabs && traitCollection.horizontalSizeClass == .regular
+        if showTabBar {
+            let tabRect = CGRect(x: layoutRect.minX, y: layoutRect.minY, width: layoutRect.width, height: tabBarHeight)
+            tabBarScrollView.isHidden = false
+            tabBarNewButton.isHidden = false
+            layoutTabBar(in: tabRect)
+            layoutRect = CGRect(x: layoutRect.minX, y: tabRect.maxY + UIFloat(4), width: layoutRect.width, height: max(0, layoutRect.height - tabBarHeight - UIFloat(4)))
+        } else {
+            tabBarScrollView.isHidden = true
+            tabBarNewButton.isHidden = true
+            tabBarCollapseButton.isHidden = true
+        }
+
         paneContainerView.frame = layoutRect
         layoutPaneControllers(in: paneContainerView.bounds)
 
@@ -704,50 +732,114 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
     }
 
     private func layoutPaneControllers(in bounds: CGRect) {
-        let visiblePaneIDs = workspace.visiblePaneIDs(isRegularWidth: isRegularLayout)
-        let visibleControllers: [TerminalPaneViewController] = visiblePaneIDs.compactMap { paneControllers[$0] }
-
-        guard !visibleControllers.isEmpty else { return }
-
-        if isRegularLayout {
-            let rowCount = Int(ceil(Double(visibleControllers.count) / 2.0))
-            let rowRects = splitRect(bounds, count: rowCount, spacing: TerminalUIMetrics.paneGap, axis: .vertical)
-
-            var index = 0
-            for row in 0..<rowCount {
-                let remaining = visibleControllers.count - index
-                let columns = min(2, remaining)
-                let columnRects = splitRect(rowRects[row], count: columns, spacing: TerminalUIMetrics.paneGap, axis: .horizontal)
-
-                for columnRect in columnRects {
-                    guard index < visibleControllers.count else { continue }
-                    visibleControllers[index].view.frame = columnRect
-                    index += 1
-                }
-            }
-            return
-        }
-
-        if let first = visibleControllers.first {
-            first.view.frame = bounds
-        }
+        // One pane per window — it fills the pane container (split removed).
+        paneControllers[windowPaneID]?.view.frame = bounds
     }
 
-    private var isRegularLayout: Bool {
-        let width = max(paneContainerView.bounds.width, view.bounds.width)
-        if traitCollection.horizontalSizeClass == .regular {
-            return true
+    // MARK: Tab Bar
+
+    private func configureTabBar() {
+        tabBarScrollView.showsHorizontalScrollIndicator = false
+        tabBarScrollView.backgroundColor = .clear
+        view.addSubview(tabBarScrollView)
+
+        tabBarStack.axis = .horizontal
+        tabBarStack.alignment = .fill
+        tabBarStack.spacing = UIFloat(6)
+        tabBarScrollView.addSubview(tabBarStack)
+
+        tabBarNewButton.setImage(UIImage(systemName: "plus"), for: .normal)
+        tabBarNewButton.tintColor = .label
+        tabBarNewButton.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            self.workspace.beginNewTab(inWindow: self.windowID)
+        }, for: .touchUpInside)
+        view.addSubview(tabBarNewButton)
+
+        tabBarCollapseButton.setImage(UIImage(systemName: "rectangle.stack"), for: .normal)
+        tabBarCollapseButton.tintColor = .label
+        tabBarCollapseButton.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            self.workspace.collapseAllWindows(into: TerminalWorkspaceStore.mainWindowID)
+            TerminalWindowRouter.shared.closeSecondaryWindows()
+        }, for: .touchUpInside)
+        view.addSubview(tabBarCollapseButton)
+    }
+
+    private func layoutTabBar(in topRect: CGRect) {
+        let buttonWidth = UIFloat(40)
+        let showCollapse = workspace.windowIDsWithTabs().count > 1 && windowID == TerminalWorkspaceStore.mainWindowID
+        tabBarCollapseButton.isHidden = !showCollapse
+        let collapseWidth = showCollapse ? buttonWidth : 0
+
+        tabBarNewButton.frame = CGRect(x: topRect.maxX - buttonWidth, y: topRect.minY, width: buttonWidth, height: topRect.height)
+        tabBarCollapseButton.frame = CGRect(x: topRect.maxX - buttonWidth - collapseWidth, y: topRect.minY, width: collapseWidth, height: topRect.height)
+
+        let scrollWidth = max(0, topRect.width - buttonWidth - collapseWidth)
+        tabBarScrollView.frame = CGRect(x: topRect.minX, y: topRect.minY, width: scrollWidth, height: topRect.height)
+
+        let contentWidth = max(scrollWidth, tabBarStack.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width + UIFloat(8))
+        tabBarStack.frame = CGRect(x: UIFloat(4), y: 0, width: contentWidth, height: topRect.height)
+        tabBarScrollView.contentSize = CGSize(width: contentWidth + UIFloat(8), height: topRect.height)
+    }
+
+    func refreshTabBar() {
+        tabBarStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let tabStates = workspace.tabStates(in: windowPaneID)
+        let activeID = workspace.activeTab(in: windowPaneID)?.id
+        for tab in tabStates {
+            tabBarStack.addArrangedSubview(makeTabChip(tab: tab, isActive: tab.id == activeID))
         }
-        if traitCollection.userInterfaceIdiom == .pad, width >= UIFloat(620) {
-            return true
+        view.setNeedsLayout()
+    }
+
+    private func makeTabChip(tab: TerminalTabState, isActive: Bool) -> UIView {
+        let chip = TerminalTabChipView()
+        chip.configure(
+            title: tab.title,
+            colorHex: tab.shortcutColorHex,
+            isActive: isActive
+        )
+        chip.onSelect = { [weak self] in
+            guard let self else { return }
+            self.workspace.setActiveTab(tabID: tab.id, in: self.windowPaneID)
         }
-        return width >= UIFloat(920)
+        chip.onClose = { [weak self] in
+            self?.workspace.closeTab(tabID: tab.id)
+        }
+        chip.menuProvider = { [weak self] in
+            self?.tabContextMenu(for: tab)
+        }
+        return chip
+    }
+
+    private func tabContextMenu(for tab: TerminalTabState) -> UIMenu {
+        var actions: [UIMenuElement] = []
+        if TerminalWindowRouter.shared.supportsMultipleWindows {
+            actions.append(UIAction(title: "Move to New Window", image: UIImage(systemName: "macwindow.badge.plus")) { [weak self] _ in
+                guard let self else { return }
+                let newWindowID = UUID().uuidString
+                self.workspace.moveTab(tabID: tab.id, toWindow: newWindowID)
+                TerminalWindowRouter.shared.openTerminalWindow?(TerminalWindowTarget(windowID: newWindowID))
+            })
+            let otherWindows = self.workspace.windowIDsWithTabs().filter { $0 != self.windowID }
+            for otherWindow in otherWindows {
+                let name = otherWindow == TerminalWorkspaceStore.mainWindowID ? "Main Window" : "Other Window"
+                actions.append(UIAction(title: "Move to \(name)", image: UIImage(systemName: "arrow.right.square")) { [weak self] _ in
+                    self?.workspace.moveTab(tabID: tab.id, toWindow: otherWindow)
+                })
+            }
+        }
+        actions.append(UIAction(title: "Close Tab", image: UIImage(systemName: "xmark"), attributes: .destructive) { [weak self] _ in
+            self?.workspace.closeTab(tabID: tab.id)
+        })
+        return UIMenu(children: actions)
     }
 
     // MARK: Pane Sync
 
     private func syncPaneControllers() {
-        let visiblePaneIDs = Set(workspace.visiblePaneIDs(isRegularWidth: isRegularLayout))
+        let visiblePaneIDs: Set<UUID> = [windowPaneID]
 
         let idsToRemove = Set(paneControllers.keys).subtracting(visiblePaneIDs)
         for paneID in idsToRemove {
@@ -758,31 +850,24 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
             paneControllers[paneID] = nil
         }
 
-        let orderedVisibleIDs = workspace.visiblePaneIDs(isRegularWidth: isRegularLayout)
-        for paneID in orderedVisibleIDs {
-            let controller: TerminalPaneViewController
-
-            if let existing = paneControllers[paneID] {
-                controller = existing
-            } else {
-                let created = TerminalPaneViewController(paneID: paneID, workspace: workspace)
-                created.delegate = self
-                addChild(created)
-                paneContainerView.addSubview(created.view)
-                created.didMove(toParent: self)
-                paneControllers[paneID] = created
-                controller = created
-            }
-
-            controller.refreshFromWorkspace()
-            controller.applyDisplaySettings(fontSize: settingsStore.state.display.fontSize)
+        let controller: TerminalPaneViewController
+        if let existing = paneControllers[windowPaneID] {
+            controller = existing
+        } else {
+            let created = TerminalPaneViewController(paneID: windowPaneID, workspace: workspace)
+            created.delegate = self
+            addChild(created)
+            paneContainerView.addSubview(created.view)
+            created.didMove(toParent: self)
+            paneControllers[windowPaneID] = created
+            controller = created
         }
 
-        for paneID in orderedVisibleIDs {
-            if let paneView = paneControllers[paneID]?.view {
-                paneContainerView.bringSubviewToFront(paneView)
-            }
-        }
+        controller.refreshFromWorkspace()
+        controller.applyDisplaySettings(fontSize: settingsStore.state.display.fontSize)
+        paneContainerView.bringSubviewToFront(controller.view)
+
+        refreshTabBar()
     }
 
     // MARK: Message
@@ -1157,7 +1242,7 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
         guard !requests.isEmpty else { return }
 
         for request in requests {
-            workspace.openTab(credentialKey: request.credentialKey, inFocusedPane: true)
+            workspace.openTab(credentialKey: request.credentialKey, windowID: windowID)
             showMessage("Connected to \(request.label)")
         }
 
@@ -1168,7 +1253,7 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
 
     @objc
     private func didTapAddPane() {
-        workspace.focusOrCreateEmptyPane()
+        workspace.beginNewTab(inWindow: windowID)
     }
 
     @objc
@@ -1261,19 +1346,16 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
 
     @objc
     private func didSwipePane(_ recognizer: UISwipeGestureRecognizer) {
-        guard !isRegularLayout else { return }
-        let orderedPaneIDs = workspace.panes.map(\.id)
-        guard orderedPaneIDs.count > 1 else { return }
-        guard let focused = workspace.focusedPaneID,
-              let currentIndex = orderedPaneIDs.firstIndex(of: focused) else {
-            workspace.focusPane(paneID: orderedPaneIDs[0])
-            return
-        }
+        // Switch between this window's tabs (Safari-style).
+        let tabIDs = workspace.tabStates(in: windowPaneID).map(\.id)
+        guard tabIDs.count > 1 else { return }
+        let activeID = workspace.activeTab(in: windowPaneID)?.id
+        let currentIndex = activeID.flatMap { tabIDs.firstIndex(of: $0) } ?? 0
 
         let nextIndex: Int
         switch recognizer.direction {
         case .left:
-            guard currentIndex < orderedPaneIDs.count - 1 else { return }
+            guard currentIndex < tabIDs.count - 1 else { return }
             nextIndex = currentIndex + 1
         case .right:
             guard currentIndex > 0 else { return }
@@ -1282,7 +1364,7 @@ final class TerminalWorkspaceViewController: UIViewController, UIGestureRecogniz
             return
         }
 
-        workspace.focusPane(paneID: orderedPaneIDs[nextIndex])
+        workspace.setActiveTab(tabID: tabIDs[nextIndex], in: windowPaneID)
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
@@ -1375,6 +1457,10 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         self.paneID = paneID
         self.workspace = workspace
         super.init(nibName: nil, bundle: nil)
+    }
+
+    private var paneWindowID: String {
+        workspace.windowID(forPane: paneID) ?? TerminalWorkspaceStore.mainWindowID
     }
 
     @available(*, unavailable)
@@ -1620,7 +1706,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
                 self.workspace.openTab(
                     credentialKey: shortcut.credentialKey,
                     preferredTitle: shortcut.title,
-                    inFocusedPane: true,
+                    windowID: self.paneWindowID,
                     themeOverrideSelectionKey: shortcut.themeSelectionKey,
                     shortcutColorHex: shortcut.colorHex,
                     tmuxSessionName: tmuxSessionName,
@@ -1632,7 +1718,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
                 self.workspace.openTab(
                     credentialKey: target.credentialKey,
                     preferredTitle: target.title,
-                    inFocusedPane: true,
+                    windowID: self.paneWindowID,
                     themeOverrideSelectionKey: nil,
                     shortcutColorHex: target.colorHex ?? "#10B981",
                     tmuxSessionName: target.sessionName,
@@ -1767,7 +1853,8 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
     private func makeOverflowMenu() -> UIMenu {
         var actions: [UIAction] = [
             UIAction(title: "New Tab", image: UIImage(systemName: "plus")) { [weak self] _ in
-                self?.workspace.focusOrCreateEmptyPane()
+                guard let self else { return }
+                self.workspace.beginNewTab(inWindow: self.paneWindowID)
             },
             UIAction(title: "View All Tabs", image: UIImage(systemName: "square.grid.2x2")) { [weak self] _ in
                 self?.presentAllTabs()
@@ -1799,17 +1886,17 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
 
     @objc
     private func didSwipeCompactBar(_ recognizer: UISwipeGestureRecognizer) {
-        let orderedPaneIDs = workspace.panes.map(\.id)
-        guard orderedPaneIDs.count > 1 else { return }
-        guard let focused = workspace.focusedPaneID,
-              let currentIndex = orderedPaneIDs.firstIndex(of: focused) else {
-            workspace.focusPane(paneID: orderedPaneIDs[0])
+        let tabIDs = workspace.tabStates(in: paneID).map(\.id)
+        guard !tabIDs.isEmpty else {
+            handleEdgeSwipeForNewTab(direction: recognizer.direction)
             return
         }
+        let activeID = workspace.activeTab(in: paneID)?.id
+        let currentIndex = activeID.flatMap { tabIDs.firstIndex(of: $0) } ?? 0
 
         let nextIndex: Int
         if recognizer.direction == .left {
-            guard currentIndex < orderedPaneIDs.count - 1 else {
+            guard currentIndex < tabIDs.count - 1 else {
                 handleEdgeSwipeForNewTab(direction: .left)
                 return
             }
@@ -1825,7 +1912,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
         }
         pendingEdgeSwipeDirection = nil
         pendingEdgeSwipeExpiry = nil
-        workspace.focusPane(paneID: orderedPaneIDs[nextIndex])
+        workspace.setActiveTab(tabID: tabIDs[nextIndex], in: paneID)
     }
 
     private func handleEdgeSwipeForNewTab(direction: UISwipeGestureRecognizer.Direction) {
@@ -1835,7 +1922,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
            now <= expiry {
             pendingEdgeSwipeDirection = nil
             pendingEdgeSwipeExpiry = nil
-            workspace.focusOrCreateEmptyPane()
+            workspace.beginNewTab(inWindow: paneWindowID)
             delegate?.terminalPane(self, didRequestMessage: "Created new tab")
             return
         }
@@ -1856,7 +1943,7 @@ final class TerminalPaneViewController: UIViewController, UIGestureRecognizerDel
                 self.presentAllTabs()
             })
             actions.append(UIAction(title: "New Tab", image: UIImage(systemName: "plus")) { _ in
-                self.workspace.focusOrCreateEmptyPane()
+                self.workspace.beginNewTab(inWindow: self.paneWindowID)
             })
             if let active = self.workspace.activeTab(in: self.paneID),
                let session = active.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -1979,10 +2066,11 @@ fi
     private func presentAllTabs() {
         let overview = TerminalTabOverviewViewController(workspace: workspace)
         overview.onSelectSession = { [weak self] credentialKey, sessionName, title, colorHex in
-            self?.workspace.openTab(
+            guard let self else { return }
+            self.workspace.openTab(
                 credentialKey: credentialKey,
                 preferredTitle: title,
-                inFocusedPane: true,
+                windowID: self.paneWindowID,
                 themeOverrideSelectionKey: nil,
                 shortcutColorHex: colorHex ?? "#10B981",
                 tmuxSessionName: sessionName,
@@ -3256,7 +3344,7 @@ final class TerminalTabOverviewViewController: UIViewController {
             didTapSelectMode()
             return
         }
-        workspace.focusOrCreateEmptyPane()
+        workspace.beginNewTab(inWindow: TerminalWorkspaceStore.mainWindowID)
         dismiss(animated: true)
     }
 
@@ -3502,12 +3590,16 @@ extension TerminalTabOverviewViewController: UICollectionViewDelegate {
             ]
             if TerminalWindowRouter.shared.supportsMultipleWindows {
                 actions.append(UIAction(title: "Open in New Window", image: UIImage(systemName: "macwindow.badge.plus")) { _ in
-                    TerminalWindowRouter.shared.open(TerminalWindowTarget(
+                    let newWindowID = UUID().uuidString
+                    self.workspace.openTab(
                         credentialKey: item.credentialKey,
+                        preferredTitle: item.displayTitle,
+                        windowID: newWindowID,
+                        shortcutColorHex: item.colorHex,
                         tmuxSessionName: item.sessionName,
-                        title: item.displayTitle,
-                        colorHex: item.colorHex
-                    ))
+                        tmuxAttachOnly: true
+                    )
+                    TerminalWindowRouter.shared.open(TerminalWindowTarget(windowID: newWindowID))
                     self.dismiss(animated: true)
                 })
             }
@@ -4843,6 +4935,87 @@ final class TerminalAllTabsCell: UICollectionViewCell, UIGestureRecognizerDelega
         shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
     ) -> Bool {
         otherGestureRecognizer is UIPanGestureRecognizer
+    }
+}
+
+@MainActor
+final class TerminalTabChipView: UIView, UIContextMenuInteractionDelegate {
+    var onSelect: (() -> Void)?
+    var onClose: (() -> Void)?
+    var menuProvider: (() -> UIMenu?)?
+
+    private let titleLabel = UILabel()
+    private let colorDot = UIView()
+    private let closeButton = UIButton(type: .system)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        layer.cornerRadius = UIFloat(9)
+        layer.cornerCurve = .continuous
+        clipsToBounds = true
+
+        colorDot.layer.cornerRadius = UIFloat(3)
+        addSubview(colorDot)
+
+        titleLabel.font = .systemFont(ofSize: UIFloat(12), weight: .medium)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        addSubview(titleLabel)
+
+        let symbolConfig = UIImage.SymbolConfiguration(pointSize: UIFloat(9), weight: .bold)
+        closeButton.setImage(UIImage(systemName: "xmark", withConfiguration: symbolConfig), for: .normal)
+        closeButton.tintColor = .secondaryLabel
+        closeButton.addAction(UIAction { [weak self] _ in self?.onClose?() }, for: .touchUpInside)
+        addSubview(closeButton)
+
+        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(didTap)))
+        addInteraction(UIContextMenuInteraction(delegate: self))
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    @objc private func didTap() {
+        onSelect?()
+    }
+
+    func configure(title: String, colorHex: String?, isActive: Bool) {
+        titleLabel.text = title
+        let accent = colorHex.flatMap { UIColor(hex: $0) } ?? .systemGray
+        colorDot.backgroundColor = accent
+        backgroundColor = isActive ? accent.withAlphaComponent(0.22) : UIColor.secondarySystemBackground
+        titleLabel.textColor = isActive ? .label : .secondaryLabel
+        layer.borderWidth = isActive ? UIFloat(1) : 0
+        layer.borderColor = accent.withAlphaComponent(0.6).cgColor
+        invalidateIntrinsicContentSize()
+    }
+
+    override var intrinsicContentSize: CGSize {
+        let titleWidth = titleLabel.intrinsicContentSize.width
+        let width = min(UIFloat(170), max(UIFloat(96), titleWidth + UIFloat(52)))
+        return CGSize(width: width, height: UIFloat(32))
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        colorDot.frame = CGRect(x: UIFloat(9), y: bounds.midY - UIFloat(3), width: UIFloat(6), height: UIFloat(6))
+        closeButton.frame = CGRect(x: bounds.maxX - UIFloat(26), y: 0, width: UIFloat(26), height: bounds.height)
+        titleLabel.frame = CGRect(
+            x: colorDot.frame.maxX + UIFloat(6),
+            y: 0,
+            width: max(0, closeButton.frame.minX - colorDot.frame.maxX - UIFloat(8)),
+            height: bounds.height
+        )
+    }
+
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        configurationForMenuAtLocation location: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+            self?.menuProvider?() ?? UIMenu()
+        }
     }
 }
 
