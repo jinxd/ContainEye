@@ -13,18 +13,36 @@ import AppIntents
 import SwiftUI
 import CoreSpotlight
 
-private struct TestCommandExecutionResult {
+struct TestCommandExecutionResult {
     let output: String
     let exitCode: Int
 }
 
-private enum TestCommandWrapper {
+enum TestCommandWrapper {
     static let exitMarker = "__CONTAINEYE_EXIT_CODE__"
 
     static func wrap(_ command: String) -> String {
         let escapedCommand = command.replacingOccurrences(of: "'", with: "'\"'\"'")
         return """
         sh -lc '\(escapedCommand); __ce_status=$?; printf "\\n\(exitMarker):%s\\n" "$__ce_status"'
+        """
+    }
+
+    /// A richer wrapper for the agent harness. Runs the command inside the
+    /// account's login shell as an interactive login shell so PATH from
+    /// `/etc/profile`, `~/.profile`, and `~/.bashrc`/`~/.zshrc` all load
+    /// (the SSH exec channel otherwise gets sshd's minimal non-login PATH).
+    /// It also seeds a fallback PATH covering common binary locations,
+    /// merges the command's stderr into stdout so errors are captured, and
+    /// keeps the exit-code marker so callers can tell "ran, no output" from
+    /// "did not run". Stdin is `/dev/null` and the shell's own startup noise
+    /// is left on stderr so job-control warnings never pollute the output.
+    static func wrapForAgent(_ command: String) -> String {
+        let escapedCommand = command.replacingOccurrences(of: "'", with: "'\"'\"'")
+        let fallbackPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/snap/bin:$HOME/.local/bin"
+        let inner = "export PATH=\"\(fallbackPath):$PATH\"; { \(escapedCommand) ; } 2>&1; __ce_status=$?; printf \"\\n\(exitMarker):%s\\n\" \"$__ce_status\""
+        return """
+        "${SHELL:-/bin/sh}" -ilc '\(inner)' </dev/null
         """
     }
 

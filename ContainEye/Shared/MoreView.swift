@@ -1614,7 +1614,7 @@ You can use tools to inspect servers, inspect indexed file paths, manage test de
 Important:
 - Use native tool calling only.
 - When you need data or actions, emit tool calls through the API tools interface.
-- To end a turn, you MUST call `finalize_response` with a final user-facing message.
+- To end a turn, you MUST call `finalize_response` with a non-empty, substantive final user-facing message that summarizes what you did or answers the question. An empty message is rejected.
 - Do not end a turn with plain assistant text; always use `finalize_response`.
 
 Allowed tools:
@@ -1918,6 +1918,7 @@ struct AgenticToolCall {
 struct AgenticToolResult {
     var userFacingSummary: String
     var jsonPayload: String
+    var isError: Bool = false
     var toolResultPayloadJSON: String { jsonPayload }
 
     func toolResultEnvelope(tool: String) -> String {
@@ -2069,13 +2070,47 @@ struct AgenticToolExecutor {
     private func runCommand(arguments: [String: Any]) async throws -> AgenticToolResult {
         let command = stringArg("command", from: arguments)
         let credential = try resolveCredential(from: arguments)
-        let output = try await SSHClientActor.shared.execute(command, on: credential)
-        let payload = serialize([
+
+        let wrappedCommand = TestCommandWrapper.wrapForAgent(command)
+        let rawOutput = try await retry { try await SSHClientActor.shared.execute(wrappedCommand, on: credential) }
+            .trimmingFromEnd(character: "\n", upto: 1)
+
+        let output: String
+        let executed: Bool
+        var exitCode: Int?
+
+        if let result = TestCommandWrapper.parseResult(from: rawOutput) {
+            executed = true
+            exitCode = result.exitCode
+            let trimmed = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                output = result.output
+            } else if result.exitCode == 0 {
+                output = "Command succeeded (exit code 0) but produced no output."
+            } else {
+                output = "Command failed (exit code \(result.exitCode)) and produced no output."
+            }
+        } else {
+            // Missing status marker means the command shell never ran to completion,
+            // so the command did not actually execute.
+            executed = false
+            let trimmed = rawOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+            output = trimmed.isEmpty
+                ? "Command did not execute (no output and no status marker returned)."
+                : rawOutput
+        }
+
+        var payloadDict: [String: Any] = [
             "server": credential.label,
             "credentialKey": credential.key,
             "command": command,
             "output": output,
-        ])
+            "executed": executed,
+        ]
+        if let exitCode {
+            payloadDict["exitCode"] = exitCode
+        }
+        let payload = serialize(payloadDict)
         return .init(userFacingSummary: output, jsonPayload: payload)
     }
 
@@ -2644,7 +2679,7 @@ struct AgenticToolExecutor {
 
     private func errorResult(_ message: String) -> AgenticToolResult {
         let payload = serialize(["error": message])
-        return .init(userFacingSummary: "Tool error: \(message)", jsonPayload: payload)
+        return .init(userFacingSummary: "Tool error: \(message)", jsonPayload: payload, isError: true)
     }
 }
 

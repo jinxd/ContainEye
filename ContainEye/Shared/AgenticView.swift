@@ -61,8 +61,12 @@ struct AgenticView: View {
             Task { await model.consumePendingContextIfNeeded(bridge: bridge) }
         }
         .task {
-            while true {
-                try? await Task.sleep(nanoseconds: 4_000_000_000)
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 4_000_000_000)
+                } catch {
+                    break
+                }
                 tipIndex = (tipIndex + 1) % rotatingTips.count
             }
         }
@@ -536,8 +540,11 @@ final class AgenticViewModel: ObservableObject {
         waitingApprovalState = nil
 
         if allow {
+            let runningID = UUID()
+            appendMessage(id: runningID, role: .status, content: runningLabel(for: state.call))
             let result = await state.executor.execute(call: state.call)
-            appendToolSummary(result.userFacingSummary)
+            removeMessage(id: runningID)
+            appendToolSummary(result.userFacingSummary, isError: result.isError)
             state.history.append([
                 "role": "tool",
                 "tool_call_id": state.call.id ?? "call_\(UUID().uuidString)",
@@ -604,7 +611,8 @@ final class AgenticViewModel: ObservableObject {
         let executor = AgenticToolExecutor(database: database)
         var history = llmHistory
 
-        for _ in 0 ..< 8 {
+        let maxSteps = 50
+        for _ in 0 ..< maxSteps {
             let placeholderID = UUID()
             appendMessage(id: placeholderID, role: .status, content: "Thinking…")
 
@@ -623,12 +631,19 @@ final class AgenticViewModel: ObservableObject {
                 }
 
                 if response.toolCalls.isEmpty {
-                    let finalText = cleaned.isEmpty ? "No response." : cleaned
-                    updateMessage(id: placeholderID, content: finalText, role: .assistant)
-                    history.append(["role": "assistant", "content": finalText])
+                    // The agent must explicitly end its turn with finalize_response.
+                    // A bare text reply is treated as an intermediate step: show it,
+                    // then nudge the model to continue or finalize.
+                    let text = cleaned.isEmpty ? "…" : cleaned
+                    updateMessage(id: placeholderID, content: text, role: .assistant)
+                    history.append(["role": "assistant", "content": text])
+                    history.append([
+                        "role": "user",
+                        "content": "Keep going until the task is fully complete. When you are done, you MUST call the finalize_response tool to end — do not stop otherwise."
+                    ])
                     llmHistory = history
                     sessionStore.save(messages: messages, llmHistory: llmHistory)
-                    return
+                    continue
                 }
 
                 let toolLabel = response.toolCalls.map(\.tool).joined(separator: ", ")
@@ -660,10 +675,20 @@ final class AgenticViewModel: ObservableObject {
 
                 for call in response.toolCalls {
                     if call.tool == "finalize_response" {
-                        let rawFinal = (call.arguments["message"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? cleaned
-                        let final = rawFinal.isEmpty ? "Done." : rawFinal
-                        updateMessage(id: placeholderID, content: final, role: .assistant)
-                        history.append(["role": "assistant", "content": final])
+                        let messageArg = (call.arguments["message"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        let rawFinal = messageArg.isEmpty ? cleaned : messageArg
+                        if rawFinal.isEmpty {
+                            // A final message is mandatory: reject the empty call and
+                            // let the agent try again with real content.
+                            history.append([
+                                "role": "tool",
+                                "tool_call_id": call.id ?? "call_\(UUID().uuidString)",
+                                "content": #"{"error":"finalize_response requires a non-empty \"message\". Provide a final user-facing summary and call finalize_response again."}"#
+                            ])
+                            continue
+                        }
+                        updateMessage(id: placeholderID, content: rawFinal, role: .assistant)
+                        history.append(["role": "assistant", "content": rawFinal])
                         llmHistory = history
                         sessionStore.save(messages: messages, llmHistory: llmHistory)
                         return
@@ -692,8 +717,11 @@ final class AgenticViewModel: ObservableObject {
                         }
                     }
 
+                    let runningID = UUID()
+                    appendMessage(id: runningID, role: .status, content: runningLabel(for: call))
                     let result = await executor.execute(call: call)
-                    appendToolSummary(result.userFacingSummary)
+                    removeMessage(id: runningID)
+                    appendToolSummary(result.userFacingSummary, isError: result.isError)
                     history.append([
                         "role": "tool",
                         "tool_call_id": call.id ?? "call_\(UUID().uuidString)",
@@ -710,14 +738,28 @@ final class AgenticViewModel: ObservableObject {
             }
         }
 
-        appendMessage(role: .error, content: "Stopped after too many tool steps.")
+        appendMessage(role: .error, content: "Stopped after \(maxSteps) steps without the agent calling finalize_response.")
         sessionStore.save(messages: messages, llmHistory: llmHistory)
     }
 
-    private func appendToolSummary(_ raw: String) {
+    private func appendToolSummary(_ raw: String, isError: Bool = false) {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let summary = trimmed.count > 3_000 ? String(trimmed.prefix(3_000)) + "\n… [truncated]" : trimmed
-        appendMessage(role: .tool, content: summary.isEmpty ? "(empty tool output)" : summary)
+        appendMessage(role: isError ? .error : .tool, content: summary.isEmpty ? "(empty tool output)" : summary)
+    }
+
+    private func removeMessage(id: UUID) {
+        messages.removeAll { $0.id == id }
+    }
+
+    private func runningLabel(for call: AgenticToolCall) -> String {
+        if call.tool == "run_command",
+           let command = (call.arguments["command"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !command.isEmpty {
+            let shortened = command.count > 60 ? String(command.prefix(60)) + "…" : command
+            return "Running: \(shortened)"
+        }
+        return "Running \(call.tool)…"
     }
 
     private func appendMessage(id: UUID = UUID(), role: AgenticTimelineMessage.Role, content: String) {
