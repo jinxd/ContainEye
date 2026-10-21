@@ -533,6 +533,11 @@ final class TerminalWorkspaceStore {
 
         controllers = [:]
         for tab in migratedTabs {
+            // Empty tabs ("New Tab" placeholders waiting for a shortcut) must stay
+            // controller-less, otherwise `isTabEmpty` reports a live session and the
+            // pane shows a dead terminal instead of the shortcut picker after relaunch.
+            guard !tab.credentialKey.isEmpty else { continue }
+
             let controller = XTermSessionController(
                 id: tab.id,
                 credentialKey: tab.credentialKey,

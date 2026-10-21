@@ -2421,9 +2421,7 @@ final class TerminalServerPickerViewController: UIViewController {
                     lhs.label.localizedCaseInsensitiveCompare(rhs.label) == .orderedAscending
                 }
 
-            for credential in credentials {
-                await TerminalLaunchShortcut.ensureDefaultShortcutIfNeeded(for: credential, in: SharedDatabase.db)
-            }
+            await TerminalShortcutProvisioner.shared.ensureShortcuts(for: credentials, in: SharedDatabase.db)
 
             let shortcuts = await TerminalLaunchShortcut.all(in: SharedDatabase.db)
             let shortcutSessionTitleMap = Self.makeShortcutSessionTitleMap(shortcuts: shortcuts)
