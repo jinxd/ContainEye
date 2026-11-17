@@ -184,7 +184,7 @@ When refactoring UI:
 
 The donation subscriptions were removed from the app in version 1.7 (November 2026): all StoreKit code, the Supporter screen/banner, and `ContainEye.storekit` are gone. On 2026-11-18 the subscription group `ContainEye` (ASC ID `21835944`) — `containeye.monthly`, `containeye.yearly`, `containeye.largeyearly` — was removed from sale (zero available territories, `availableInNewTerritories` disabled), so new purchases and renewals stop. Existing subscribers keep access through their paid period.
 
-Note: an approved subscription cannot be deleted with the team API key, and availability changes for approved products require the Account Holder's App Store Connect web session. To make the products disappear from ASC entirely, an Account Holder must delete them in the web UI under **Monetization → Subscriptions**. The 1.7 description no longer mentions donations.
+Note: approved auto-renewable subscriptions can't be deleted (Apple keeps them for existing subscribers), so removing them from sale is the supported retirement path. Because these products were approved, the availability change required the Account Holder's App Store Connect web session — the team API key is not allowed to modify it.
 
 ## Quick Project Snapshot
 
