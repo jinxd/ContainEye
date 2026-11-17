@@ -8,7 +8,7 @@
 import SwiftUI
 
 enum Sheet: Identifiable {
-    case feedback, credits, supporter
+    case feedback, credits
 
     var id: String {
         switch self {
@@ -16,8 +16,6 @@ enum Sheet: Identifiable {
             "feedback"
         case .credits:
             "credits"
-        case .supporter:
-            "supporter"
         }
     }
 }
@@ -36,11 +34,6 @@ struct SheetView: View {
 #endif
             case .credits:
                 CreditsView()
-#if !os(macOS)
-                    .navigationTransition(.zoom(sourceID: sheet, in: namespace!))
-#endif
-            case .supporter:
-                SupporterView()
 #if !os(macOS)
                     .navigationTransition(.zoom(sourceID: sheet, in: namespace!))
 #endif

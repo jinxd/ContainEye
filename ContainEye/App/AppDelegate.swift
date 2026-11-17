@@ -8,7 +8,6 @@
 
 import SwiftUI
 import Blackbird
-import StoreKit
 
 final class AppDelegate: NSObject, UIApplicationDelegate {
     private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
@@ -109,14 +108,5 @@ print("completion handler new data, ending bg task")
             try await Task.sleep(for: .seconds(29))
         } catch {
         }
-    }
-
-    func fetchOriginalPurchaseDate() async -> Date? {
-        for await result in Transaction.all {
-            if case .verified(let transaction) = result {
-                return transaction.originalPurchaseDate
-            }
-        }
-        return nil
     }
 }

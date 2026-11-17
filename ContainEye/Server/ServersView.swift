@@ -21,9 +21,6 @@ struct ServersView: View {
     var body: some View {
         ScrollView{
             VStack{
-                // Supporter banner
-                SupporterBanner()
-
                 if servers.results.isEmpty {
                     if servers.didLoad {
                         ContentUnavailableView("You don't have any servers yet.", systemImage: "server.rack")

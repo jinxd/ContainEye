@@ -19,33 +19,51 @@ struct AgenticView: View {
     @StateObject private var model = AgenticViewModel()
     @State private var showApprovalSettings = false
     @State private var tipIndex = 0
+    @FocusState private var isComposerFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            List(model.messages) { message in
-                AgenticMessageRow(message: message)
-                    .listRowInsets(.init(top: 8, leading: 12, bottom: 8, trailing: 12))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-            }
-            .safeAreaInset(edge: .top) {
-                HStack(spacing: 6) {
-                    Image(systemName: "lightbulb")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(rotatingTips[tipIndex])
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
+            ScrollViewReader { proxy in
+                List(model.messages) { message in
+                    AgenticMessageRow(message: message)
+                        .listRowInsets(.init(top: 8, leading: 12, bottom: 8, trailing: 12))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .id(message.id)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.ultraThinMaterial)
-            }
-            .listStyle(.plain)
+                .safeAreaInset(edge: .top) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "lightbulb")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(rotatingTips[tipIndex])
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.ultraThinMaterial)
+                }
+                .listStyle(.plain)
 #if os(iOS)
-            .scrollDismissesKeyboard(.immediately)
+                .scrollDismissesKeyboard(.immediately)
 #endif
+                .onAppear {
+                    scrollToLatestMessage(proxy, animated: false)
+                }
+                .onChange(of: model.messages.count) {
+                    scrollToLatestMessage(proxy)
+                }
+                .onChange(of: model.messages.last?.content) {
+                    scrollToLatestMessage(proxy)
+                }
+                .onChange(of: isComposerFocused) { _, focused in
+                    if focused {
+                        scrollToLatestMessage(proxy)
+                    }
+                }
+            }
 
             Divider()
 
@@ -59,6 +77,16 @@ struct AgenticView: View {
         }
         .onChange(of: bridge.pendingContext?.id) {
             Task { await model.consumePendingContextIfNeeded(bridge: bridge) }
+        }
+        .onChange(of: model.isRunning) { _, running in
+            if running {
+                isComposerFocused = false
+            }
+        }
+        .onChange(of: model.showCommandApprovalAlert) { _, showing in
+            if showing {
+                isComposerFocused = false
+            }
         }
         .task {
             while !Task.isCancelled {
@@ -134,6 +162,17 @@ struct AgenticView: View {
         ]
     }
 
+    private func scrollToLatestMessage(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        guard let id = model.messages.last?.id else { return }
+        if animated {
+            withAnimation(.easeOut(duration: 0.2)) {
+                proxy.scrollTo(id, anchor: .bottom)
+            }
+        } else {
+            proxy.scrollTo(id, anchor: .bottom)
+        }
+    }
+
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
             if model.isRunning {
@@ -182,9 +221,11 @@ struct AgenticView: View {
                 TextField("Ask the agent…", text: $model.input, axis: .vertical)
                     .lineLimit(1 ... 6)
                     .textFieldStyle(.roundedBorder)
+                    .focused($isComposerFocused)
                     .disabled(model.isRunning)
 
                 Button {
+                    isComposerFocused = false
                     Task { await model.send() }
                 } label: {
                     if model.isRunning {

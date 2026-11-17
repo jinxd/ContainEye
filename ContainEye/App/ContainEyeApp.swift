@@ -25,7 +25,6 @@ struct ContainEyeApp: App {
     let agenticBridge = AgenticContextBridge.shared
     let contextStore = AgenticScreenContextStore.shared
     let terminalNavigationManager = TerminalNavigationManager.shared
-    let storeKitManager = StoreKitManager.shared
     @Environment(\.scenePhase) var scenePhase
 
     init() {
@@ -66,7 +65,6 @@ struct ContainEyeApp: App {
             .environment(\.agenticBridge, agenticBridge)
             .environment(\.agenticContextStore, contextStore)
             .environment(\.terminalNavigationManager, terminalNavigationManager)
-            .environment(\.storeKitManager, storeKitManager)
         }
         // Standalone terminal windows (iPad/Mac multi-window). Opening a tmux
         // session in a new window activates one of these scenes.
@@ -77,7 +75,6 @@ struct ContainEyeApp: App {
                 .environment(\.agenticBridge, agenticBridge)
                 .environment(\.agenticContextStore, contextStore)
                 .environment(\.terminalNavigationManager, terminalNavigationManager)
-                .environment(\.storeKitManager, storeKitManager)
         }
 
 #if !os(macOS)

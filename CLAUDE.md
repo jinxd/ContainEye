@@ -180,6 +180,13 @@ When refactoring UI:
 - For action selection UI, do not use alerts/action sheets as pickers; use `UIMenu` or context menus.
 - Default distribution flow is ad hoc via `scripts/deploy-ad-hoc.sh` unless the user explicitly asks for a different release path.
 
+## Pending App Store Connect Cleanup
+
+The donation subscriptions were removed from the app in version 1.7 (November 2026): all StoreKit code, the Supporter screen/banner, and `ContainEye.storekit` are gone. The products themselves still exist in App Store Connect and must be removed manually:
+
+- Subscription group `ContainEye` (ASC ID `21835944`) under **Monetization → Subscriptions**, containing `containeye.monthly`, `containeye.yearly`, and `containeye.largeyearly`.
+- Delete that subscription group (and the products) once version 1.7 is live. The 1.7 description already drops the "contains ways to donate" sentence.
+
 ## Quick Project Snapshot
 
 - App target uses SwiftUI with modern Apple-platform APIs.

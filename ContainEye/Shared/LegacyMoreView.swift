@@ -67,12 +67,6 @@ struct MoreView: View {
 
                 // Community Section
                 SectionCard(title: "Support ContainEye", icon: "heart.circle.fill", color: .red) {
-                    CardRow(icon: "heart.fill", title: "Become a Supporter", subtitle: "Support development with a donation") {
-                        NavigationLink(value: Sheet.supporter) {
-                            EmptyView()
-                        }
-                    }
-
                     CardRow(icon: "square.and.arrow.up", title: "Share the App", subtitle: "Tell your friends about ContainEye") {
                         ShareLink(item: URL(string: "https://apps.apple.com/app/apple-store/id6741063706?pt=126452706&ct=containeye&mt=8")!) {
                             EmptyView()

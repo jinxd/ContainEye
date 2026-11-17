@@ -123,7 +123,11 @@ private struct Confirmator: View {
                     Color.black.opacity(0.4)
                         .ignoresSafeArea()
                         .onTapGesture {
-                            dismissCurrentDialog()
+                            if focused {
+                                focused = false
+                            } else {
+                                dismissCurrentDialog()
+                            }
                         }
                     
                     // Main dialog content
@@ -145,11 +149,12 @@ private struct Confirmator: View {
                     .padding()
                 }
                 .onAppear {
+                    // Keep the keyboard closed until the user taps the answer field,
+                    // otherwise it covers the question and its actions.
                     hideKeyboard()
                     withAnimation {
                         isAnimatingIn = true
                     }
-                    focused = true
                 }
                 .onDisappear {
                     isAnimatingIn = false
